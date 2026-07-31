@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a reproducible defect in Pdf++
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not submit security vulnerabilities publicly. Follow SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: Pdf++ version or commit
+      placeholder: 0.43.0 or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Windows 11, Visual Studio 2026, x64 Release
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: Describe the observed behavior and why it is incorrect.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include minimal code, commands, and a redistributable PDF when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or sanitizer output
+      render: shell

@@ -1,0 +1,33 @@
+#pragma once
+#include <cstddef>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace CPPPdf {
+
+struct PdfFilterSpec {
+    std::string name;
+    std::string decodeParameters;
+};
+
+class PdfFilterPipeline final {
+public:
+    explicit PdfFilterPipeline(std::size_t maxDecodedSize = 512ULL * 1024ULL * 1024ULL)
+        : maxDecodedSize_(maxDecodedSize) {}
+
+    [[nodiscard]] std::vector<std::byte> Decode(
+        std::span<const std::byte> input,
+        const std::vector<PdfFilterSpec>& filters) const;
+
+    [[nodiscard]] static std::vector<std::byte> DecodeFlate(
+        std::span<const std::byte> input,
+        std::size_t maxDecodedSize);
+    [[nodiscard]] static std::vector<std::byte> DecodeAsciiHex(std::span<const std::byte> input);
+    [[nodiscard]] static std::vector<std::byte> DecodeAscii85(std::span<const std::byte> input);
+    [[nodiscard]] static std::vector<std::byte> DecodeRunLength(std::span<const std::byte> input);
+private:
+    std::size_t maxDecodedSize_;
+};
+
+} // namespace CPPPdf

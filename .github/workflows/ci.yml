@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu GCC
+            os: ubuntu-latest
+            compiler: gcc
+          - name: Ubuntu Clang
+            os: ubuntu-latest
+            compiler: clang
+          - name: Windows MSVC
+            os: windows-latest
+            compiler: msvc
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select GCC
+        if: matrix.compiler == 'gcc'
+        shell: bash
+        run: |
+          echo "CC=gcc" >> "$GITHUB_ENV"
+          echo "CXX=g++" >> "$GITHUB_ENV"
+
+      - name: Select Clang
+        if: matrix.compiler == 'clang'
+        shell: bash
+        run: |
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: >-
+          cmake -S . -B build
+          -DPDFPP_BUILD_TESTS=ON
+          -DPDFPP_BUILD_SAMPLES=ON
+          -DPDFPP_BUILD_BENCHMARKS=OFF
+          -DPDFPP_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build -C Release --output-on-failure

@@ -1,0 +1,77 @@
+# CMake and build output
+/build*/
+/out/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+cmake_install.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+DartConfiguration.tcl
+Testing/
+install_manifest.txt
+compile_commands.json
+*.ninja
+.ninja_*
+Makefile
+
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.VC.opendb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+x64/
+x86/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# Compiler output
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# Coverage, profiling, sanitizers
+coverage/
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+*.lcov
+
+# Generated PDF/image/benchmark output
+*.ppm
+*.pgm
+*.pbm
+*.benchmark.csv
+benchmark-results/
+
+# IDE/editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Archives and local scratch files
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tmp
+*.bak

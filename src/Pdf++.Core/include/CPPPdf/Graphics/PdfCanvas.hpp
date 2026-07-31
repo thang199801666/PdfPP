@@ -1,0 +1,86 @@
+#pragma once
+#include <CPPPdf/Core/PdfTypes.hpp>
+#include <CPPPdf/Graphics/PdfImage.hpp>
+#include <CPPPdf/Fonts/PdfTrueTypeFont.hpp>
+#include <memory>
+#include <span>
+#include <string>
+
+namespace CPPPdf {
+namespace Internal { struct PdfWriterState; }
+
+struct PdfColor final {
+    double r{}, g{}, b{};
+    static PdfColor Black() noexcept { return {}; }
+    static PdfColor White() noexcept { return {1,1,1}; }
+    static PdfColor Red() noexcept { return {1,0,0}; }
+    static PdfColor Green() noexcept { return {0,1,0}; }
+    static PdfColor Blue() noexcept { return {0,0,1}; }
+    static PdfColor Gray(double value) noexcept { return {value,value,value}; }
+    static PdfColor FromRgb(double red, double green, double blue) noexcept { return {red,green,blue}; }
+};
+
+enum class PdfLineCap { Butt = 0, Round = 1, ProjectingSquare = 2 };
+enum class PdfLineJoin { Miter = 0, Round = 1, Bevel = 2 };
+enum class PdfTextAlignment { Left, Center, Right };
+
+struct PdfTextLayoutOptions final {
+    PdfRectangle box{};
+    double fontSize{12.0};
+    double lineSpacing{1.2};
+    PdfTextAlignment alignment{PdfTextAlignment::Left};
+    bool wrap{true};
+};
+
+class PdfCanvas final {
+public:
+    PdfCanvas() = default;
+    PdfCanvas& SaveState();
+    PdfCanvas& RestoreState();
+    PdfCanvas& SetStrokeColor(PdfColor color);
+    PdfCanvas& SetFillColor(PdfColor color);
+    PdfCanvas& SetStrokeOpacity(double opacity);
+    PdfCanvas& SetFillOpacity(double opacity);
+    PdfCanvas& SetOpacity(double opacity);
+    PdfCanvas& SetLineWidth(double width);
+    PdfCanvas& SetLineCap(PdfLineCap cap);
+    PdfCanvas& SetLineJoin(PdfLineJoin join);
+    PdfCanvas& SetMiterLimit(double limit);
+    PdfCanvas& SetDashPattern(std::span<const double> pattern, double phase = 0.0);
+    PdfCanvas& ClearDashPattern();
+    PdfCanvas& ConcatenateMatrix(double a, double b, double c, double d, double e, double f);
+    PdfCanvas& MoveTo(double x, double y);
+    PdfCanvas& LineTo(double x, double y);
+    PdfCanvas& CurveTo(double x1, double y1, double x2, double y2, double x3, double y3);
+    PdfCanvas& ClosePath();
+    PdfCanvas& Rectangle(double x, double y, double width, double height);
+    PdfCanvas& DrawLine(double x1, double y1, double x2, double y2);
+    PdfCanvas& FillRectangle(double x, double y, double width, double height);
+    PdfCanvas& Stroke();
+    PdfCanvas& Fill();
+    PdfCanvas& FillEvenOdd();
+    PdfCanvas& FillStroke();
+    PdfCanvas& FillStrokeEvenOdd();
+    PdfCanvas& Clip();
+    PdfCanvas& ClipEvenOdd();
+    PdfCanvas& EndPath();
+    PdfCanvas& BeginText();
+    PdfCanvas& SetFontAndSize(std::string base14Font, double size);
+    PdfCanvas& SetTrueTypeFontAndSize(const PdfTrueTypeFont& font, double size);
+    PdfCanvas& SetTextMatrix(double a, double b, double c, double d, double e, double f);
+    PdfCanvas& MoveText(double x, double y);
+    PdfCanvas& ShowText(std::string text);
+    PdfCanvas& ShowTextUtf8(std::string utf8Text);
+    PdfCanvas& DrawTextUtf8(const PdfTrueTypeFont& font, std::string utf8Text, const PdfTextLayoutOptions& options);
+    PdfCanvas& EndText();
+    PdfCanvas& DrawImage(const PdfImage& image, const PdfRectangle& rectangle);
+private:
+    friend class PdfWriter;
+    PdfCanvas(std::shared_ptr<Internal::PdfWriterState> state, std::size_t pageIndex);
+    void Append(const std::string& command);
+    std::string RegisterOpacity(double strokeOpacity, double fillOpacity);
+    std::shared_ptr<Internal::PdfWriterState> state_;
+    std::size_t pageIndex_{};
+};
+
+} // namespace CPPPdf

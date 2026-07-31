@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup><Filter Include="Tests"><UniqueIdentifier>{F92B6FC1-D960-469B-B16A-7CC678F6E045}</UniqueIdentifier></Filter></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="CoreTests.cpp"><Filter>Tests</Filter></ClCompile>
+    <ClCompile Include="ReaderIntegrationTests.cpp"><Filter>Tests</Filter></ClCompile>
+    <ClCompile Include="WriterIntegrationTests.cpp"><Filter>Tests</Filter></ClCompile>
+    <ClCompile Include="ApiCoverageTests.cpp"><Filter>Tests</Filter></ClCompile>
+    <ClCompile Include="FeatureUnitTests.cpp"><Filter>Tests</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="TestRunner.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

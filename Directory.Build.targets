@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    Applied after every .vcxproj in the solution.
+    Keep compiler intermediates and compiler PDBs isolated per project so
+    parallel CL.EXE processes never write to the same vc145.pdb file.
+  -->
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)artifacts\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)artifacts\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ProgramDataBaseFileName>$(IntDir)$(ProjectName).compile.pdb</ProgramDataBaseFileName>
+      <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

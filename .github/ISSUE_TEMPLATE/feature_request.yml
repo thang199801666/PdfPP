@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a scoped Pdf++ capability or improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use case
+      description: Describe the concrete workflow or limitation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API or behavior
+      description: Include a small C++ example when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Reader/parser
+        - Writer/editing
+        - Text extraction/search
+        - Rendering
+        - Fonts
+        - Forms/annotations
+        - Performance
+        - Build/tooling
+        - Documentation
+    validations:
+      required: true
