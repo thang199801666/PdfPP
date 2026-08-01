@@ -60,6 +60,9 @@ struct PdfContentEvent {
     std::string text;
     std::string operation;
     std::vector<double> numbers;
+    std::vector<std::string> textSegments;
+    std::vector<double> textSegmentAdjustments;
+    std::vector<double> textAdjustments;
     PdfTextStateSnapshot textState;
     std::vector<PdfInlineImageProperty> inlineImageDictionary;
     std::vector<std::byte> bytes;

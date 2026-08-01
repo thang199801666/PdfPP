@@ -26,6 +26,12 @@ Legend: **Yes** = supported, **Partial** = supported with documented limitations
 
 For production pipelines, validate generated files with an independent PDF implementation such as qpdf, PDFium, MuPDF, or Poppler. Use representative real-world PDF corpora before enabling untrusted uploads.
 
+## Untrusted-input safeguards
+
+The reader applies configurable limits for indirect objects, recursion depth, decoded streams, object-stream entries, cached objects, and page count. Flate decoding used by xref and object streams is subject to the same decoded-stream limit as normal filter processing. Malformed input is rejected for truncated xref data, invalid stream boundaries, page-tree cycles, unsupported filters, and decompression-limit violations.
+
+These safeguards reduce resource-exhaustion risk but are not a substitute for process isolation when handling hostile PDFs.
+
 | Named destinations | N/A | Supported | Supported during writer page reordering |
 | Link annotations | Partial read through object API | URI and named-destination links | Writer API |
 

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <regex>
 #include <zlib.h>
 
@@ -12,6 +13,12 @@ namespace CPPPdf {
 namespace {
 int Hex(char c){ if(c>='0'&&c<='9')return c-'0'; if(c>='a'&&c<='f')return c-'a'+10; if(c>='A'&&c<='F')return c-'A'+10; return -1; }
 void Check(std::size_t n,std::size_t max){ if(n>max) throw PdfException(PdfErrorCode::UnsupportedFeature,"Decoded stream exceeds configured limit."); }
+void CheckAppend(std::size_t current, std::size_t additional, std::size_t max) {
+    if (current > max || additional > max - current) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Decoded stream exceeds configured limit.");
+    }
+}
 
 int Parameter(const std::string& dictionary, const char* key, int fallback) {
     const std::regex expression(std::string("/") + key + R"(\s+([+-]?\d+))");
@@ -100,35 +107,117 @@ std::vector<std::byte> ApplyPredictor(
 }
 
 std::vector<std::byte> PdfFilterPipeline::Decode(std::span<const std::byte> input,const std::vector<PdfFilterSpec>& filters) const {
+    Check(input.size(), maxDecodedSize_);
     std::vector<std::byte> data(input.begin(),input.end());
     for(const auto& f:filters){
         if(f.name=="FlateDecode"||f.name=="Fl") {
             data=DecodeFlate(data,maxDecodedSize_);
             data=ApplyPredictor(std::move(data), f.decodeParameters, maxDecodedSize_);
         }
-        else if(f.name=="ASCIIHexDecode"||f.name=="AHx") data=DecodeAsciiHex(data);
-        else if(f.name=="ASCII85Decode"||f.name=="A85") data=DecodeAscii85(data);
-        else if(f.name=="RunLengthDecode"||f.name=="RL") data=DecodeRunLength(data);
+        else if(f.name=="ASCIIHexDecode"||f.name=="AHx") data=DecodeAsciiHex(data,maxDecodedSize_);
+        else if(f.name=="ASCII85Decode"||f.name=="A85") data=DecodeAscii85(data,maxDecodedSize_);
+        else if(f.name=="RunLengthDecode"||f.name=="RL") data=DecodeRunLength(data,maxDecodedSize_);
         else throw PdfException(PdfErrorCode::UnsupportedFeature,"Unsupported PDF filter: "+f.name);
         Check(data.size(),maxDecodedSize_);
     }
     return data;
 }
 std::vector<std::byte> PdfFilterPipeline::DecodeFlate(std::span<const std::byte> input,std::size_t maxSize){
+    if (input.size() > static_cast<std::size_t>(std::numeric_limits<uInt>::max())) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "FlateDecode input exceeds the zlib input limit.");
+    }
     z_stream s{}; s.next_in=reinterpret_cast<Bytef*>(const_cast<std::byte*>(input.data())); s.avail_in=static_cast<uInt>(input.size());
     if(inflateInit(&s)!=Z_OK) throw PdfException(PdfErrorCode::MalformedObject,"Cannot initialize FlateDecode.");
     std::vector<std::byte> out; std::byte chunk[16384]; int code=Z_OK;
     while(code==Z_OK){ s.next_out=reinterpret_cast<Bytef*>(chunk); s.avail_out=sizeof(chunk); code=inflate(&s,Z_NO_FLUSH); const auto n=sizeof(chunk)-s.avail_out; out.insert(out.end(),chunk,chunk+n); Check(out.size(),maxSize); }
     inflateEnd(&s); if(code!=Z_STREAM_END) throw PdfException(PdfErrorCode::MalformedObject,"Invalid FlateDecode stream."); return out;
 }
-std::vector<std::byte> PdfFilterPipeline::DecodeAsciiHex(std::span<const std::byte> input){
-    std::vector<std::byte> out; int high=-1; for(auto b:input){ char c=static_cast<char>(b); if(c=='>')break; if(std::isspace(static_cast<unsigned char>(c)))continue; int h=Hex(c); if(h<0)throw PdfException(PdfErrorCode::MalformedObject,"Invalid ASCIIHex data."); if(high<0)high=h; else {out.push_back(static_cast<std::byte>((high<<4)|h)); high=-1;}} if(high>=0)out.push_back(static_cast<std::byte>(high<<4)); return out;
+std::vector<std::byte> PdfFilterPipeline::DecodeAsciiHex(
+    std::span<const std::byte> input, std::size_t maxDecodedSize) {
+    std::vector<std::byte> out;
+    int high = -1;
+    for (auto b : input) {
+        const char c = static_cast<char>(b);
+        if (c == '>') break;
+        if (std::isspace(static_cast<unsigned char>(c))) continue;
+        const int h = Hex(c);
+        if (h < 0) throw PdfException(PdfErrorCode::MalformedObject, "Invalid ASCIIHex data.");
+        if (high < 0) {
+            high = h;
+        } else {
+            CheckAppend(out.size(), 1U, maxDecodedSize);
+            out.push_back(static_cast<std::byte>((high << 4) | h));
+            high = -1;
+        }
+    }
+    if (high >= 0) {
+        CheckAppend(out.size(), 1U, maxDecodedSize);
+        out.push_back(static_cast<std::byte>(high << 4));
+    }
+    return out;
 }
-std::vector<std::byte> PdfFilterPipeline::DecodeAscii85(std::span<const std::byte> input){
-    std::vector<std::byte> out; std::uint32_t tuple=0; int count=0; for(auto b:input){ char c=static_cast<char>(b); if(std::isspace(static_cast<unsigned char>(c)))continue; if(c=='~')break; if(c=='z'&&count==0){out.insert(out.end(),4,std::byte{0});continue;} if(c<'!'||c>'u')throw PdfException(PdfErrorCode::MalformedObject,"Invalid ASCII85 data."); tuple=tuple*85U+static_cast<unsigned>(c-'!'); if(++count==5){for(int i=3;i>=0;--i)out.push_back(static_cast<std::byte>((tuple>>(i*8))&0xFFU));tuple=0;count=0;}}
-    if(count>1){ for(int i=count;i<5;++i) tuple=tuple*85U+84U; for(int i=3;i>=4-(count-1);--i) out.push_back(static_cast<std::byte>((tuple>>(i*8))&0xFFU)); } return out;
+std::vector<std::byte> PdfFilterPipeline::DecodeAscii85(
+    std::span<const std::byte> input, std::size_t maxDecodedSize) {
+    std::vector<std::byte> out;
+    std::uint32_t tuple = 0;
+    int count = 0;
+    for (auto b : input) {
+        const char c = static_cast<char>(b);
+        if (std::isspace(static_cast<unsigned char>(c))) continue;
+        if (c == '~') break;
+        if (c == 'z' && count == 0) {
+            CheckAppend(out.size(), 4U, maxDecodedSize);
+            out.insert(out.end(), 4U, std::byte{0});
+            continue;
+        }
+        if (c < '!' || c > 'u') {
+            throw PdfException(PdfErrorCode::MalformedObject, "Invalid ASCII85 data.");
+        }
+        tuple = tuple * 85U + static_cast<unsigned>(c - '!');
+        if (++count == 5) {
+            CheckAppend(out.size(), 4U, maxDecodedSize);
+            for (int i = 3; i >= 0; --i) {
+                out.push_back(static_cast<std::byte>((tuple >> (i * 8)) & 0xFFU));
+            }
+            tuple = 0;
+            count = 0;
+        }
+    }
+    if (count > 1) {
+        for (int i = count; i < 5; ++i) tuple = tuple * 85U + 84U;
+        const std::size_t produced = static_cast<std::size_t>(count - 1);
+        CheckAppend(out.size(), produced, maxDecodedSize);
+        for (int i = 3; i >= 4 - (count - 1); --i) {
+            out.push_back(static_cast<std::byte>((tuple >> (i * 8)) & 0xFFU));
+        }
+    }
+    return out;
 }
-std::vector<std::byte> PdfFilterPipeline::DecodeRunLength(std::span<const std::byte> input){
-    std::vector<std::byte> out; std::size_t i=0; while(i<input.size()){ unsigned n=std::to_integer<unsigned>(input[i++]); if(n==128)break; if(n<=127){ std::size_t count=n+1; if(i+count>input.size())throw PdfException(PdfErrorCode::MalformedObject,"Truncated RunLength stream."); out.insert(out.end(),input.begin()+static_cast<std::ptrdiff_t>(i),input.begin()+static_cast<std::ptrdiff_t>(i+count)); i+=count; } else { if(i>=input.size())throw PdfException(PdfErrorCode::MalformedObject,"Truncated RunLength stream."); out.insert(out.end(),257-n,input[i++]); }} return out;
+std::vector<std::byte> PdfFilterPipeline::DecodeRunLength(
+    std::span<const std::byte> input, std::size_t maxDecodedSize) {
+    std::vector<std::byte> out;
+    std::size_t i = 0;
+    while (i < input.size()) {
+        const unsigned n = std::to_integer<unsigned>(input[i++]);
+        if (n == 128U) break;
+        if (n <= 127U) {
+            const std::size_t count = n + 1U;
+            if (i + count > input.size()) {
+                throw PdfException(PdfErrorCode::MalformedObject, "Truncated RunLength stream.");
+            }
+            CheckAppend(out.size(), count, maxDecodedSize);
+            out.insert(out.end(), input.begin() + static_cast<std::ptrdiff_t>(i),
+                       input.begin() + static_cast<std::ptrdiff_t>(i + count));
+            i += count;
+        } else {
+            if (i >= input.size()) {
+                throw PdfException(PdfErrorCode::MalformedObject, "Truncated RunLength stream.");
+            }
+            CheckAppend(out.size(), 257U - n, maxDecodedSize);
+            out.insert(out.end(), 257U - n, input[i++]);
+        }
+    }
+    return out;
 }
 } // namespace CPPPdf

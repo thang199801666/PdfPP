@@ -36,6 +36,7 @@ public:
 
     [[nodiscard]] virtual std::uint64_t Size() const = 0;
     virtual void Read(std::uint64_t offset, std::span<char> destination) = 0;
+    [[nodiscard]] virtual std::span<const char> View() const noexcept { return {}; }
 
     // Compatibility helper. New parser code should prefer Size() + Read().
     [[nodiscard]] virtual std::vector<char> ReadAll();
@@ -46,6 +47,7 @@ public:
     explicit PdfFileInputSource(std::filesystem::path path);
     [[nodiscard]] std::uint64_t Size() const override;
     void Read(std::uint64_t offset, std::span<char> destination) override;
+    [[nodiscard]] std::span<const char> View() const noexcept override;
     [[nodiscard]] std::vector<char> ReadAll() override;
 private:
     std::filesystem::path path_;
@@ -63,6 +65,7 @@ public:
     PdfMappedFileInputSource& operator=(const PdfMappedFileInputSource&) = delete;
     [[nodiscard]] std::uint64_t Size() const override;
     void Read(std::uint64_t offset, std::span<char> destination) override;
+    [[nodiscard]] std::span<const char> View() const noexcept override;
     [[nodiscard]] std::vector<char> ReadAll() override;
 private:
     class Impl;
@@ -74,6 +77,7 @@ public:
     explicit PdfMemoryInputSource(std::span<const std::byte> bytes);
     [[nodiscard]] std::uint64_t Size() const override;
     void Read(std::uint64_t offset, std::span<char> destination) override;
+    [[nodiscard]] std::span<const char> View() const noexcept override;
 private:
     std::vector<char> bytes_;
 };

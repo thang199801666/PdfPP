@@ -19,7 +19,7 @@ See [docs/FeatureMatrix.md](docs/FeatureMatrix.md) for the supported feature sco
 
 - C++20 compiler
 - CMake 3.24 or newer
-- Visual Studio 2022/2026, GCC, or Clang
+- Visual Studio 2026 with MSVC toolset v145 for the canonical Windows solution; GCC or Clang for CMake-based builds
 
 ## Build
 
@@ -162,4 +162,6 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), follow the [
 
 ## License
 
-Pdf++ is licensed under the [Apache License 2.0](LICENSE). Third-party components retain their respective licenses; see [NOTICE](NOTICE) and the files under `third_party/`.
+Pdf++ is licensed under the [GNU General Public License v3.0](LICENSE).
+Third-party components retain their respective licenses; see [NOTICE](NOTICE)
+and the files under `third_party/`.

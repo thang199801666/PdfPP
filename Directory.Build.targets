@@ -6,8 +6,8 @@
     parallel CL.EXE processes never write to the same vc145.pdb file.
   -->
   <PropertyGroup>
-    <OutDir>$(SolutionDir)artifacts\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)artifacts\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
 
   <ItemDefinitionGroup>

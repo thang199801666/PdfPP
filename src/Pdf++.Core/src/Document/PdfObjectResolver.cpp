@@ -45,11 +45,6 @@ const PdfObject& PdfObjectResolver::Resolve(const PdfReference& reference,
         return cached->second.object;
     }
 
-    if (resolving_.size() >= limits_.maxObjectCount) {
-        throw PdfException(PdfErrorCode::MalformedObject,
-                           "Configured maximum object count was exceeded.");
-    }
-
     if (!resolving_.insert(key).second) {
         throw PdfException(PdfErrorCode::MalformedObject,
                            "Cyclic indirect object resolution detected.");

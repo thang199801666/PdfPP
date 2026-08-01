@@ -60,4 +60,5 @@ Optimize CMap lookup cache
 Fix xref-stream recovery bounds
 ```
 
-By submitting a contribution, you agree that it is licensed under the repository's Apache License 2.0.
+By submitting a contribution, you agree that it is licensed under the
+repository's GNU General Public License v3.0.

@@ -527,8 +527,11 @@ void TestWriterEmbeddedFiles() {
     PDFPP_TEST_CHECK(writer.GetFileAttachmentCount(page) == 1U);
     writer.Save(output);
 
-    std::ifstream input(output, std::ios::binary);
-    const std::string pdf((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::string pdf;
+    {
+        std::ifstream input(output, std::ios::binary);
+        pdf.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
     PDFPP_TEST_CHECK(pdf.find("/EmbeddedFiles") != std::string::npos);
     PDFPP_TEST_CHECK(pdf.find("/Type /EmbeddedFile") != std::string::npos);
     PDFPP_TEST_CHECK(pdf.find("/Type /Filespec") != std::string::npos);

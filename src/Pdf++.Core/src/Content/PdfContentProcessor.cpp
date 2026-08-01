@@ -304,7 +304,16 @@ void PdfContentProcessor::Process(
 
     std::vector<Operand> operands;
     PdfTextStateSnapshot textState = initialState;
-    std::vector<PdfTextStateSnapshot> graphicsStack;
+    // q/Q save and restore the graphics state only. Text state (font,
+    // text matrix, spacing, leading, and rise) is independent in PDF and
+    // must survive a graphics-state restore.
+    struct GraphicsState final {
+        std::array<double, 6> currentTransformationMatrix{};
+        std::array<double, 3> strokeColor{};
+        std::array<double, 3> fillColor{};
+        double lineWidth{};
+    };
+    std::vector<GraphicsState> graphicsStack;
     std::size_t offset{};
 
     while (offset < content.size()) {
@@ -343,9 +352,22 @@ void PdfContentProcessor::Process(
         }
         else if (token == "BT") Emit(handler_, PdfContentEventType::BeginText, std::string(token), textState);
         else if (token == "ET") Emit(handler_, PdfContentEventType::EndText, std::string(token), textState);
-        else if (token == "q") { graphicsStack.push_back(textState); Emit(handler_, PdfContentEventType::SaveState, std::string(token), textState); }
+        else if (token == "q") {
+            graphicsStack.push_back({textState.currentTransformationMatrix,
+                                     textState.strokeColor,
+                                     textState.fillColor,
+                                     textState.lineWidth});
+            Emit(handler_, PdfContentEventType::SaveState, std::string(token), textState);
+        }
         else if (token == "Q") {
-            if (!graphicsStack.empty()) { textState = graphicsStack.back(); graphicsStack.pop_back(); }
+            if (!graphicsStack.empty()) {
+                const auto state = graphicsStack.back();
+                graphicsStack.pop_back();
+                textState.currentTransformationMatrix = state.currentTransformationMatrix;
+                textState.strokeColor = state.strokeColor;
+                textState.fillColor = state.fillColor;
+                textState.lineWidth = state.lineWidth;
+            }
             Emit(handler_, PdfContentEventType::RestoreState, std::string(token), textState);
         }
         else if (token == "Tf") {
@@ -397,19 +419,31 @@ void PdfContentProcessor::Process(
         else if (token == "TJ") {
             std::string combined;
             std::vector<double> adjustments;
+            std::vector<std::string> eventSegments;
+            std::vector<double> eventSegmentAdjustments;
             if (!operands.empty()) {
                 if (const auto* array = std::get_if<ArrayOperand>(&operands.front())) {
                     for (const auto& item : array->values) {
                         if (const auto* stringValue = std::get_if<StringOperand>(&item)) {
                             combined += stringValue->value;
+                            eventSegments.push_back(stringValue->value);
+                            eventSegmentAdjustments.push_back(0.0);
                         } else if (const auto* adjustment = std::get_if<double>(&item)) {
                             adjustments.push_back(*adjustment);
+                            if (!eventSegmentAdjustments.empty()) eventSegmentAdjustments.back() += *adjustment;
                         }
                     }
                 }
             }
-            Emit(handler_, PdfContentEventType::RenderText, std::string(token), textState,
-                 std::move(combined), std::move(adjustments));
+            PdfContentEvent event;
+            event.type = PdfContentEventType::RenderText;
+            event.operation = std::string(token);
+            event.textState = textState;
+            event.text = std::move(combined);
+            event.numbers = std::move(adjustments);
+            event.textSegments = std::move(eventSegments);
+            event.textSegmentAdjustments = std::move(eventSegmentAdjustments);
+            handler_(event);
         }
         else if (token == "'") {
             textState.textMatrix[5] -= textState.leading;

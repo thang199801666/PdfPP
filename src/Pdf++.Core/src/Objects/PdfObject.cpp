@@ -25,6 +25,7 @@ std::size_t PdfNameHash::operator()(const PdfName& name) const noexcept {
 }
 const PdfObject& PdfArray::at(std::size_t index) const { return values_.at(index); }
 PdfObject& PdfArray::at(std::size_t index) { return values_.at(index); }
+void PdfArray::reserve(std::size_t capacity) { values_.reserve(capacity); }
 void PdfArray::push_back(PdfObject value) { values_.push_back(std::move(value)); }
 
 bool PdfDictionary::Contains(const PdfName& key) const { return values_.contains(key); }
@@ -49,6 +50,7 @@ const PdfArray* PdfDictionary::GetAsArray(const PdfName& key) const noexcept {
 const PdfDictionary* PdfDictionary::GetAsDictionary(const PdfName& key) const noexcept {
     const auto* value = Find(key); return value ? value->AsDictionary() : nullptr;
 }
+void PdfDictionary::reserve(std::size_t capacity) { values_.reserve(capacity); }
 void PdfDictionary::Put(PdfName key, PdfObject value) { values_.insert_or_assign(std::move(key), std::move(value)); }
 bool PdfDictionary::Remove(const PdfName& key) { return values_.erase(key) != 0; }
 

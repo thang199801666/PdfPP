@@ -74,14 +74,36 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
     fontCache.reserve(16U);
     double currentX{};
     double currentY{};
+    double textLineX{};
+    double textLineY{};
     bool hasPosition{};
 
     PdfContentProcessor processor;
     processor.SetHandler([&](const PdfContentEvent& event) {
-        if (event.type == PdfContentEventType::SetTextMatrix ||
-            event.type == PdfContentEventType::MoveText) {
-            currentX = event.textState.textMatrix[4];
-            currentY = event.textState.textMatrix[5] + event.textState.rise;
+        if (event.type == PdfContentEventType::SetTextMatrix) {
+            textLineX = event.textState.textMatrix[4];
+            textLineY = event.textState.textMatrix[5];
+            currentX = textLineX;
+            currentY = textLineY + event.textState.rise;
+            hasPosition = true;
+            return;
+        }
+        if (event.type == PdfContentEventType::MoveText) {
+            // Td/T* translates the text-line matrix in text space. Tj
+            // advances only the text matrix, so keep a separate line origin
+            // and apply the Tm basis to the operator's delta.
+            const auto& matrix = event.textState.textMatrix;
+            const double scaleX = std::max(1.0e-9, std::hypot(matrix[0], matrix[1]));
+            const double scaleY = std::max(1.0e-9, std::hypot(matrix[2], matrix[3]));
+            if (event.numbers.size() >= 2U) {
+                textLineX += event.numbers[0] * scaleX;
+                textLineY += event.numbers[1] * scaleY;
+            } else {
+                textLineX = matrix[4];
+                textLineY = matrix[5];
+            }
+            currentX = textLineX;
+            currentY = textLineY + event.textState.rise;
             hasPosition = true;
             return;
         }
@@ -103,6 +125,14 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
         }
 
         const double fontSize = event.textState.fontSize > 0.0 ? event.textState.fontSize : 12.0;
+        // PDF files commonly put the actual text size in Tm and use `1 Tf`.
+        // The previous extractor only used the Tf operand, producing 1-point
+        // bounding boxes for scaled text (including document.pdf). Account
+        // for the text-matrix basis vectors before measuring and boxing it.
+        const auto& textMatrix = event.textState.textMatrix;
+        const double textScaleX = std::max(1.0e-9, std::hypot(textMatrix[0], textMatrix[1]));
+        const double textScaleY = std::max(1.0e-9, std::hypot(textMatrix[2], textMatrix[3]));
+        const double effectiveFontSize = fontSize * textScaleY;
         const double scale = event.textState.horizontalScaling / 100.0;
         const PdfFontResource* font{};
         if (request.fontResolver) {
@@ -115,20 +145,39 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
             }
         }
         std::string decodedText = font ? font->Decode(event.text) : event.text;
+        if (event.operation == "TJ" && !event.textSegments.empty()) {
+            decodedText.clear();
+            for (std::size_t segmentIndex = 0; segmentIndex < event.textSegments.size(); ++segmentIndex) {
+                const auto decodedSegment = font
+                    ? font->Decode(event.textSegments[segmentIndex])
+                    : event.textSegments[segmentIndex];
+                decodedText += decodedSegment;
+                const double adjustment = segmentIndex < event.textSegmentAdjustments.size()
+                    ? event.textSegmentAdjustments[segmentIndex] : 0.0;
+                if (adjustment < 0.0) {
+                    const double adjustmentAdvance =
+                        (-adjustment / 1000.0) * fontSize * textScaleX * scale;
+                    if (adjustmentAdvance >= std::max(0.35, effectiveFontSize * 0.06) &&
+                        (decodedText.empty() || decodedText.back() != ' ')) {
+                        decodedText.push_back(' ');
+                    }
+                }
+            }
+        }
         const TextMetrics decodedMetrics = AnalyzeText(decodedText);
         const auto glyphCountValue = font
             ? font->GetGlyphCount(event.text)
             : std::max<std::size_t>(1U, decodedMetrics.codePoints);
         const double glyphCount = static_cast<double>(std::max<std::size_t>(1U, glyphCountValue));
         double width = font
-            ? (font->MeasureEncodedText(event.text) / 1000.0) * fontSize * scale
-            : glyphCount * fontSize * 0.5 * scale;
-        width += std::max(0.0, glyphCount - 1.0) * event.textState.characterSpacing * scale;
-        width += static_cast<double>(decodedMetrics.spaces) * event.textState.wordSpacing * scale;
+            ? (font->MeasureEncodedText(event.text) / 1000.0) * fontSize * textScaleX * scale
+            : glyphCount * fontSize * textScaleX * 0.5 * scale;
+        width += std::max(0.0, glyphCount - 1.0) * event.textState.characterSpacing * textScaleX * scale;
+        width += static_cast<double>(decodedMetrics.spaces) * event.textState.wordSpacing * textScaleX * scale;
 
         if (event.operation == "TJ") {
             for (const double adjustment : event.numbers) {
-                width += (-adjustment / 1000.0) * fontSize * scale;
+                width += (-adjustment / 1000.0) * fontSize * textScaleX * scale;
             }
         }
         width = std::max(0.0, width);
@@ -137,10 +186,10 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
         const PdfPoint start = TransformPoint(ctm, currentX, currentY);
         const PdfPoint end = TransformPoint(ctm, currentX + width, currentY);
         const std::array<PdfPoint, 4> boxPoints{
-            TransformPoint(ctm, currentX, currentY - fontSize * 0.20),
-            TransformPoint(ctm, currentX + width, currentY - fontSize * 0.20),
-            TransformPoint(ctm, currentX + width, currentY + fontSize * 0.80),
-            TransformPoint(ctm, currentX, currentY + fontSize * 0.80)
+            TransformPoint(ctm, currentX, currentY - effectiveFontSize * 0.20),
+            TransformPoint(ctm, currentX + width, currentY - effectiveFontSize * 0.20),
+            TransformPoint(ctm, currentX + width, currentY + effectiveFontSize * 0.80),
+            TransformPoint(ctm, currentX, currentY + effectiveFontSize * 0.80)
         };
 
         PdfTextChunk chunk;
@@ -149,7 +198,8 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
         chunk.end = end;
         chunk.boundingBox = BoundsFromPoints(boxPoints);
         chunk.fontResource = event.textState.fontResource;
-        chunk.fontSize = fontSize;
+        chunk.fontFamily = font ? font->GetDescriptor().baseFont : std::string{};
+        chunk.fontSize = effectiveFontSize;
         chunk.renderingMode = event.textState.renderingMode;
         chunk.sourceObjectNumber = request.sourceObjectNumber;
         chunk.glyphCount = static_cast<std::uint32_t>(glyphCountValue);

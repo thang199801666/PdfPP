@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -23,9 +24,15 @@ public:
     [[nodiscard]] static std::vector<std::byte> DecodeFlate(
         std::span<const std::byte> input,
         std::size_t maxDecodedSize);
-    [[nodiscard]] static std::vector<std::byte> DecodeAsciiHex(std::span<const std::byte> input);
-    [[nodiscard]] static std::vector<std::byte> DecodeAscii85(std::span<const std::byte> input);
-    [[nodiscard]] static std::vector<std::byte> DecodeRunLength(std::span<const std::byte> input);
+    [[nodiscard]] static std::vector<std::byte> DecodeAsciiHex(
+        std::span<const std::byte> input,
+        std::size_t maxDecodedSize = std::numeric_limits<std::size_t>::max());
+    [[nodiscard]] static std::vector<std::byte> DecodeAscii85(
+        std::span<const std::byte> input,
+        std::size_t maxDecodedSize = std::numeric_limits<std::size_t>::max());
+    [[nodiscard]] static std::vector<std::byte> DecodeRunLength(
+        std::span<const std::byte> input,
+        std::size_t maxDecodedSize = std::numeric_limits<std::size_t>::max());
 private:
     std::size_t maxDecodedSize_;
 };

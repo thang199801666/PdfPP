@@ -20,6 +20,7 @@ struct PdfTextChunk {
     PdfPoint end;
     PdfRectangle boundingBox;
     std::string fontResource;
+    std::string fontFamily;
     double fontSize{};
     int renderingMode{};
     std::uint32_t sourceObjectNumber{};

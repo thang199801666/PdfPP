@@ -10,6 +10,8 @@ The text pipeline now provides three cache levels:
 2. Per-extraction font-resource cache.
 3. `PdfTextDocumentIndex`, which retains extracted page chunks and reusable search indexes under a configurable memory budget.
 
+The cached page tree is now returned by reference internally. Page-oriented operations no longer copy the complete page-reference vector on every call; this matters for large documents and repeated extraction APIs.
+
 ## Repeated document search
 
 ```cpp
@@ -39,7 +41,7 @@ auto regex = index.FindRegexAll(jobPattern);
 auto document = CPPPdf::PdfDocument::OpenMapped("large.pdf");
 ```
 
-Mapping remains opt-in. The current parser owns a contiguous document buffer, so mapping avoids repeated file reads but does not yet make all parser objects zero-copy.
+Mapping remains opt-in. Mapped documents now retain the input source for the document lifetime and expose a contiguous read-only view directly to the parser, avoiding the previous full-file copy. Object bodies and decoded streams may still allocate when materialized.
 
 ## Streaming output sink
 
@@ -54,19 +56,13 @@ The output sink is streamed directly to `std::ostream`; complex object bodies ar
 
 ## Benchmark discipline
 
-Run:
-
-```text
-Pdf++.Benchmarks input.pdf 7 4
-```
-
-The benchmark reports open/page count, sequential and parallel extraction, literal and regex search, reusable page index, cold/warm document index, and image enumeration. Compare medians on the same machine, build type, corpus and thread count.
+Use the cross-engine validation tools under `tools/validation/` for repeatable open, extraction, rendering and feature measurements. Compare medians on the same machine, build type, corpus and thread count.
 
 ## Remaining gaps to leading engines
 
 Pdf++ 0.40 does not claim parity with MuPDF or PDFium. The largest remaining opportunities are:
 
-- Parser views over mapped input without copying the full file.
+- Lazy indirect-object parsing over the mapped view; the document-level parse still scans xref/page structure eagerly, and object/stream materialization still returns owned strings.
 - Shared document-level parsed font and CMap cache.
 - Independent per-worker resolver contexts for parallel preload.
 - Optional RE2 or PCRE2 JIT backend.

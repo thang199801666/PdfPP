@@ -11,8 +11,10 @@
 #include <istream>
 #include <span>
 #include <cstddef>
+#include <functional>
 #include <CPPPdf/IO/PdfReader.hpp>
 #include <CPPPdf/Core/PdfTypes.hpp>
+#include <CPPPdf/Content/PdfContentProcessor.hpp>
 #include <CPPPdf/Objects/PdfObject.hpp>
 #include <CPPPdf/Text/PdfTextExtractor.hpp>
 #include <CPPPdf/Graphics/PdfImage.hpp>
@@ -98,6 +100,10 @@ public:
     [[nodiscard]] std::vector<PdfTextChunk> ExtractTextChunks(
         std::size_t pageIndex,
         const PdfTextExtractionRequest& request = {}) const;
+    using PdfContentEventHandler = std::function<void(const PdfContentEvent&)>;
+    void ForEachPageContentEvent(
+        std::size_t pageIndex,
+        const PdfContentEventHandler& handler) const;
     [[nodiscard]] std::string ExtractText(
         std::size_t pageIndex,
         const PdfTextExtractionRequest& request) const;
@@ -120,14 +126,14 @@ private:
                                std::unordered_map<std::uint32_t, bool>& visiting,
                                std::vector<PdfReference>& pages) const;
 
-    [[nodiscard]] std::vector<PdfReference> pageReferences() const;
+    [[nodiscard]] const std::vector<PdfReference>& pageReferences() const;
     [[nodiscard]] std::vector<PdfReference> contentReferences(const std::string& pageObject) const;
     [[nodiscard]] std::string decodeContentStream(const std::string& streamObject) const;
     [[nodiscard]] std::string readCompressedObject(std::uint32_t objectNumber,
                                                    const PdfXrefEntry& entry) const;
     [[nodiscard]] std::string recoverIndirectObject(std::uint32_t objectNumber) const;
     [[nodiscard]] std::string recoverFromObjectStreams(std::uint32_t objectNumber) const;
-    [[nodiscard]] static std::string extractStreamData(const std::string& streamObject);
+    [[nodiscard]] std::string extractStreamData(const std::string& streamObject) const;
     [[nodiscard]] static std::vector<std::size_t> parseIntegerArrayAfterKey(
         const std::string& dictionary, const std::string& key);
     [[nodiscard]] static std::string extractTextOperators(const std::string& content,
@@ -153,8 +159,10 @@ private:
                                                           const std::string& key);
 
     std::filesystem::path path_;
+    std::unique_ptr<PdfInputSource> source_;
     PdfReaderOptions readerOptions_{};
-    std::vector<char> bytes_;
+    std::vector<char> ownedBytes_;
+    std::span<const char> bytes_{};
     std::string version_;
     std::unordered_map<std::uint32_t, PdfXrefEntry> xref_;
     std::unordered_set<std::uint64_t> parsedXrefOffsets_;

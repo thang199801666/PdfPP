@@ -1,5 +1,8 @@
 Pdf++
 Copyright 2026 Pdf++ contributors
 
+Pdf++ is distributed under the GNU General Public License, version 3.
+See LICENSE for the license terms.
+
 This product includes zlib, distributed under the zlib License.
 See third_party/zlib for its source and license notices.

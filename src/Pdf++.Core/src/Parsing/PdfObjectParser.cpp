@@ -3,6 +3,7 @@
 #include <charconv>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <system_error>
 
 namespace CPPPdf::Internal {
@@ -33,8 +34,8 @@ private:
     PdfName ParseName(){ ++p_; std::string v; while(!End()&&!Delim(Current())){ if(Current()=='#'&&p_+2<s_.size()){ auto hex=[](char c){if(c>='0'&&c<='9')return c-'0';if(c>='A'&&c<='F')return c-'A'+10;if(c>='a'&&c<='f')return c-'a'+10;return -1;}; int a=hex(s_[p_+1]),b=hex(s_[p_+2]); if(a>=0&&b>=0){v.push_back(static_cast<char>((a<<4)|b));p_+=3;continue;}} v.push_back(Current());++p_;} return PdfName(std::move(v)); }
     std::string ParseLiteralString(){ ++p_; std::string out; int depth=1; bool esc=false; while(!End()&&depth>0){char c=s_[p_++]; if(esc){esc=false; switch(c){case'n':out+='\n';break;case'r':out+='\r';break;case't':out+='\t';break;case'b':out+='\b';break;case'f':out+='\f';break;case'\n':break;case'\r':if(!End()&&Current()=='\n')++p_;break;default:out+=c;} continue;} if(c=='\\'){esc=true;continue;} if(c=='('){++depth;out+=c;} else if(c==')'){if(--depth>0)out+=c;} else out+=c;} if(depth)throw PdfException(PdfErrorCode::MalformedObject,"Unterminated PDF string."); return out; }
     std::string ParseHexString(){ ++p_; std::string hex; while(!End()&&Current()!='>'){if(!std::isspace(static_cast<unsigned char>(Current())))hex+=Current();++p_;} if(End())throw PdfException(PdfErrorCode::MalformedObject,"Unterminated hex string."); ++p_; if(hex.size()%2)hex+='0'; auto h=[](char c){if(c>='0'&&c<='9')return c-'0';if(c>='A'&&c<='F')return c-'A'+10;if(c>='a'&&c<='f')return c-'a'+10;return -1;}; std::string out; for(std::size_t i=0;i<hex.size();i+=2){int a=h(hex[i]),b=h(hex[i+1]);if(a<0||b<0)throw PdfException(PdfErrorCode::MalformedObject,"Invalid hex string.");out.push_back(static_cast<char>((a<<4)|b));}return out; }
-    PdfArray ParseArray(std::size_t depth){++p_; PdfArray a; for(;;){Skip(); if(End())throw PdfException(PdfErrorCode::MalformedObject,"Unterminated array."); if(Peek(']')){++p_;break;} a.push_back(ParseValue(depth));} return a;}
-    PdfDictionary ParseDictionary(std::size_t depth){p_+=2; PdfDictionary d; for(;;){Skip(); if(Starts(">>")){p_+=2;break;} if(!Peek('/'))throw PdfException(PdfErrorCode::MalformedObject,"Dictionary key is not a name."); auto key=ParseName(); auto value=ParseValue(depth); d.Put(std::move(key),std::move(value));} return d;}
+    PdfArray ParseArray(std::size_t depth){++p_; PdfArray a; a.reserve(8U); for(;;){Skip(); if(End())throw PdfException(PdfErrorCode::MalformedObject,"Unterminated array."); if(Peek(']')){++p_;break;} a.push_back(ParseValue(depth));} return a;}
+    PdfDictionary ParseDictionary(std::size_t depth){p_+=2; PdfDictionary d; d.reserve(8U); for(;;){Skip(); if(Starts(">>")){p_+=2;break;} if(!Peek('/'))throw PdfException(PdfErrorCode::MalformedObject,"Dictionary key is not a name."); auto key=ParseName(); auto value=ParseValue(depth); d.Put(std::move(key),std::move(value));} return d;}
     PdfObject ParseNumberOrReference(){ Skip(); auto start=p_; while(!End()&&!Delim(Current()))++p_; auto token=s_.substr(start,p_-start); bool real=token.find_first_of(".")!=std::string_view::npos; if(real){
             double value{};
             const auto parsed = std::from_chars(token.data(), token.data() + token.size(), value,
@@ -87,9 +88,8 @@ PdfObject PdfObjectParser::Parse(std::string_view source,std::size_t maxDepth){
     }
 
     std::vector<std::byte> bytes(dataEnd - dataStart);
-    for(std::size_t index = 0; index < bytes.size(); ++index) {
-        bytes[index] = static_cast<std::byte>(
-            static_cast<unsigned char>(source[dataStart + index]));
+    if (!bytes.empty()) {
+        std::memcpy(bytes.data(), source.data() + dataStart, bytes.size());
     }
     return PdfObject(PdfStream(*dictionary,std::move(bytes)));
 }

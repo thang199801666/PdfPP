@@ -1,12 +1,6 @@
 # Keyword highlight example
 
-Project: `Pdf++.HighlightSample`
-
-Run from Visual Studio or command line:
-
-```powershell
-Pdf++.HighlightSample.exe input.pdf output_highlighted.pdf
-```
+The standalone highlight sample has been removed from the solution. Use the Pdf++ API directly:
 
 The example searches every page for `openXL` using ASCII case-insensitive comparison and appends PDF Highlight annotations using a light-yellow color.
 

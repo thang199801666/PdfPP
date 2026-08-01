@@ -1,4 +1,7 @@
 # CMake and build output
+/artifacts/
+/build/
+/out/
 /build*/
 /out/
 /cmake-build-*/

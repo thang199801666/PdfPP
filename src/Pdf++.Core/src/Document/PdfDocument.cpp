@@ -40,14 +40,14 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
     return value;
 }
 
-[[nodiscard]] bool startsWithAt(const std::vector<char>& bytes,
+[[nodiscard]] bool startsWithAt(std::span<const char> bytes,
                                 std::size_t offset,
                                 std::string_view text) {
     return offset <= bytes.size() && text.size() <= bytes.size() - offset &&
            std::equal(text.begin(), text.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
 }
 
-[[nodiscard]] std::size_t skipWhitespace(const std::vector<char>& bytes, std::size_t pos) {
+[[nodiscard]] std::size_t skipWhitespace(std::span<const char> bytes, std::size_t pos) {
     while (pos < bytes.size()) {
         const unsigned char ch = static_cast<unsigned char>(bytes[pos]);
         if (!std::isspace(ch) && ch != 0) {
@@ -58,7 +58,7 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
     return pos;
 }
 
-[[nodiscard]] std::string readLine(const std::vector<char>& bytes, std::size_t& pos) {
+[[nodiscard]] std::string readLine(std::span<const char> bytes, std::size_t& pos) {
     if (pos >= bytes.size()) {
         return {};
     }
@@ -91,7 +91,7 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
     return value;
 }
 
-[[nodiscard]] std::size_t findDictionaryEnd(const std::vector<char>& bytes, std::size_t begin) {
+[[nodiscard]] std::size_t findDictionaryEnd(std::span<const char> bytes, std::size_t begin) {
     if (!startsWithAt(bytes, begin, "<<")) {
         throw PdfException(PdfErrorCode::MalformedObject, "Dictionary does not start with <<.");
     }
@@ -200,8 +200,13 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
     return result;
 }
 
-[[nodiscard]] std::string inflateZlib(std::string_view input) {
+[[nodiscard]] std::string inflateZlib(std::string_view input, std::size_t maxSize) {
     if (input.empty()) return {};
+
+    if (input.size() > static_cast<std::size_t>(std::numeric_limits<uInt>::max())) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "FlateDecode input exceeds the zlib input limit.");
+    }
 
     z_stream stream{};
     stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(input.data()));
@@ -218,6 +223,11 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
         stream.avail_out = static_cast<uInt>(buffer.size());
         status = inflate(&stream, Z_NO_FLUSH);
         const std::size_t produced = buffer.size() - stream.avail_out;
+        if (output.size() > maxSize || produced > maxSize - output.size()) {
+            inflateEnd(&stream);
+            throw PdfException(PdfErrorCode::UnsupportedFeature,
+                               "Decoded stream exceeds configured limit.");
+        }
         output.append(buffer.data(), produced);
     }
     inflateEnd(&stream);
@@ -574,6 +584,84 @@ void extractContentRecursively(
     output.insert(output.end(),
                   std::make_move_iterator(chunks.begin()),
                   std::make_move_iterator(chunks.end()));
+}
+
+void processPageContentRecursively(
+    const PdfDocument& document,
+    const std::string_view content,
+    const PdfDictionary* resources,
+    const PdfTextStateSnapshot& initialState,
+    const StreamDecoder& decodeStream,
+    std::unordered_set<std::uint64_t>& activeForms,
+    const std::size_t depth,
+    const PdfDocument::PdfContentEventHandler& handler) {
+    if (depth > 32U || !handler) return;
+
+    PdfContentProcessor processor;
+    processor.SetHandler([&](const PdfContentEvent& event) {
+        handler(event);
+        if (event.type != PdfContentEventType::InvokeXObject || resources == nullptr) return;
+
+        const auto* xObjects = objectDictionary(document, resources->Find(PdfName("XObject")));
+        if (xObjects == nullptr) return;
+        const auto* entry = xObjects->Find(PdfName(event.text));
+        if (entry == nullptr) return;
+
+        PdfReference reference{};
+        const PdfStream* stream{};
+        if (const auto indirect = entry->AsReference()) {
+            reference = PdfReference{indirect->first, indirect->second};
+            const std::uint64_t key =
+                (static_cast<std::uint64_t>(reference.objectNumber) << 16U) |
+                reference.generation;
+            if (!activeForms.insert(key).second) return;
+            stream = document.GetObject(reference).AsStream();
+            if (stream == nullptr) {
+                activeForms.erase(key);
+                return;
+            }
+        } else {
+            stream = entry->AsStream();
+            if (stream == nullptr) return;
+        }
+
+        const auto subtype = stream->dictionary().GetAsName(PdfName("Subtype"));
+        if (!subtype.has_value() || subtype->value() != "Form") {
+            if (reference.objectNumber != 0U) {
+                const std::uint64_t key =
+                    (static_cast<std::uint64_t>(reference.objectNumber) << 16U) |
+                    reference.generation;
+                activeForms.erase(key);
+            }
+            return;
+        }
+
+        const auto formMatrix = matrixFromDictionary(stream->dictionary());
+        PdfTextStateSnapshot childState = event.textState;
+        childState.currentTransformationMatrix =
+            multiplyMatrices(formMatrix, event.textState.currentTransformationMatrix);
+        const PdfDictionary* childResources = objectDictionary(
+            document, stream->dictionary().Find(PdfName("Resources")));
+        if (childResources == nullptr) childResources = resources;
+
+        std::string childContent;
+        if (reference.objectNumber != 0U) {
+            childContent = decodeStream(reference);
+        } else {
+            const auto bytes = stream->bytes();
+            childContent.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        }
+        processPageContentRecursively(document, childContent, childResources, childState,
+                                      decodeStream, activeForms, depth + 1U, handler);
+
+        if (reference.objectNumber != 0U) {
+            const std::uint64_t key =
+                (static_cast<std::uint64_t>(reference.objectNumber) << 16U) |
+                reference.generation;
+            activeForms.erase(key);
+        }
+    });
+    processor.Process(content, initialState);
 }
 
 
@@ -934,7 +1022,12 @@ PdfDocument PdfDocument::Open(std::unique_ptr<PdfInputSource> source, const PdfR
     }
     PdfDocument document;
     document.readerOptions_ = options;
-    document.bytes_ = source->ReadAll();
+    document.source_ = std::move(source);
+    document.bytes_ = document.source_->View();
+    if (document.bytes_.empty() && document.source_->Size() != 0U) {
+        document.ownedBytes_ = document.source_->ReadAll();
+        document.bytes_ = document.ownedBytes_;
+    }
     document.parse();
     if (document.xref_.size() > options.limits.maxObjectCount) {
         throw PdfException(PdfErrorCode::MalformedXref, "PDF object count exceeds configured limit.");
@@ -1021,7 +1114,7 @@ std::vector<std::size_t> PdfDocument::parseIntegerArrayAfterKey(
     return values;
 }
 
-std::string PdfDocument::extractStreamData(const std::string& streamObject) {
+std::string PdfDocument::extractStreamData(const std::string& streamObject) const {
     const std::size_t streamKeyword = streamObject.find("stream");
     if (streamKeyword == std::string::npos) return {};
     std::size_t dataBegin = streamKeyword + 6U;
@@ -1030,7 +1123,22 @@ std::string PdfDocument::extractStreamData(const std::string& streamObject) {
 
     std::size_t dataEnd = std::string::npos;
     try {
-        const std::size_t length = parseIntegerAfterKey(streamObject, "Length");
+        std::size_t length{};
+        const std::regex indirectLength(R"(/Length\s+(\d+)\s+(\d+)\s+R)");
+        std::smatch indirectMatch;
+        if (std::regex_search(streamObject, indirectMatch, indirectLength)) {
+            const auto lengthObject = readIndirectObject(
+                static_cast<std::uint32_t>(std::stoul(indirectMatch[1].str())));
+            const std::regex integer(R"(obj\s+([0-9]+))");
+            std::smatch integerMatch;
+            if (!std::regex_search(lengthObject, integerMatch, integer)) {
+                throw PdfException(PdfErrorCode::MalformedObject,
+                                   "Indirect stream length is not an integer.");
+            }
+            length = static_cast<std::size_t>(std::stoull(integerMatch[1].str()));
+        } else {
+            length = parseIntegerAfterKey(streamObject, "Length");
+        }
         if (dataBegin + length <= streamObject.size()) dataEnd = dataBegin + length;
     } catch (...) {
     }
@@ -1071,7 +1179,8 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
 
     std::string decoded = extractStreamData(object);
     if (object.find("/FlateDecode") != std::string::npos) {
-        decoded = applyFlateDecodeParms(object, inflateZlib(decoded));
+        decoded = applyFlateDecodeParms(
+            object, inflateZlib(decoded, readerOptions_.limits.maxDecodedStreamSize));
     }
     else if (object.find("/Filter") != std::string::npos) {
         throw PdfException(PdfErrorCode::MalformedXref, "Unsupported filter in xref stream.");
@@ -1159,7 +1268,9 @@ void PdfDocument::parseClassicXref(std::uint64_t offset64) {
         std::uint32_t firstObject{};
         std::uint32_t count{};
         subsectionStream >> firstObject >> count;
-        if (!subsectionStream || count == 0) {
+        // Empty subsections (for example `0 0`) are legal and occur in
+        // PDFs produced by several desktop applications.
+        if (!subsectionStream) {
             throw PdfException(PdfErrorCode::MalformedXref,
                                "Malformed xref subsection header: " + subsection);
         }
@@ -1171,10 +1282,22 @@ void PdfDocument::parseClassicXref(std::uint64_t offset64) {
             std::uint32_t generation{};
             char state{};
             entryStream >> entryOffset >> generation >> state;
-            if (!entryStream || generation > std::numeric_limits<std::uint16_t>::max() ||
-                (state != 'n' && state != 'f')) {
+            if (!entryStream || (state != 'n' && state != 'f')) {
                 throw PdfException(PdfErrorCode::MalformedXref,
                                    "Malformed xref entry: " + line);
+            }
+
+            // The PDF generation field is formally limited to uint16. In
+            // practice, damaged producers occasionally write 65536 (or a
+            // larger value) while keeping the object offset and state valid.
+            // MuPDF-style recovery keeps the usable entry instead of
+            // rejecting the entire document; strict mode still reports it.
+            if (generation > std::numeric_limits<std::uint16_t>::max()) {
+                if (readerOptions_.strictParsing || !readerOptions_.repairDamagedXref) {
+                    throw PdfException(PdfErrorCode::MalformedXref,
+                                       "Malformed xref entry: " + line);
+                }
+                generation = std::numeric_limits<std::uint16_t>::max();
             }
 
             PdfXrefEntry entry{};
@@ -1191,9 +1314,7 @@ void PdfDocument::parseClassicXref(std::uint64_t offset64) {
         throw PdfException(PdfErrorCode::TrailerNotFound, "Trailer dictionary was not found after xref table.");
     }
     const std::size_t end = findDictionaryEnd(bytes_, pos);
-    const std::string currentTrailer(
-        bytes_.begin() + static_cast<std::ptrdiff_t>(pos),
-        bytes_.begin() + static_cast<std::ptrdiff_t>(end));
+    const std::string currentTrailer(bytes_.data() + pos, end - pos);
 
     if (trailerDictionary_.empty()) {
         trailerDictionary_ = currentTrailer;
@@ -1336,10 +1457,11 @@ std::string PdfDocument::recoverFromObjectStreams(std::uint32_t objectNumber) co
 
         try {
             const std::size_t count = parseIntegerAfterKey(objectStream, "N");
+            if (count > readerOptions_.limits.maxObjectStreamObjects) continue;
             const std::size_t first = parseIntegerAfterKey(objectStream, "First");
             std::string decoded = extractStreamData(objectStream);
             if (objectStream.find("/FlateDecode") != std::string::npos) {
-                decoded = inflateZlib(decoded);
+                decoded = inflateZlib(decoded, readerOptions_.limits.maxDecodedStreamSize);
             } else if (objectStream.find("/Filter") != std::string::npos) {
                 continue;
             }
@@ -1384,9 +1506,15 @@ std::string PdfDocument::readCompressedObject(std::uint32_t objectNumber,
                            "Compressed object references a stream that is not /Type /ObjStm.");
     }
     const std::size_t count = parseIntegerAfterKey(objectStream, "N");
+    if (count > readerOptions_.limits.maxObjectStreamObjects) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Object stream exceeds configured object count limit.");
+    }
     const std::size_t first = parseIntegerAfterKey(objectStream, "First");
     std::string decoded = extractStreamData(objectStream);
-    if (objectStream.find("/FlateDecode") != std::string::npos) decoded = inflateZlib(decoded);
+    if (objectStream.find("/FlateDecode") != std::string::npos) {
+        decoded = inflateZlib(decoded, readerOptions_.limits.maxDecodedStreamSize);
+    }
     else if (objectStream.find("/Filter") != std::string::npos) {
         throw PdfException(PdfErrorCode::MalformedObject, "Unsupported filter in object stream.");
     }
@@ -1637,7 +1765,7 @@ PdfDocumentInfo PdfDocument::documentInfo() const {
 }
 
 PdfPageInfo PdfDocument::pageInfo(const std::size_t pageIndex) const {
-    const auto pages = pageReferences();
+    const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) {
         throw PdfException(PdfErrorCode::InvalidPageTree, "Page index is out of range.");
     }
@@ -1682,6 +1810,10 @@ void PdfDocument::collectPageReferences(const PdfReference& reference,
     const std::string object = readIndirectObject(reference.objectNumber);
     const std::string type = parseNameAfterKey(object, "Type");
     if (type == "Page") {
+        if (pages.size() >= readerOptions_.limits.maxPageCount) {
+            throw PdfException(PdfErrorCode::InvalidPageTree,
+                               "PDF page count exceeds configured limit.");
+        }
         pages.push_back(reference);
         visiting[reference.objectNumber] = false;
         return;
@@ -1696,7 +1828,7 @@ void PdfDocument::collectPageReferences(const PdfReference& reference,
     visiting[reference.objectNumber] = false;
 }
 
-std::vector<PdfReference> PdfDocument::pageReferences() const {
+const std::vector<PdfReference>& PdfDocument::pageReferences() const {
     if (!pageReferencesCached_) {
         const auto root = findRootReference();
         const auto catalog = readIndirectObject(root.objectNumber);
@@ -1990,11 +2122,14 @@ std::string PdfDocument::extractPageTextFromReference(
     const StreamDecoder decoder = [this](const PdfReference& reference) {
         return decodeContentStream(readIndirectObject(reference.objectNumber));
     };
+    std::string content;
     for (const auto& contentRef : contentReferences(pageObject)) {
-        request.sourceObjectNumber = contentRef.objectNumber;
-        const auto decoded = decoder(contentRef);
+        if (!content.empty()) content.push_back('\n');
+        content += decoder(contentRef);
+    }
+    if (!content.empty()) {
         extractContentRecursively(
-            *this, decoded, resources, request, decoder, activeForms, 0U, chunks);
+            *this, content, resources, request, decoder, activeForms, 0U, chunks);
     }
     return PdfTextExtractor::BuildText(chunks, request);
 }
@@ -2025,7 +2160,7 @@ void PdfDocument::ClearObjectCache() const noexcept {
 }
 
 PdfPage PdfDocument::GetPage(const std::size_t pageIndex) const {
-    const auto refs = pageReferences();
+    const auto& refs = pageReferences();
     if (pageIndex >= refs.size()) {
         throw PdfException(PdfErrorCode::InvalidPageTree, "Page index is out of range.");
     }
@@ -2033,13 +2168,20 @@ PdfPage PdfDocument::GetPage(const std::size_t pageIndex) const {
     const std::string resources = findInheritedPageValue(pageObject, "Resources");
     std::vector<std::string> streams;
     for (const auto& ref : contentReferences(pageObject)) {
-        streams.push_back(decodeContentStream(readIndirectObject(ref.objectNumber)));
+        try {
+            streams.push_back(decodeContentStream(readIndirectObject(ref.objectNumber)));
+        } catch (const PdfException&) {
+            // A damaged optional content stream must not make the complete
+            // page unrenderable. Keep the stream slot empty so valid streams
+            // on the same page can still be painted.
+            streams.emplace_back();
+        }
     }
     return PdfPage(pageInfo(pageIndex), resources, std::move(streams));
 }
 
 PdfReference PdfDocument::GetPageReference(const std::size_t pageIndex) const {
-    const auto refs = pageReferences();
+    const auto& refs = pageReferences();
     if (pageIndex >= refs.size()) {
         throw PdfException(PdfErrorCode::InvalidPageTree, "Page index is out of range.");
     }
@@ -2047,7 +2189,7 @@ PdfReference PdfDocument::GetPageReference(const std::size_t pageIndex) const {
 }
 
 std::string PdfDocument::extractPageText(std::size_t pageIndex) const {
-    const auto pages = pageReferences();
+    const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) {
         throw PdfException(PdfErrorCode::InvalidPageTree,
                            "Page index " + std::to_string(pageIndex) + " is outside the document.");
@@ -2058,7 +2200,7 @@ std::string PdfDocument::extractPageText(std::size_t pageIndex) const {
 PdfTextPage PdfDocument::ExtractTextPage(
     std::size_t pageIndex,
     const PdfTextExtractionOptions& options) const {
-    const auto pages = pageReferences();
+    const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) {
         throw PdfException(PdfErrorCode::InvalidPageTree,
                            "Page index " + std::to_string(pageIndex) + " is outside the document.");
@@ -2071,7 +2213,7 @@ std::vector<PdfTextChunk> PdfDocument::ExtractTextChunks(
     const std::size_t pageIndex,
     const PdfTextExtractionRequest& inputRequest) const {
     auto request = inputRequest;
-    const auto pages = pageReferences();
+    const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) {
         throw PdfException(PdfErrorCode::InvalidPageTree,
                            "Page index " + std::to_string(pageIndex) + " is outside the document.");
@@ -2083,13 +2225,40 @@ std::vector<PdfTextChunk> PdfDocument::ExtractTextChunks(
     const StreamDecoder decoder = [this](const PdfReference& reference) {
         return decodeContentStream(readIndirectObject(reference.objectNumber));
     };
+    std::string content;
     for (const auto& contentRef : contentReferences(pageObject)) {
-        request.sourceObjectNumber = contentRef.objectNumber;
-        const auto decoded = decoder(contentRef);
+        if (!content.empty()) content.push_back('\n');
+        content += decoder(contentRef);
+    }
+    if (!content.empty()) {
         extractContentRecursively(
-            *this, decoded, resources, request, decoder, activeForms, 0U, chunks);
+            *this, content, resources, request, decoder, activeForms, 0U, chunks);
     }
     return chunks;
+}
+
+void PdfDocument::ForEachPageContentEvent(
+    const std::size_t pageIndex,
+    const PdfContentEventHandler& handler) const {
+    const auto& pages = pageReferences();
+    if (pageIndex >= pages.size()) {
+        throw PdfException(PdfErrorCode::InvalidPageTree,
+                           "Page index " + std::to_string(pageIndex) + " is outside the document.");
+    }
+
+    const std::string pageObject = readIndirectObject(pages[pageIndex].objectNumber);
+    const auto* resources = inheritedPageResources(*this, pages[pageIndex]);
+    std::string content;
+    for (const auto& contentReference : contentReferences(pageObject)) {
+        if (!content.empty()) content.push_back('\n');
+        content += decodeContentStream(readIndirectObject(contentReference.objectNumber));
+    }
+    std::unordered_set<std::uint64_t> activeForms;
+    const StreamDecoder decoder = [this](const PdfReference& reference) {
+        return decodeContentStream(readIndirectObject(reference.objectNumber));
+    };
+    processPageContentRecursively(*this, content, resources, {}, decoder,
+                                  activeForms, 0U, handler);
 }
 
 std::string PdfDocument::ExtractText(
@@ -2101,7 +2270,7 @@ std::string PdfDocument::ExtractText(
 std::vector<PdfExtractedImage> PdfDocument::ExtractImages(
     const std::size_t pageIndex,
     const PdfImageExtractionOptions& options) const {
-    const auto pages = pageReferences();
+    const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) {
         throw PdfException(PdfErrorCode::InvalidPageTree,
                            "Page index " + std::to_string(pageIndex) + " is outside the document.");
@@ -2114,15 +2283,20 @@ std::vector<PdfExtractedImage> PdfDocument::ExtractImages(
         return decodeContentStream(readIndirectObject(reference.objectNumber));
     };
     const std::array<double, 6> identity{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+    std::string content;
     for (const auto& contentRef : contentReferences(pageObject)) {
-        extractImagesRecursively(*this, decoder(contentRef), resources, identity,
+        if (!content.empty()) content.push_back('\n');
+        content += decoder(contentRef);
+    }
+    if (!content.empty()) {
+        extractImagesRecursively(*this, content, resources, identity,
             options, decoder, activeForms, 0U, images);
     }
     return images;
 }
 
 std::vector<std::string> PdfDocument::extractAllPageText() const {
-    const auto pages = pageReferences();
+    const auto& pages = pageReferences();
     std::vector<std::string> result;
     result.reserve(pages.size());
     for (const auto& page : pages) {

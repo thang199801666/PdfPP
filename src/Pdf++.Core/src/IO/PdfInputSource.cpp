@@ -62,6 +62,10 @@ std::uint64_t PdfFileInputSource::Size() const {
     return size_;
 }
 
+std::span<const char> PdfFileInputSource::View() const noexcept {
+    return {};
+}
+
 void PdfFileInputSource::Read(std::uint64_t offset, std::span<char> destination) {
     validateReadRange(Size(), offset, destination.size());
     if (destination.empty()) {
@@ -111,6 +115,10 @@ std::uint64_t PdfMemoryInputSource::Size() const {
     return static_cast<std::uint64_t>(bytes_.size());
 }
 
+std::span<const char> PdfMemoryInputSource::View() const noexcept {
+    return bytes_;
+}
+
 void PdfMemoryInputSource::Read(std::uint64_t offset, std::span<char> destination) {
     validateReadRange(Size(), offset, destination.size());
     if (!destination.empty()) {
@@ -143,7 +151,7 @@ class PdfMappedFileInputSource::Impl final {
 public:
     explicit Impl(std::filesystem::path sourcePath) : path(std::move(sourcePath)) {
 #if defined(_WIN32)
-        file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
                            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
         if (file == INVALID_HANDLE_VALUE) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open mapped PDF file.");
         LARGE_INTEGER length{};
@@ -197,6 +205,9 @@ PdfMappedFileInputSource::~PdfMappedFileInputSource() = default;
 PdfMappedFileInputSource::PdfMappedFileInputSource(PdfMappedFileInputSource&&) noexcept = default;
 PdfMappedFileInputSource& PdfMappedFileInputSource::operator=(PdfMappedFileInputSource&&) noexcept = default;
 std::uint64_t PdfMappedFileInputSource::Size() const { return impl_->size; }
+std::span<const char> PdfMappedFileInputSource::View() const noexcept {
+    return {impl_->data, static_cast<std::size_t>(impl_->size)};
+}
 void PdfMappedFileInputSource::Read(const std::uint64_t offset, const std::span<char> destination) {
     validateReadRange(impl_->size, offset, destination.size());
     if (!destination.empty()) std::memcpy(destination.data(), impl_->data + static_cast<std::size_t>(offset), destination.size());

@@ -1,4 +1,5 @@
 #include <CPPPdf/Filters/PdfFilterPipeline.hpp>
+#include <CPPPdf/PdfError.hpp>
 #include <CPPPdf/Objects/PdfObject.hpp>
 #include <CPPPdf/IO/PdfReader.hpp>
 #include <CPPPdf/Fonts/PdfFont.hpp>
@@ -205,6 +206,14 @@ int RunCoreTests() {
         std::byte{10}, std::byte{20}, std::byte{30},
         std::byte{15}, std::byte{25}, std::byte{35}};
     PDFPP_TEST_CHECK(std::equal(predicted.begin(), predicted.end(), expectedPredictor.begin(), expectedPredictor.end()));
+
+    bool rejectedDecodedLimit = false;
+    try {
+        (void)PdfFilterPipeline::DecodeFlate(compressed, 1U);
+    } catch (const PdfException&) {
+        rejectedDecodedLimit = true;
+    }
+    PDFPP_TEST_CHECK(rejectedDecodedLimit);
 
     const auto restoredChunks = PdfTextExtractor::ExtractChunks(
         "q 2 0 0 2 10 20 cm BT /F1 10 Tf 1 0 0 1 1 1 Tm (A) Tj ET Q "

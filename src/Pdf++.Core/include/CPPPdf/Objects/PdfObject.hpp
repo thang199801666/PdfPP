@@ -66,6 +66,7 @@ public:
     [[nodiscard]] bool empty() const noexcept { return values_.empty(); }
     [[nodiscard]] const PdfObject& at(std::size_t index) const;
     [[nodiscard]] PdfObject& at(std::size_t index);
+    void reserve(std::size_t capacity);
     void push_back(PdfObject value);
     [[nodiscard]] const Storage& values() const noexcept { return values_; }
 private:
@@ -82,6 +83,7 @@ public:
     [[nodiscard]] std::optional<PdfName> GetAsName(const PdfName& key) const;
     [[nodiscard]] const PdfArray* GetAsArray(const PdfName& key) const noexcept;
     [[nodiscard]] const PdfDictionary* GetAsDictionary(const PdfName& key) const noexcept;
+    void reserve(std::size_t capacity);
     void Put(PdfName key, PdfObject value);
     bool Remove(const PdfName& key);
     [[nodiscard]] const Storage& values() const noexcept { return values_; }

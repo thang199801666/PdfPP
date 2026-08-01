@@ -196,7 +196,10 @@ std::array<std::uint8_t, 7> Glyph(const char input) noexcept {
     case '/': return {1,2,2,4,8,8,16}; case ':': return {0,12,12,0,12,12,0};
     case '(': return {2,4,8,8,8,4,2}; case ')': return {8,4,2,2,2,4,8};
     case ' ': return {0,0,0,0,0,0,0};
-    default: return {31,17,17,17,17,17,31};
+    // Do not paint an opaque fallback box for glyphs that the lightweight
+    // bitmap fallback cannot represent. Unsupported font encodings otherwise
+    // turn an entire text run into large black rectangles.
+    default: return {0,0,0,0,0,0,0};
     }
 }
 
@@ -215,7 +218,9 @@ void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
     const double pixelScaleY = std::max(1.0, (height * 0.82) / 7.0);
     for (std::size_t characterIndex = 0; characterIndex < chunk.utf8Text.size(); ++characterIndex) {
         const unsigned char raw = static_cast<unsigned char>(chunk.utf8Text[characterIndex]);
-        if (raw >= 0x80U) continue;
+        // Ignore UTF-8 continuation bytes and control characters. The
+        // fallback renderer only has a small printable ASCII glyph table.
+        if (raw < 0x20U || raw >= 0x80U) continue;
         const auto glyph = Glyph(static_cast<char>(raw));
         const double originX = left + static_cast<double>(characterIndex) * cellWidth;
         const double originY = top + (height - 7.0 * pixelScaleY) * 0.5;
@@ -392,16 +397,24 @@ PdfBitmap PdfPageRenderer::Render(
         std::vector<Subpath> paths;
         Subpath* current{};
         bool pendingClip{};
+        bool clipActive{};
         ClipMask clip(width * height, 1U);
-        std::vector<ClipMask> clipStack;
-        PdfContentProcessor processor;
-        processor.SetHandler([&](const PdfContentEvent& event) {
+        struct ClipState final {
+            ClipMask mask;
+            bool active{};
+        };
+        std::vector<ClipState> clipStack;
+        const PdfDocument::PdfContentEventHandler pathHandler = [&](const PdfContentEvent& event) {
             if (event.type == PdfContentEventType::SaveState) {
-                clipStack.push_back(clip);
+                clipStack.push_back({clip, clipActive});
                 return;
             }
             if (event.type == PdfContentEventType::RestoreState) {
-                if (!clipStack.empty()) { clip = std::move(clipStack.back()); clipStack.pop_back(); }
+                if (!clipStack.empty()) {
+                    clip = std::move(clipStack.back().mask);
+                    clipActive = clipStack.back().active;
+                    clipStack.pop_back();
+                }
                 return;
             }
             if (event.type != PdfContentEventType::RenderPath) return;
@@ -465,35 +478,60 @@ PdfBitmap PdfPageRenderer::Render(
                 if (pendingClip && (fill || stroke || op == "n")) {
                     auto newMask = CreatePathMask(width, height, paths);
                     for (std::size_t i = 0; i < clip.size(); ++i) clip[i] = static_cast<std::uint8_t>(clip[i] != 0U && newMask[i] != 0U);
+                    clipActive = true;
                     pendingClip = false;
                 }
                 if (fill || stroke) {
-                    PdfBitmap layer(width, height, {0U, 0U, 0U, 0U});
-                    if (fill) FillPath(layer, paths, ToColor(event.textState.fillColor));
-                    if (stroke) StrokePath(layer, paths, std::max(1.0, event.textState.lineWidth * scale), ToColor(event.textState.strokeColor));
-                    CompositeLayer(bitmap, layer, clip);
+                    if (!clipActive) {
+                        // The common case has no clipping path. Paint
+                        // directly into the page instead of allocating and
+                        // compositing a full-page temporary bitmap per path.
+                        if (fill) FillPath(bitmap, paths, ToColor(event.textState.fillColor));
+                        if (stroke) StrokePath(bitmap, paths,
+                                               std::max(1.0, event.textState.lineWidth * scale),
+                                               ToColor(event.textState.strokeColor));
+                    } else {
+                        PdfBitmap layer(width, height, {0U, 0U, 0U, 0U});
+                        if (fill) FillPath(layer, paths, ToColor(event.textState.fillColor));
+                        if (stroke) StrokePath(layer, paths,
+                                               std::max(1.0, event.textState.lineWidth * scale),
+                                               ToColor(event.textState.strokeColor));
+                        CompositeLayer(bitmap, layer, clip);
+                    }
                 }
                 if (fill || stroke || op == "n") {
                     paths.clear();
                     current = nullptr;
                 }
             }
-        });
-        for (const auto& content : page.GetContentStreams()) processor.Process(content);
+        };
+        // Process the page as one continuous content sequence and recurse
+        // into Form XObjects so vector content is not silently omitted.
+        document.ForEachPageContentEvent(pageIndex, pathHandler);
     }
 
     if (options.renderImages) {
         PdfImageExtractionOptions extractionOptions;
         extractionOptions.keepEncodedBytes = false;
         extractionOptions.decodeSupportedFilters = true;
-        for (const auto& image : document.ExtractImages(pageIndex, extractionOptions)) {
-            DrawImage(bitmap, image, mapper, options.interpolateImages);
+        try {
+            for (const auto& image : document.ExtractImages(pageIndex, extractionOptions)) {
+                DrawImage(bitmap, image, mapper, options.interpolateImages);
+            }
+        } catch (const PdfException&) {
+            // Continue with paths/text when one malformed image stream is
+            // present in an otherwise readable page.
         }
     }
 
     if (options.renderText) {
-        const auto chunks = document.ExtractTextChunks(pageIndex);
-        for (const auto& chunk : chunks) DrawTextChunk(bitmap, chunk, mapper, PdfRgbaColor::Black());
+        try {
+            const auto chunks = document.ExtractTextChunks(pageIndex);
+            for (const auto& chunk : chunks) DrawTextChunk(bitmap, chunk, mapper, PdfRgbaColor::Black());
+        } catch (const PdfException&) {
+            // Text extraction is best-effort during rendering. A malformed
+            // text stream should not discard already rendered page content.
+        }
     }
     return Downsample(bitmap, options.antiAliasSamples, options.background);
 }

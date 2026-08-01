@@ -33,7 +33,7 @@ std::vector<std::byte> makeMinimalPdf() {
 
     const std::size_t xrefOffset = pdf.size();
     std::ostringstream xref;
-    xref << "xref\n0 5\n0000000000 65535 f \n";
+    xref << "xref\n0 0\n0 5\n0000000000 65535 f \n";
     for (std::size_t i = 1; i < offsets.size(); ++i) {
         xref << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
     }
@@ -232,6 +232,21 @@ int RunReaderIntegrationTests() {
         boundedDocument.GetCachedObjectCount() > 1U) {
         std::cerr << "Bounded LRU object cache exceeded its configured capacity.\n";
         return 13;
+    }
+
+    CPPPdf::PdfReaderOptions pageLimitedOptions;
+    pageLimitedOptions.limits.maxPageCount = 0U;
+    auto pageLimitedDocument = CPPPdf::PdfDocument::Open(
+        std::span<const std::byte>(bytes), pageLimitedOptions);
+    try {
+        (void)pageLimitedDocument.GetPageCount();
+        std::cerr << "Expected page-count limit to reject the document.\n";
+        return 19;
+    } catch (const CPPPdf::PdfException& error) {
+        if (error.code() != CPPPdf::PdfErrorCode::InvalidPageTree) {
+            std::cerr << "Page-count limit returned the wrong error code.\n";
+            return 20;
+        }
     }
 
     const auto fontBytes = makeFontResourcePdf();

@@ -1,21 +1,76 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
   <ItemGroup>
-    <Filter Include="Public API\Core" /><Filter Include="Public API\Document" /><Filter Include="Public API\IO" /><Filter Include="Public API\Objects" /><Filter Include="Public API\Filters" /><Filter Include="Public API\Compatibility" /><Filter Include="Implementation\Document" /><Filter Include="Implementation\IO" /><Filter Include="Implementation\Objects" /><Filter Include="Implementation\Parsing" /><Filter Include="Implementation\Filters" /><Filter Include="Implementation\Internal" /><Filter Include="Public API\Fonts" /><Filter Include="Public API\Content" /><Filter Include="Public API\Writer" /><Filter Include="Public API\Graphics" /><Filter Include="Public API\Rendering" /><Filter Include="Implementation\Rendering" /><Filter Include="Implementation\Fonts" /><Filter Include="Implementation\Content" /><Filter Include="Implementation\Writer" /><Filter Include="Implementation\Graphics" /><Filter Include="Public API\Text" /><Filter Include="Implementation\Text" />
-  <Filter Include="Public API\Forms"><UniqueIdentifier>{A50F79C8-5115-4A18-A117-000000000091}</UniqueIdentifier></Filter><Filter Include="Public API\Annotations"><UniqueIdentifier>{B7F740F5-132B-4DAB-A4F8-60C4CE29315A}</UniqueIdentifier></Filter><Filter Include="Implementation\Forms"><UniqueIdentifier>{A50F79C8-5115-4A18-A117-000000000092}</UniqueIdentifier></Filter><Filter Include="Implementation\Annotations"><UniqueIdentifier>{E99FCF7F-0E5F-4373-BB39-2F7F2C151985}</UniqueIdentifier></Filter><ClInclude Include="include\CPPPdf\Writer\PdfFont.hpp"><Filter>Header Files\Writer</Filter></ClInclude><ClInclude Include="include\CPPPdf\Fonts\PdfTrueTypeFont.hpp"><Filter>Header Files\Fonts</Filter></ClInclude><ClInclude Include="include\CPPPdf\Text\PdfTextDocumentIndex.hpp"><Filter>Public API\Text</Filter></ClInclude></ItemGroup>
+    <ClInclude Include="include\CPPPdf\CPPPdf.hpp" />
+    <ClInclude Include="include\CPPPdf\Core\PdfTypes.hpp" />
+    <ClInclude Include="include\CPPPdf\Document\PdfDocument.hpp" />
+    <ClInclude Include="include\CPPPdf\Document\PdfPage.hpp" />
+    <ClInclude Include="include\CPPPdf\Document\PdfPageEditor.hpp" />
+    <ClInclude Include="include\CPPPdf\Filters\PdfFilterPipeline.hpp" />
+    <ClInclude Include="include\CPPPdf\IO\PdfReader.hpp" />
+    <ClInclude Include="include\CPPPdf\Objects\PdfObject.hpp" />
+    <ClInclude Include="include\CPPPdf\PdfDocument.hpp" />
+    <ClInclude Include="include\CPPPdf\PdfError.hpp" />
+    <ClInclude Include="include\CPPPdf\PdfPage.hpp" />
+    <ClInclude Include="include\CPPPdf\PdfReader.hpp" />
+    <ClInclude Include="src\Internal\Parsing\PdfObjectParser.hpp" />
+    <ClInclude Include="src\Internal\Document\PdfObjectResolver.hpp" />
+    <ClInclude Include="include\CPPPdf\Fonts\PdfFont.hpp" />
+    <ClInclude Include="include\CPPPdf\Fonts\PdfFontResource.hpp" />
+    <ClInclude Include="include\CPPPdf\Fonts\PdfTrueTypeFont.hpp" />
+    <ClInclude Include="include\CPPPdf\Content\PdfContentProcessor.hpp" />
+    <ClInclude Include="include\CPPPdf\Writer\PdfWriter.hpp" />
+    <ClInclude Include="include\CPPPdf\Graphics\PdfCanvas.hpp" />
+    <ClInclude Include="include\CPPPdf\Graphics\PdfImage.hpp" />
+    <ClInclude Include="include\CPPPdf\Rendering.hpp" />
+    <ClInclude Include="include\CPPPdf\Rendering\PdfBitmap.hpp" />
+    <ClInclude Include="include\CPPPdf\Rendering\PdfPageRenderer.hpp" />
+    <ClInclude Include="src\Writer\PdfWriterState.hpp" />
+    <ClInclude Include="include\CPPPdf\Text\PdfTextExtractor.hpp" />
+    <ClInclude Include="include\CPPPdf\Text\PdfTextSearch.hpp" />
+    <ClInclude Include="include\CPPPdf\Text\PdfTextDocumentIndex.hpp" />
+    <ClInclude Include="include\CPPPdf\Annotations\PdfKeywordHighlighter.hpp" />
+    <ClInclude Include="include\CPPPdf\Annotations\PdfAnnotationEditor.hpp" />
+    <ClInclude Include="include\CPPPdf\Document\PdfPageOrganizer.hpp" />
+    <ClInclude Include="include\CPPPdf\Document\PdfPageImporter.hpp" />
+    <ClInclude Include="src\Internal\Writer\PdfObjectSerializer.hpp" />
+    <ClInclude Include="include\CPPPdf\Forms\PdfAcroForm.hpp" />
+    <ClInclude Include="include\CPPPdf\Api.hpp" />
+    <ClInclude Include="include\CPPPdf\Version.hpp" />
+    <ClInclude Include="include\CPPPdf\Types.hpp" />
+    <ClInclude Include="include\CPPPdf\Reader.hpp" />
+    <ClInclude Include="include\CPPPdf\Document.hpp" />
+    <ClInclude Include="include\CPPPdf\Text.hpp" />
+    <ClInclude Include="include\CPPPdf\Graphics.hpp" />
+    <ClInclude Include="include\CPPPdf\Writer.hpp" />
+    <ClInclude Include="include\CPPPdf\Annotations.hpp" />
+    <ClInclude Include="include\CPPPdf\Forms.hpp" />
+  </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="include\CPPPdf\CPPPdf.hpp"><Filter>Public API</Filter></ClInclude>
-    <ClInclude Include="include\CPPPdf\Core\PdfTypes.hpp"><Filter>Public API\Core</Filter></ClInclude>
-    <ClInclude Include="include\CPPPdf\Document\PdfDocument.hpp"><Filter>Public API\Document</Filter></ClInclude><ClInclude Include="include\CPPPdf\Document\PdfPage.hpp"><Filter>Public API\Document</Filter></ClInclude><ClInclude Include="include\CPPPdf\Document\PdfPageEditor.hpp"><Filter>Public API\Document</Filter></ClInclude><ClInclude Include="include\CPPPdf\Document\PdfPageOrganizer.hpp"><Filter>Public API\Document</Filter></ClInclude><ClInclude Include="include\CPPPdf\Document\PdfPageImporter.hpp"><Filter>Public API\Document</Filter></ClInclude>
-    <ClInclude Include="include\CPPPdf\IO\PdfReader.hpp"><Filter>Public API\IO</Filter></ClInclude><ClInclude Include="include\CPPPdf\Objects\PdfObject.hpp"><Filter>Public API\Objects</Filter></ClInclude><ClInclude Include="include\CPPPdf\Filters\PdfFilterPipeline.hpp"><Filter>Public API\Filters</Filter></ClInclude>
-    <ClInclude Include="include\CPPPdf\PdfDocument.hpp"><Filter>Public API\Compatibility</Filter></ClInclude><ClInclude Include="include\CPPPdf\PdfPage.hpp"><Filter>Public API\Compatibility</Filter></ClInclude><ClInclude Include="include\CPPPdf\PdfReader.hpp"><Filter>Public API\Compatibility</Filter></ClInclude><ClInclude Include="include\CPPPdf\PdfError.hpp"><Filter>Public API\Compatibility</Filter></ClInclude>
-    <ClInclude Include="src\Internal\Parsing\PdfObjectParser.hpp"><Filter>Implementation\Internal</Filter></ClInclude><ClInclude Include="src\Internal\Writer\PdfObjectSerializer.hpp"><Filter>Implementation\Internal</Filter></ClInclude><ClInclude Include="src\Internal\Document\PdfObjectResolver.hpp"><Filter>Implementation\Internal</Filter></ClInclude>
-  <ClInclude Include="include\CPPPdf\Fonts\PdfFontResource.hpp">
-      <Filter>Public API\Fonts</Filter>
-    </ClInclude>
-    <ClInclude Include="include\CPPPdf\Fonts\PdfFont.hpp"><Filter>Public API\Fonts</Filter></ClInclude><ClInclude Include="include\CPPPdf\Content\PdfContentProcessor.hpp"><Filter>Public API\Content</Filter></ClInclude><ClInclude Include="include\CPPPdf\Writer\PdfWriter.hpp"><Filter>Public API\Writer</Filter></ClInclude><ClInclude Include="include\CPPPdf\Graphics\PdfCanvas.hpp"><Filter>Public API\Graphics</Filter></ClInclude><ClInclude Include="include\CPPPdf\Graphics\PdfImage.hpp"><Filter>Public API\Graphics</Filter></ClInclude><ClInclude Include="include\CPPPdf\Rendering.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Rendering\PdfBitmap.hpp"><Filter>Public API\Rendering</Filter></ClInclude><ClInclude Include="include\CPPPdf\Rendering\PdfPageRenderer.hpp"><Filter>Public API\Rendering</Filter></ClInclude><ClInclude Include="src\Writer\PdfWriterState.hpp"><Filter>Implementation\Internal</Filter></ClInclude><ClInclude Include="include\CPPPdf\Text\PdfTextExtractor.hpp"><Filter>Public API\Text</Filter></ClInclude><ClInclude Include="include\CPPPdf\Text\PdfTextSearch.hpp"><Filter>Public API\Text</Filter></ClInclude><ClInclude Include="include\CPPPdf\Annotations\PdfKeywordHighlighter.hpp"><Filter>Public API\Annotations</Filter></ClInclude><ClInclude Include="include\CPPPdf\Annotations\PdfAnnotationEditor.hpp"><Filter>Public API\Annotations</Filter></ClInclude><ClInclude Include="include\CPPPdf\Forms\PdfAcroForm.hpp"><Filter>Public API\Forms</Filter></ClInclude><ClInclude Include="include\CPPPdf\Api.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Version.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Types.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Reader.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Document.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Text.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Graphics.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Writer.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Annotations.hpp"><Filter>Public API</Filter></ClInclude><ClInclude Include="include\CPPPdf\Forms.hpp"><Filter>Public API</Filter></ClInclude></ItemGroup>
-  <ItemGroup><ClCompile Include="src\Document\PdfDocument.cpp"><Filter>Implementation\Document</Filter></ClCompile><ClCompile Include="src\Document\PdfObjectResolver.cpp"><Filter>Implementation\Document</Filter></ClCompile><ClCompile Include="src\Document\PdfPageEditor.cpp"><Filter>Implementation\Document</Filter></ClCompile><ClCompile Include="src\Document\PdfPageOrganizer.cpp"><Filter>Implementation\Document</Filter></ClCompile><ClCompile Include="src\Document\PdfPageImporter.cpp"><Filter>Implementation\Document</Filter></ClCompile><ClCompile Include="src\Internal\Writer\PdfObjectSerializer.cpp"><Filter>Implementation\Writer</Filter></ClCompile><ClCompile Include="src\IO\PdfInputSource.cpp"><Filter>Implementation\IO</Filter></ClCompile><ClCompile Include="src\Objects\PdfObject.cpp"><Filter>Implementation\Objects</Filter></ClCompile><ClCompile Include="src\Parsing\PdfObjectParser.cpp"><Filter>Implementation\Parsing</Filter></ClCompile><ClCompile Include="src\Filters\PdfFilterPipeline.cpp"><Filter>Implementation\Filters</Filter></ClCompile><ClCompile Include="src\Fonts\PdfFontResource.cpp">
-      <Filter>Implementation\Fonts</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Fonts\PdfFont.cpp"><Filter>Implementation\Fonts</Filter></ClCompile><ClCompile Include="src\Content\PdfContentProcessor.cpp"><Filter>Implementation\Content</Filter></ClCompile><ClCompile Include="src\Writer\PdfWriter.cpp"><Filter>Implementation\Writer</Filter></ClCompile><ClCompile Include="src\Graphics\PdfCanvas.cpp"><Filter>Implementation\Graphics</Filter></ClCompile><ClCompile Include="src\Graphics\PdfImage.cpp"><Filter>Implementation\Graphics</Filter></ClCompile><ClCompile Include="src\Rendering\PdfBitmap.cpp"><Filter>Implementation\Rendering</Filter></ClCompile><ClCompile Include="src\Rendering\PdfPageRenderer.cpp"><Filter>Implementation\Rendering</Filter></ClCompile><ClCompile Include="src\Text\PdfTextExtractor.cpp"><Filter>Implementation\Text</Filter></ClCompile><ClCompile Include="src\Text\PdfTextSearch.cpp"><Filter>Implementation\Text</Filter></ClCompile><ClCompile Include="src\Text\PdfTextDocumentIndex.cpp"><Filter>Implementation\Text</Filter></ClCompile><ClCompile Include="src\Annotations\PdfKeywordHighlighter.cpp"><Filter>Implementation\Annotations</Filter></ClCompile><ClCompile Include="src\Annotations\PdfAnnotationEditor.cpp"><Filter>Implementation\Annotations</Filter></ClCompile><ClCompile Include="src\Forms\PdfAcroForm.cpp"><Filter>Implementation\Forms</Filter></ClCompile><ClCompile Include="src\Fonts\PdfTrueTypeFont.cpp"><Filter>Source Files\Fonts</Filter></ClCompile></ItemGroup>
+    <ClCompile Include="src\Document\PdfDocument.cpp" />
+    <ClCompile Include="src\Document\PdfObjectResolver.cpp" />
+    <ClCompile Include="src\Document\PdfPageEditor.cpp" />
+    <ClCompile Include="src\Filters\PdfFilterPipeline.cpp" />
+    <ClCompile Include="src\IO\PdfInputSource.cpp" />
+    <ClCompile Include="src\Objects\PdfObject.cpp" />
+    <ClCompile Include="src\Parsing\PdfObjectParser.cpp" />
+    <ClCompile Include="src\Fonts\PdfFont.cpp" />
+    <ClCompile Include="src\Fonts\PdfFontResource.cpp" />
+    <ClCompile Include="src\Fonts\PdfTrueTypeFont.cpp" />
+    <ClCompile Include="src\Content\PdfContentProcessor.cpp" />
+    <ClCompile Include="src\Writer\PdfWriter.cpp" />
+    <ClCompile Include="src\Graphics\PdfCanvas.cpp" />
+    <ClCompile Include="src\Graphics\PdfImage.cpp" />
+    <ClCompile Include="src\Rendering\PdfBitmap.cpp" />
+    <ClCompile Include="src\Rendering\PdfPageRenderer.cpp" />
+    <ClCompile Include="src\Text\PdfTextExtractor.cpp" />
+    <ClCompile Include="src\Text\PdfTextSearch.cpp" />
+    <ClCompile Include="src\Text\PdfTextDocumentIndex.cpp" />
+    <ClCompile Include="src\Annotations\PdfKeywordHighlighter.cpp" />
+    <ClCompile Include="src\Annotations\PdfAnnotationEditor.cpp" />
+    <ClCompile Include="src\Document\PdfPageOrganizer.cpp" />
+    <ClCompile Include="src\Document\PdfPageImporter.cpp" />
+    <ClCompile Include="src\Internal\Writer\PdfObjectSerializer.cpp" />
+    <ClCompile Include="src\Forms\PdfAcroForm.cpp" />
+  </ItemGroup>
 </Project>
