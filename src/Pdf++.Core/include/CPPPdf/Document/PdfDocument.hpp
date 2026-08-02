@@ -10,8 +10,10 @@
 #include <optional>
 #include <istream>
 #include <span>
+#include <string_view>
 #include <cstddef>
 #include <functional>
+#include <list>
 #include <CPPPdf/IO/PdfReader.hpp>
 #include <CPPPdf/Core/PdfTypes.hpp>
 #include <CPPPdf/Content/PdfContentProcessor.hpp>
@@ -22,7 +24,8 @@
 namespace CPPPdf {
 
 class PdfPage;
-namespace Internal { class PdfObjectResolver; }
+class PdfFontResource;
+namespace Internal { class PdfObjectResolver; class PdfStandardSecurity; class PdfIncrementalWriter; }
 
 struct PdfXrefEntry {
     enum class Type : std::uint8_t { Free = 0, Uncompressed = 1, Compressed = 2 };
@@ -36,7 +39,7 @@ struct PdfXrefEntry {
 
 class PdfDocument final {
 public:
-    PdfDocument() = default;
+    PdfDocument();
     ~PdfDocument();
     PdfDocument(PdfDocument&&) noexcept;
     PdfDocument& operator=(PdfDocument&&) noexcept;
@@ -63,7 +66,11 @@ public:
     [[nodiscard]] std::size_t xrefEntryCount() const noexcept { return GetXrefEntryCount(); }
     [[nodiscard]] std::size_t pageCount() const;
     [[nodiscard]] const std::string& GetTrailerDictionary() const noexcept { return trailerDictionary_; }
-    [[nodiscard]] bool IsEncrypted() const noexcept { return trailerDictionary_.find("/Encrypt") != std::string::npos; }
+    [[nodiscard]] bool IsEncrypted() const noexcept { return encryption_ != nullptr; }
+    [[nodiscard]] bool IsPasswordRequired() const noexcept;
+    [[nodiscard]] bool AuthenticatePassword(std::string_view password);
+    [[nodiscard]] bool IsOwnerPasswordAuthenticated() const noexcept;
+    [[nodiscard]] std::int32_t GetPermissionBits() const noexcept;
     [[nodiscard]] const std::string& trailerDictionary() const noexcept { return GetTrailerDictionary(); }
     [[nodiscard]] bool isEncrypted() const noexcept { return IsEncrypted(); }
     [[nodiscard]] PdfDocumentInfo documentInfo() const;
@@ -73,6 +80,7 @@ public:
 
     [[nodiscard]] std::string readIndirectObject(std::uint32_t objectNumber) const;
     [[nodiscard]] std::vector<std::uint32_t> objectNumbers() const;
+    [[nodiscard]] std::optional<PdfXrefEntry> GetXrefEntry(std::uint32_t objectNumber) const;
     [[nodiscard]] const PdfObject& GetObject(const PdfReference& reference) const;
     [[nodiscard]] PdfPage GetPage(std::size_t pageIndex) const;
     [[nodiscard]] PdfReference GetPageReference(std::size_t pageIndex) const;
@@ -82,6 +90,19 @@ public:
     [[nodiscard]] const PdfReaderOptions& readerOptions() const noexcept { return readerOptions_; }
     [[nodiscard]] std::size_t GetCachedObjectCount() const noexcept;
     [[nodiscard]] std::size_t GetObjectCacheCapacity() const noexcept;
+    [[nodiscard]] std::size_t GetCachedObjectStreamCount() const noexcept;
+    [[nodiscard]] std::size_t GetCachedObjectStreamBytes() const noexcept;
+    [[nodiscard]] std::size_t GetObjectStreamCacheHits() const noexcept;
+    [[nodiscard]] std::size_t GetObjectStreamCacheMisses() const noexcept;
+    [[nodiscard]] std::shared_ptr<const PdfFontResource> GetCachedFontResource(
+        PdfReference reference) const;
+    [[nodiscard]] std::size_t GetCachedFontResourceCount() const noexcept;
+    [[nodiscard]] std::size_t GetFontResourceCacheHits() const noexcept;
+    [[nodiscard]] std::size_t GetFontResourceCacheMisses() const noexcept;
+    [[nodiscard]] std::size_t GetCachedContentStreamCount() const noexcept;
+    [[nodiscard]] std::size_t GetCachedContentStreamBytes() const noexcept;
+    [[nodiscard]] std::size_t GetContentStreamCacheHits() const noexcept;
+    [[nodiscard]] std::size_t GetContentStreamCacheMisses() const noexcept;
     void ClearObjectCache() const noexcept;
 
     // pageIndex is zero-based.
@@ -112,12 +133,30 @@ public:
         const PdfImageExtractionOptions& options = {}) const;
 
 private:
+    struct DecodedObjectStream {
+        std::string decoded;
+        std::size_t first{};
+        std::vector<std::pair<std::uint32_t, std::size_t>> objects;
+    };
+
+    struct ObjectStreamCacheEntry {
+        std::shared_ptr<const DecodedObjectStream> stream;
+        std::list<std::uint32_t>::iterator recency;
+    };
+
+    friend class Internal::PdfIncrementalWriter;
+    friend class PdfWriter;
     void parse();
     void parseHeader();
     [[nodiscard]] std::uint64_t findStartXref() const;
+    [[nodiscard]] std::vector<std::uint64_t> findRecoveredXrefOffsets() const;
     void parseXrefSection(std::uint64_t offset);
     void parseClassicXref(std::uint64_t offset);
     void parseXrefStream(std::uint64_t offset);
+    void initializeEncryption();
+    [[nodiscard]] std::string readRawIndirectObject(std::uint32_t objectNumber) const;
+    [[nodiscard]] std::string EncryptObjectForIncrementalWrite(
+        std::string_view object, const PdfReference& reference) const;
     [[nodiscard]] PdfReference findRootReference() const;
     [[nodiscard]] PdfReference findPagesReference(const std::string& catalogObject) const;
     [[nodiscard]] std::size_t countPagesFromNode(const PdfReference& reference,
@@ -129,34 +168,40 @@ private:
     [[nodiscard]] const std::vector<PdfReference>& pageReferences() const;
     [[nodiscard]] std::vector<PdfReference> contentReferences(const std::string& pageObject) const;
     [[nodiscard]] std::string decodeContentStream(const std::string& streamObject) const;
+    [[nodiscard]] std::string decodeContentStreamReference(const PdfReference& reference) const;
     [[nodiscard]] std::string readCompressedObject(std::uint32_t objectNumber,
                                                    const PdfXrefEntry& entry) const;
+    [[nodiscard]] std::shared_ptr<const DecodedObjectStream> loadObjectStream(
+        std::uint32_t objectStreamNumber) const;
     [[nodiscard]] std::string recoverIndirectObject(std::uint32_t objectNumber) const;
     [[nodiscard]] std::string recoverFromObjectStreams(std::uint32_t objectNumber) const;
+    [[nodiscard]] std::string_view extractStreamDataView(const std::string& streamObject) const;
     [[nodiscard]] std::string extractStreamData(const std::string& streamObject) const;
-    [[nodiscard]] static std::vector<std::size_t> parseIntegerArrayAfterKey(
-        const std::string& dictionary, const std::string& key);
     [[nodiscard]] static std::string extractTextOperators(const std::string& content,
                                                            const PdfTextExtractionOptions& options);
 
     [[nodiscard]] static PdfReference parseReferenceAfterKey(const std::string& dictionary,
-                                                             const std::string& key);
+                                                             const std::string& key,
+                                                             std::size_t maxDepth);
     [[nodiscard]] static std::vector<PdfReference> parseReferenceArrayAfterKey(const std::string& dictionary,
-                                                                               const std::string& key);
+                                                                               const std::string& key,
+                                                                               std::size_t maxDepth);
     [[nodiscard]] static std::string parseNameAfterKey(const std::string& dictionary,
-                                                       const std::string& key);
+                                                       const std::string& key,
+                                                       std::size_t maxDepth);
     [[nodiscard]] static std::string parseStringAfterKey(const std::string& dictionary,
-                                                         const std::string& key);
-    [[nodiscard]] static std::vector<double> parseNumberArrayAfterKey(const std::string& dictionary,
-                                                                      const std::string& key);
-    [[nodiscard]] std::string findInheritedPageValue(std::string pageObject,
-                                                     const std::string& key) const;
+                                                          const std::string& key,
+                                                          std::size_t maxDepth);
+    [[nodiscard]] PdfObject findInheritedPageValue(const std::string& pageObject,
+                                                   const std::string& key,
+                                                   std::size_t maxDepth) const;
     [[nodiscard]] std::string extractPageTextFromReference(
         const PdfReference& pageReference,
         const PdfTextExtractionOptions& options = {}) const;
 
     [[nodiscard]] static std::size_t parseIntegerAfterKey(const std::string& dictionary,
-                                                          const std::string& key);
+                                                          const std::string& key,
+                                                          std::size_t maxDepth);
 
     std::filesystem::path path_;
     std::unique_ptr<PdfInputSource> source_;
@@ -169,7 +214,23 @@ private:
     mutable bool pageReferencesCached_{false};
     mutable std::vector<PdfReference> pageReferencesCache_;
     std::string trailerDictionary_;
+    std::optional<PdfReference> encryptionReference_;
+    std::unique_ptr<Internal::PdfStandardSecurity> encryption_;
     mutable std::unique_ptr<Internal::PdfObjectResolver> objectResolver_;
+    mutable std::unordered_map<std::uint32_t, ObjectStreamCacheEntry> objectStreamCache_;
+    mutable std::list<std::uint32_t> objectStreamRecency_;
+    mutable std::size_t cachedObjectStreamBytes_{};
+    mutable std::size_t objectStreamCacheHits_{};
+    mutable std::size_t objectStreamCacheMisses_{};
+    mutable std::unordered_map<std::uint64_t, std::shared_ptr<PdfFontResource>> fontResourceCache_;
+    mutable std::list<std::uint64_t> fontResourceRecency_;
+    mutable std::size_t fontResourceCacheHits_{};
+    mutable std::size_t fontResourceCacheMisses_{};
+    mutable std::unordered_map<std::uint64_t, std::shared_ptr<const std::string>> contentStreamCache_;
+    mutable std::list<std::uint64_t> contentStreamRecency_;
+    mutable std::size_t cachedContentStreamBytes_{};
+    mutable std::size_t contentStreamCacheHits_{};
+    mutable std::size_t contentStreamCacheMisses_{};
 };
 
 } // namespace CPPPdf

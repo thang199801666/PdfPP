@@ -16,5 +16,6 @@
 #include <CPPPdf/Graphics.hpp>
 #include <CPPPdf/Rendering.hpp>
 #include <CPPPdf/Writer.hpp>
+#include <CPPPdf/Security/PdfSecurity.hpp>
 #include <CPPPdf/Annotations.hpp>
 #include <CPPPdf/Forms.hpp>

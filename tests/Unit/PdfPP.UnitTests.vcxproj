@@ -52,6 +52,7 @@
     <ClCompile Include="WriterIntegrationTests.cpp" />
     <ClCompile Include="ApiCoverageTests.cpp" />
     <ClCompile Include="FeatureUnitTests.cpp" />
+    <ClCompile Include="SecurityTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Pdf++.Core\Pdf++.Core.vcxproj">

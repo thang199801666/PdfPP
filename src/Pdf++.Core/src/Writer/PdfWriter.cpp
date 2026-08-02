@@ -1,5 +1,12 @@
 #include <CPPPdf/Writer/PdfWriter.hpp>
+#include <CPPPdf/Document/PdfDocument.hpp>
+#include <CPPPdf/IO/PdfReader.hpp>
+#include <CPPPdf/Objects/PdfObject.hpp>
+#include <CPPPdf/PdfError.hpp>
 #include "PdfWriterState.hpp"
+#include "Internal/Security/PdfStandardSecurity.hpp"
+#include "Internal/Writer/PdfObjectCollectionWriter.hpp"
+#include "Internal/Writer/PdfObjectSerializer.hpp"
 #include <zlib.h>
 #include <algorithm>
 #include <cmath>
@@ -8,6 +15,8 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 
 namespace CPPPdf {
@@ -23,6 +32,35 @@ namespace {
     if (status != Z_OK) throw std::runtime_error("Cannot compress image stream.");
     output.resize(outputSize);
     return output;
+}
+
+void collectReferencesFromObject(const PdfObject& object, std::vector<PdfReference>& references) {
+    switch (object.type()) {
+    case PdfObjectType::IndirectReference: {
+        const auto pair = *object.AsReference();
+        references.push_back(PdfReference{pair.first, pair.second});
+        break;
+    }
+    case PdfObjectType::Array:
+        for (const auto& value : object.AsArray()->values()) {
+            collectReferencesFromObject(value, references);
+        }
+        break;
+    case PdfObjectType::Dictionary:
+        for (const auto& [key, value] : object.AsDictionary()->values()) {
+            (void)key;
+            collectReferencesFromObject(value, references);
+        }
+        break;
+    case PdfObjectType::Stream:
+        for (const auto& [key, value] : object.AsStream()->dictionary().values()) {
+            (void)key;
+            collectReferencesFromObject(value, references);
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 
@@ -556,6 +594,19 @@ void PdfWriter::AddWatermarkToAllPages(const PdfWatermarkOptions& options) {
     for (std::size_t i=0;i<state_->pages.size();++i) AddWatermark(i, options);
 }
 
+void PdfWriter::SetEncryption(const PdfEncryptionOptions& options) {
+    if (options.userPassword.size() > 32U || options.ownerPassword.size() > 32U) {
+        throw std::invalid_argument("PDF AES-128/RC4-128 passwords are limited to 32 bytes.");
+    }
+    state_->encryption = options;
+}
+
+void PdfWriter::ClearEncryption() noexcept { state_->encryption.reset(); }
+bool PdfWriter::HasEncryption() const noexcept { return state_->encryption.has_value(); }
+const PdfEncryptionOptions* PdfWriter::GetEncryptionOptions() const noexcept {
+    return state_->encryption ? &*state_->encryption : nullptr;
+}
+
 void PdfWriter::Save(const std::filesystem::path& path, PdfSaveMode mode) const {
     PdfSaveOptions options; options.mode = mode; Save(path, options);
 }
@@ -585,9 +636,16 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             }
         }
     }
+
     std::vector<std::string> objects(1);
     auto allocate=[&](){ objects.emplace_back(); return static_cast<int>(objects.size()-1); };
     const int catalog=allocate(), pages=allocate(), base14Font=allocate();
+    const int encryptionObject = state_->encryption ? allocate() : 0;
+    const auto fileId = Internal::GeneratePdfFileId();
+    const auto security = state_->encryption
+        ? std::optional<Internal::PdfStandardSecurity>(
+            Internal::PdfStandardSecurity::Create(*state_->encryption, fileId))
+        : std::nullopt;
     const bool hasDocumentInfo = !state_->documentInfo.title.empty() || !state_->documentInfo.author.empty() ||
         !state_->documentInfo.subject.empty() || !state_->documentInfo.keywords.empty() ||
         !state_->documentInfo.creator.empty() || !state_->documentInfo.producer.empty() ||
@@ -916,6 +974,168 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             objects[attachmentIds[i][j]] = annotation.str();
         }
     }
-    out<<"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n";std::vector<std::uint64_t> offsets(objects.size());for(std::size_t i=1;i<objects.size();++i){offsets[i]=static_cast<std::uint64_t>(out.tellp());out<<i<<" 0 obj\n";out.write(objects[i].data(),static_cast<std::streamsize>(objects[i].size()));out<<"\nendobj\n";}const auto xref=static_cast<std::uint64_t>(out.tellp());out<<"xref\n0 "<<objects.size()<<"\n0000000000 65535 f \n";for(std::size_t i=1;i<objects.size();++i)out<<std::setw(10)<<std::setfill('0')<<offsets[i]<<" 00000 n \n";out<<"trailer\n<< /Size "<<objects.size()<<" /Root "<<catalog<<" 0 R";if(hasDocumentInfo)out<<" /Info "<<infoObject<<" 0 R";out<<" >>\nstartxref\n"<<xref<<"\n%%EOF\n";
+    if (security) objects[encryptionObject] = security->EncryptionDictionary();
+
+    Internal::PdfObjectCollectionWriterOptions collectionOptions;
+    collectionOptions.writeXrefStream = options.writeXrefStream;
+    collectionOptions.writeObjectStreams = options.writeObjectStreams;
+    Internal::PdfObjectCollectionWriter::Write(
+        out, collectionOptions, objects,
+        static_cast<std::size_t>(catalog),
+        hasDocumentInfo ? static_cast<std::size_t>(infoObject) : 0U,
+        static_cast<std::size_t>(encryptionObject),
+        security ? &*security : nullptr,
+        fileId);
+}
+
+void PdfWriter::Resave(const PdfDocument& document,
+                       const std::filesystem::path& outputPath,
+                       const PdfSaveOptions& options) {
+    std::ofstream output(outputPath, std::ios::binary);
+    if (!output) throw std::runtime_error("Cannot create PDF output file");
+    if (options.mode == PdfSaveMode::Incremental) {
+        throw std::runtime_error("Incremental resave is not supported; use the incremental editors.");
+    }
+
+    const PdfReference root = document.GetCatalogReference();
+
+    // Collect every object reachable from the catalog (and the document /Info
+    // dictionary, which the trailer references directly). Missing objects are
+    // skipped so damaged sources still resave.
+    std::vector<std::string> objects(1);
+    std::unordered_map<std::uint32_t, std::uint32_t> remap;
+    std::vector<PdfReference> queue{root};
+    const auto infoReference = document.GetTrailerReference(PdfName("Info"));
+    if (infoReference) queue.push_back(*infoReference);
+    std::size_t pending = 0U;
+    std::size_t catalogObject = 0U;
+    std::size_t infoObject = 0U;
+    while (pending < queue.size()) {
+        const PdfReference reference = queue[pending++];
+        if (remap.contains(reference.objectNumber)) continue;
+        const PdfObject* parsed = nullptr;
+        try {
+            parsed = &document.GetObject(reference);
+        } catch (const PdfException&) {
+            continue;
+        }
+        if (parsed == nullptr) continue;
+        const std::uint32_t newNumber = static_cast<std::uint32_t>(objects.size());
+        remap[reference.objectNumber] = newNumber;
+        objects.emplace_back();
+        if (reference == root) catalogObject = newNumber;
+        if (infoReference && reference == *infoReference) infoObject = newNumber;
+        collectReferencesFromObject(*parsed, queue);
+    }
+    if (catalogObject == 0U) {
+        throw std::runtime_error("Resave: the document catalog could not be read.");
+    }
+
+    // Serialize every reachable object with remapped reference numbers. This
+    // first pass uses the provisional numbers so identical bodies can be
+    // recognized before the final numbering is assigned.
+    std::vector<std::string> provisional(objects.size());
+    for (const auto& [oldNumber, newNumber] : remap) {
+        (void)oldNumber;
+        std::ostringstream body;
+        const PdfObject& object = document.GetObject(PdfReference{oldNumber, 0U});
+        Internal::PdfObjectSerializer::WriteObject(body, object, [&remap](const PdfReference& reference) {
+            const auto mapped = remap.find(reference.objectNumber);
+            if (mapped == remap.end()) return reference;
+            return PdfReference{mapped->second, 0U};
+        });
+        provisional[newNumber] = body.str();
+    }
+
+    // Deduplicate byte-identical objects. Only streams (fonts, images, content
+    // streams) are merged: sharing a stream by reference is always safe, while
+    // two identical dictionaries can still be distinct entities (e.g. two
+    // empty page objects) that must not collapse into one.
+    std::vector<std::uint32_t> canonical(objects.size(), 0U);
+    if (options.deduplicateObjects) {
+        std::unordered_map<std::string_view, std::uint32_t> canonicalByBody;
+        for (std::uint32_t i = 1U; i < objects.size(); ++i) {
+            const std::string& body = provisional[i];
+            if (body.find("endstream") == std::string::npos) {
+                canonical[i] = i;
+                continue;
+            }
+            const auto found = canonicalByBody.find(body);
+            if (found == canonicalByBody.end()) {
+                canonicalByBody.emplace(body, i);
+                canonical[i] = i;
+            } else {
+                canonical[i] = found->second;
+            }
+        }
+    } else {
+        for (std::uint32_t i = 1U; i < objects.size(); ++i) canonical[i] = i;
+    }
+
+    // Compact the numbering: every canonical object keeps one final number.
+    std::vector<std::uint32_t> finalNumber(objects.size(), 0U);
+    std::uint32_t nextFinal = 1U;
+    for (std::uint32_t i = 1U; i < objects.size(); ++i) {
+        if (canonical[i] == i) finalNumber[i] = nextFinal++;
+    }
+
+    // Re-serialize with the final mapper so every reference (including the
+    // dropped duplicates) points at the surviving canonical object.
+    std::vector<std::string> deduped(nextFinal);
+    std::size_t catalogFinal = 0U;
+    std::size_t infoFinal = 0U;
+    for (const auto& [oldNumber, newNumber] : remap) {
+        const std::uint32_t final = finalNumber[canonical[newNumber]];
+        if (final == 0U) continue;
+        std::ostringstream body;
+        const PdfObject& object = document.GetObject(PdfReference{oldNumber, 0U});
+        Internal::PdfObjectSerializer::WriteObject(body, object,
+            [&remap, &canonical, &finalNumber](const PdfReference& reference) {
+                const auto mapped = remap.find(reference.objectNumber);
+                if (mapped == remap.end()) return reference;
+                return PdfReference{finalNumber[canonical[mapped->second]], 0U};
+            });
+        deduped[final] = body.str();
+        if (newNumber == catalogObject) catalogFinal = final;
+        if (infoObject != 0U && newNumber == infoObject) infoFinal = final;
+    }
+    objects = std::move(deduped);
+    catalogObject = catalogFinal;
+    infoObject = infoFinal;
+
+    const Internal::PdfStandardSecurity* security = nullptr;
+    std::array<std::uint8_t, 16> fileId{};
+    std::size_t encryptionObject = 0U;
+    if (document.IsEncrypted()) {
+        // Preserve the source encryption: reuse its security handler and file
+        // ID so the same passwords continue to unlock the resaved file.
+        security = document.encryption_.get();
+        fileId = document.encryption_->FileId();
+        encryptionObject = objects.size();
+        objects.emplace_back();
+        objects[encryptionObject] = security->EncryptionDictionary();
+    } else {
+        fileId = Internal::GeneratePdfFileId();
+    }
+
+    Internal::PdfObjectCollectionWriterOptions collectionOptions;
+    collectionOptions.writeXrefStream = options.writeXrefStream;
+    collectionOptions.writeObjectStreams = options.writeObjectStreams;
+    Internal::PdfObjectCollectionWriter::Write(
+        output, collectionOptions, objects, catalogObject, infoObject,
+        encryptionObject, security, fileId);
+}
+
+void PdfWriter::Resave(const std::filesystem::path& inputPath,
+                       const std::filesystem::path& outputPath,
+                       const PdfSaveOptions& options) {
+    Resave(PdfDocument::Open(inputPath), outputPath, options);
+}
+
+void PdfWriter::Resave(const std::filesystem::path& inputPath,
+                       const std::filesystem::path& outputPath,
+                       const PdfReaderOptions& readerOptions,
+                       const PdfSaveOptions& options) {
+    Resave(PdfDocument::Open(inputPath, readerOptions), outputPath, options);
 }
 } // namespace CPPPdf

@@ -1,4 +1,4 @@
-#include <CPPPdf/CPPPdf.hpp>
+#include <CPPPdf/CPPPdf.h>
 #include <cassert>
 #include <filesystem>
 #include <array>

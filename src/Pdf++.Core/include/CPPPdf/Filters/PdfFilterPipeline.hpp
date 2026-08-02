@@ -33,6 +33,10 @@ public:
     [[nodiscard]] static std::vector<std::byte> DecodeRunLength(
         std::span<const std::byte> input,
         std::size_t maxDecodedSize = std::numeric_limits<std::size_t>::max());
+    [[nodiscard]] static std::vector<std::byte> DecodeLzw(
+        std::span<const std::byte> input,
+        bool earlyChange = true,
+        std::size_t maxDecodedSize = std::numeric_limits<std::size_t>::max());
 private:
     std::size_t maxDecodedSize_;
 };

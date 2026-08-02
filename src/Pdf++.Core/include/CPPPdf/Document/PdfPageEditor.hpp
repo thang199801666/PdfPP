@@ -4,6 +4,7 @@
 #include <CPPPdf/Text/PdfTextExtractor.hpp>
 #include <CPPPdf/Graphics/PdfImage.hpp>
 #include <CPPPdf/Writer/PdfWriter.hpp>
+#include <CPPPdf/IO/PdfReader.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -65,7 +66,8 @@ public:
     [[nodiscard]] static PdfPageEditResult ApplyEdits(
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
-        const std::vector<PdfPageEdit>& edits);
+        const std::vector<PdfPageEdit>& edits,
+        const PdfReaderOptions& readerOptions = {});
 
     [[nodiscard]] static PdfPageEditResult AddContent(
         const std::filesystem::path& inputPath,

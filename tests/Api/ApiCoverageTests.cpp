@@ -1,4 +1,4 @@
-#include <CPPPdf/CPPPdf.hpp>
+#include <CPPPdf/CPPPdf.h>
 
 #include <algorithm>
 #include <array>

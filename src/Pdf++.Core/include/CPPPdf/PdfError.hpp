@@ -16,6 +16,10 @@ enum class PdfErrorCode {
     ObjectNotFound,
     MalformedObject,
     InvalidPageTree,
+    PasswordRequired,
+    InvalidPassword,
+    PermissionDenied,
+    UnsupportedEncryption,
     UnsupportedFeature
 };
 

@@ -4,6 +4,7 @@
 #include <CPPPdf/Objects/PdfObject.hpp>
 #include <CPPPdf/PdfError.hpp>
 #include "Internal/Parsing/PdfObjectParser.hpp"
+#include "Internal/Writer/PdfIncrementalWriter.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -359,12 +360,9 @@ std::string pdfImageColorSpaceName(const PdfImageColorSpace colorSpace) {
     }
 }
 
-void writeImageObject(
-    std::ostream& output,
-    const std::uint32_t objectNumber,
-    const PdfImage& image) {
+void writeImageObjectBody(std::ostream& output, const PdfImage& image) {
     const auto bytes = image.GetBytes();
-    output << objectNumber << " 0 obj\n<< /Type /XObject /Subtype /Image"
+    output << "<< /Type /XObject /Subtype /Image"
            << " /Width " << image.GetWidth()
            << " /Height " << image.GetHeight()
            << " /ColorSpace " << pdfImageColorSpaceName(image.GetColorSpace())
@@ -378,7 +376,7 @@ void writeImageObject(
     output << " /Length " << bytes.size() << " >>\nstream\n";
     output.write(reinterpret_cast<const char*>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
-    output << "\nendstream\nendobj\n";
+    output << "\nendstream";
 }
 
 std::string makeImageStampContent(
@@ -542,11 +540,13 @@ PdfPageEditResult PdfPageEditor::AddWatermarkToAllPages(
 PdfPageEditResult PdfPageEditor::ApplyEdits(
     const std::filesystem::path& inputPath,
     const std::filesystem::path& outputPath,
-    const std::vector<PdfPageEdit>& edits) {
-    PdfDocument document = PdfDocument::Open(inputPath);
-    if (document.IsEncrypted()) {
-        throw PdfException(PdfErrorCode::UnsupportedFeature,
-                           "Incremental page editing does not support encrypted PDFs yet.");
+    const std::vector<PdfPageEdit>& edits,
+    const PdfReaderOptions& readerOptions) {
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (document.IsEncrypted() && !document.IsOwnerPasswordAuthenticated() &&
+        (static_cast<std::uint32_t>(document.GetPermissionBits()) & 8U) == 0U) {
+        throw PdfException(PdfErrorCode::PermissionDenied,
+                           "The user password does not permit page-content modification.");
     }
 
     std::map<std::size_t, PdfPageEdit> merged;
@@ -569,14 +569,8 @@ PdfPageEditResult PdfPageEditor::ApplyEdits(
     }
 
     PdfPageEditResult result{outputPath, merged.size(), 0U};
-    const std::string original = readFile(inputPath);
-    std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
-    if (!output) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot create output PDF: " + outputPath.string());
-    output.write(original.data(), static_cast<std::streamsize>(original.size()));
-    if (original.empty() || (original.back() != '\n' && original.back() != '\r')) output << '\n';
-
-    std::uint32_t objectNumber = nextObjectNumber(document);
-    std::map<std::uint32_t, std::pair<std::uint64_t, std::uint16_t>> xrefEntries;
+    Internal::PdfIncrementalWriter writer(inputPath, outputPath, document);
+    std::uint32_t objectNumber = Internal::PdfIncrementalWriter::NextObjectNumber(document);
 
     for (const auto& [pageIndex, edit] : merged) {
         const PdfReference pageReference = document.GetPageReference(pageIndex);
@@ -592,8 +586,9 @@ PdfPageEditResult PdfPageEditor::ApplyEdits(
             std::size_t stampIndex = 0U;
             for (const auto& [image, options] : edit.imageStamps) {
                 const std::uint32_t imageNumber = objectNumber++;
-                xrefEntries[imageNumber] = {static_cast<std::uint64_t>(output.tellp()), 0U};
-                writeImageObject(output, imageNumber, image);
+                std::ostringstream imageBody;
+                writeImageObjectBody(imageBody, image);
+                writer.WriteRawObject(PdfReference{imageNumber, 0U}, imageBody.str());
 
                 const std::string imageName = "PPImage" + std::to_string(stampIndex + 1U);
                 const std::string stateName = "PPImageGS" + std::to_string(stampIndex + 1U);
@@ -652,11 +647,13 @@ PdfPageEditResult PdfPageEditor::ApplyEdits(
         auto appendStream = [&](const std::string& streamContent, bool background) {
             if (streamContent.empty()) return;
             const std::uint32_t streamNumber = objectNumber++;
-            xrefEntries[streamNumber] = {static_cast<std::uint64_t>(output.tellp()), 0U};
-            output << streamNumber << " 0 obj\n<< /Length " << streamContent.size() << " >>\nstream\n";
-            output.write(streamContent.data(), static_cast<std::streamsize>(streamContent.size()));
-            if (streamContent.empty() || streamContent.back() != '\n') output << '\n';
-            output << "endstream\nendobj\n";
+            std::vector<std::byte> streamBytes(streamContent.size());
+            std::transform(streamContent.begin(), streamContent.end(), streamBytes.begin(),
+                           [](const char value) {
+                               return static_cast<std::byte>(static_cast<unsigned char>(value));
+                           });
+            writer.WriteObject(PdfReference{streamNumber, 0U},
+                               PdfObject(PdfStream(PdfDictionary{}, std::move(streamBytes))));
 
             PdfArray updated;
             if (background) updated.push_back(PdfObject::IndirectReference(streamNumber, 0U));
@@ -681,35 +678,9 @@ PdfPageEditResult PdfPageEditor::ApplyEdits(
         if (edit.mediaBox) pageDictionary.Put(PdfName::MediaBox, PdfObject(rectangleArray(*edit.mediaBox)));
         if (edit.cropBox) pageDictionary.Put(PdfName::CropBox, PdfObject(rectangleArray(*edit.cropBox)));
 
-        xrefEntries[pageReference.objectNumber] = {
-            static_cast<std::uint64_t>(output.tellp()), pageReference.generation};
-        output << pageReference.objectNumber << ' ' << pageReference.generation << " obj\n";
-        serializeDictionary(output, pageDictionary);
-        output << "\nendobj\n";
+        writer.WriteDictionary(pageReference, pageDictionary);
     }
-
-    const std::uint64_t xrefOffset = static_cast<std::uint64_t>(output.tellp());
-    output << "xref\n";
-    auto iterator = xrefEntries.begin();
-    while (iterator != xrefEntries.end()) {
-        const std::uint32_t first = iterator->first;
-        auto end = iterator;
-        std::uint32_t expected = first;
-        while (end != xrefEntries.end() && end->first == expected) { ++end; ++expected; }
-        output << first << ' ' << (expected - first) << '\n';
-        for (auto current = iterator; current != end; ++current) {
-            writeXrefEntry(output, current->second.first, current->second.second);
-        }
-        iterator = end;
-    }
-
-    PdfDictionary trailer = parseTrailerDictionary(document);
-    trailer.Put(PdfName("Size"), PdfObject(static_cast<std::int64_t>(objectNumber)));
-    trailer.Put(PdfName("Prev"), PdfObject(static_cast<std::int64_t>(document.GetStartXrefOffset())));
-    trailer.Remove(PdfName("XRefStm"));
-    output << "trailer\n";
-    serializeDictionary(output, trailer);
-    output << "\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    writer.Finish(objectNumber);
     return result;
 }
 

@@ -10,7 +10,7 @@
 - `src/Parsing`: parser implementations.
 - `src/Internal`: private parser contracts and implementation details.
 
-New code should include `<CPPPdf/CPPPdf.hpp>` or canonical component headers. Root-level `PdfDocument.hpp`, `PdfPage.hpp`, and `PdfReader.hpp` remain forwarding headers for source compatibility.
+New code should include `<CPPPdf/CPPPdf.h>` or canonical component headers. `CPPPdf.hpp` remains a forwarding wrapper for source compatibility, as do root-level `PdfDocument.hpp`, `PdfPage.hpp`, and `PdfReader.hpp`.
 
 CMake consumers use:
 

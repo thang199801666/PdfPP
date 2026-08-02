@@ -518,6 +518,11 @@ void TestRenderingFoundation() {
     PDFPP_TEST_CHECK(antialiased.GetWidth() == 200U);
     PDFPP_TEST_CHECK(antialiased.GetHeight() == 120U);
 
+    antialiasedOptions.antiAliasSamples = 4U;
+    const auto highSample = PdfPageRenderer::Render(document, 0, antialiasedOptions);
+    PDFPP_TEST_CHECK(highSample.GetWidth() == 200U);
+    PDFPP_TEST_CHECK(highSample.GetHeight() == 120U);
+
     bitmap.SavePpm(ppm);
     const auto ppmBytes = ReadText(ppm);
     PDFPP_TEST_CHECK(ppmBytes.starts_with("P6\n200 120\n255\n"));

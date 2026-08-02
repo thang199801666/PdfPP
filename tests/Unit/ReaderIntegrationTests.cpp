@@ -1,4 +1,4 @@
-#include <CPPPdf/CPPPdf.hpp>
+#include <CPPPdf/CPPPdf.h>
 
 #include <array>
 #include <cstddef>
@@ -44,6 +44,74 @@ std::vector<std::byte> makeMinimalPdf() {
     std::vector<std::byte> result(pdf.size());
     for (std::size_t i = 0; i < pdf.size(); ++i) {
         result[i] = static_cast<std::byte>(pdf[i]);
+    }
+    return result;
+}
+
+std::vector<std::byte> makeObjectStreamPdf() {
+    std::string pdf = "%PDF-1.7\n";
+    std::array<std::size_t, 12> offsets{};
+
+    auto addObject = [&](const std::size_t number, const std::string_view body) {
+        offsets[number] = pdf.size();
+        pdf += std::to_string(number) + " 0 obj\n";
+        pdf.append(body);
+        pdf += "\nendobj\n";
+    };
+    auto makeObjectStream = [](const std::uint32_t firstNumber,
+                               const std::uint32_t secondNumber,
+                               const std::string_view firstBody,
+                               const std::string_view secondBody) {
+        const std::string header = std::to_string(firstNumber) + " 0 " +
+            std::to_string(secondNumber) + " " + std::to_string(firstBody.size() + 1U) + " ";
+        const std::string decoded = header + std::string(firstBody) + " " + std::string(secondBody);
+        return "<< /Type /ObjStm /N 2 /First " + std::to_string(header.size()) +
+            " /Length " + std::to_string(decoded.size()) + " >>\nstream\n" +
+            decoded + "\nendstream";
+    };
+
+    addObject(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    addObject(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    addObject(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>");
+    addObject(6, makeObjectStream(4, 5, "<< /Value (One) >>", "<< /Value (Two) >>"));
+    addObject(10, makeObjectStream(8, 9, "<< /Value (Three) >>", "<< /Value (Four) >>"));
+
+    offsets[11] = pdf.size();
+    std::string xrefData;
+    xrefData.reserve(12U * 7U);
+    auto appendBigEndian = [&xrefData](std::uint64_t value, const std::size_t width) {
+        for (std::size_t i = width; i > 0U; --i) {
+            xrefData.push_back(static_cast<char>((value >> ((i - 1U) * 8U)) & 0xFFU));
+        }
+    };
+    auto addXrefEntry = [&](const std::uint8_t type,
+                            const std::uint32_t field2,
+                            const std::uint16_t field3) {
+        appendBigEndian(type, 1U);
+        appendBigEndian(field2, 4U);
+        appendBigEndian(field3, 2U);
+    };
+    for (std::uint32_t number = 0U; number < offsets.size(); ++number) {
+        if (number == 0U) {
+            addXrefEntry(0U, 0U, 65535U);
+        } else if (number == 4U || number == 5U) {
+            addXrefEntry(2U, 6U, static_cast<std::uint16_t>(number - 4U));
+        } else if (number == 8U || number == 9U) {
+            addXrefEntry(2U, 10U, static_cast<std::uint16_t>(number - 8U));
+        } else if (offsets[number] != 0U) {
+            addXrefEntry(1U, static_cast<std::uint32_t>(offsets[number]), 0U);
+        } else {
+            addXrefEntry(0U, 0U, 0U);
+        }
+    }
+    pdf += "11 0 obj\n<< /Type /XRef /Size 12 /Root 1 0 R /W [1 4 2] /Length " +
+        std::to_string(xrefData.size()) + " >>\nstream\n";
+    pdf += xrefData;
+    pdf += "\nendstream\nendobj\nstartxref\n" + std::to_string(offsets[11]) + "\n%%EOF\n";
+
+    std::vector<std::byte> result(pdf.size());
+    for (std::size_t i = 0; i < pdf.size(); ++i) {
+        result[i] = static_cast<std::byte>(static_cast<unsigned char>(pdf[i]));
     }
     return result;
 }
@@ -207,6 +275,32 @@ int RunReaderIntegrationTests() {
         std::cerr << "Page text extraction failed.\n";
         return 3;
     }
+    if (document.GetContentStreamCacheHits() == 0U ||
+        document.GetCachedContentStreamCount() == 0U) {
+        std::cerr << "Decoded content-stream cache did not reuse the page stream.\n";
+        return 26;
+    }
+
+    auto damagedBytes = bytes;
+    std::string damagedPdf(reinterpret_cast<const char*>(damagedBytes.data()), damagedBytes.size());
+    const std::size_t startxref = damagedPdf.rfind("startxref");
+    const std::size_t offsetBegin = startxref == std::string::npos
+        ? std::string::npos : damagedPdf.find_first_of("0123456789", startxref + 9U);
+    if (offsetBegin != std::string::npos) {
+        const std::size_t offsetEnd = damagedPdf.find_first_not_of("0123456789", offsetBegin);
+        damagedPdf.replace(offsetBegin, offsetEnd - offsetBegin,
+                           offsetEnd - offsetBegin, '0');
+        for (std::size_t index = 0; index < damagedPdf.size(); ++index) {
+            damagedBytes[index] = static_cast<std::byte>(
+                static_cast<unsigned char>(damagedPdf[index]));
+        }
+    }
+    auto recoveredDocument = CPPPdf::PdfDocument::Open(
+        std::span<const std::byte>(damagedBytes));
+    if (recoveredDocument.GetPageCount() != 1U) {
+        std::cerr << "Damaged startxref recovery did not restore the page tree.\n";
+        return 28;
+    }
 
     document.ClearObjectCache();
     (void)document.GetObject(CPPPdf::PdfReference{1U, 0U});
@@ -232,6 +326,63 @@ int RunReaderIntegrationTests() {
         boundedDocument.GetCachedObjectCount() > 1U) {
         std::cerr << "Bounded LRU object cache exceeded its configured capacity.\n";
         return 13;
+    }
+
+    CPPPdf::PdfReaderOptions objectLimitOptions;
+    objectLimitOptions.limits.maxIndirectObjectBytes = 16U;
+    bool oversizedObjectRejected = false;
+    try {
+        auto limitedDocument = CPPPdf::PdfDocument::Open(
+            std::span<const std::byte>(bytes), objectLimitOptions);
+        (void)limitedDocument.GetPageCount();
+    } catch (const CPPPdf::PdfException&) {
+        oversizedObjectRejected = true;
+    }
+    if (!oversizedObjectRejected) {
+        std::cerr << "Indirect-object size limit did not reject an oversized object.\n";
+        return 27;
+    }
+
+    const auto objectStreamBytes = makeObjectStreamPdf();
+    CPPPdf::PdfReaderOptions objectStreamOptions;
+    objectStreamOptions.limits.maxCachedObjects = 0U;
+    objectStreamOptions.limits.maxCachedObjectStreams = 1U;
+    auto objectStreamDocument = CPPPdf::PdfDocument::Open(
+        std::span<const std::byte>(objectStreamBytes), objectStreamOptions);
+    (void)objectStreamDocument.GetObject(CPPPdf::PdfReference{4U, 0U});
+    (void)objectStreamDocument.GetObject(CPPPdf::PdfReference{5U, 0U});
+    if (objectStreamDocument.GetObjectStreamCacheMisses() != 1U ||
+        objectStreamDocument.GetObjectStreamCacheHits() != 1U ||
+        objectStreamDocument.GetCachedObjectStreamCount() != 1U ||
+        objectStreamDocument.GetCachedObjectStreamBytes() == 0U) {
+        std::cerr << "Decoded object-stream cache did not record the expected hit.\n";
+        return 21;
+    }
+    (void)objectStreamDocument.GetObject(CPPPdf::PdfReference{8U, 0U});
+    (void)objectStreamDocument.GetObject(CPPPdf::PdfReference{4U, 0U});
+    if (objectStreamDocument.GetCachedObjectStreamCount() != 1U ||
+        objectStreamDocument.GetObjectStreamCacheMisses() != 3U) {
+        std::cerr << "Decoded object-stream LRU did not evict at its configured limit.\n";
+        return 22;
+    }
+    objectStreamDocument.ClearObjectCache();
+    if (objectStreamDocument.GetCachedObjectStreamCount() != 0U ||
+        objectStreamDocument.GetCachedObjectStreamBytes() != 0U) {
+        std::cerr << "Decoded object-stream cache did not clear.\n";
+        return 23;
+    }
+
+    CPPPdf::PdfReaderOptions tinyObjectStreamOptions;
+    tinyObjectStreamOptions.limits.maxCachedObjects = 0U;
+    tinyObjectStreamOptions.limits.maxCachedObjectStreamBytes = 1U;
+    auto tinyObjectStreamDocument = CPPPdf::PdfDocument::Open(
+        std::span<const std::byte>(objectStreamBytes), tinyObjectStreamOptions);
+    (void)tinyObjectStreamDocument.GetObject(CPPPdf::PdfReference{4U, 0U});
+    (void)tinyObjectStreamDocument.GetObject(CPPPdf::PdfReference{5U, 0U});
+    if (tinyObjectStreamDocument.GetCachedObjectStreamCount() != 0U ||
+        tinyObjectStreamDocument.GetObjectStreamCacheMisses() != 2U) {
+        std::cerr << "Decoded object-stream cache exceeded its byte budget.\n";
+        return 24;
     }
 
     CPPPdf::PdfReaderOptions pageLimitedOptions;
@@ -262,6 +413,12 @@ int RunReaderIntegrationTests() {
         measuredWidth < 11.99 || measuredWidth > 12.01) {
         std::cerr << "Embedded font widths were not applied to text positioning.\n";
         return 7;
+    }
+    const auto fontChunksAgain = fontDocument.ExtractTextChunks(0U);
+    if (fontChunksAgain.size() != 1U || fontDocument.GetFontResourceCacheHits() == 0U ||
+        fontDocument.GetCachedFontResourceCount() != 1U) {
+        std::cerr << "Document-level font resource cache did not reuse an indirect font.\n";
+        return 25;
     }
 
     const auto formBytes = makeFormXObjectPdf();

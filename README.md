@@ -11,6 +11,7 @@ Pdf++ is a modern C++20 library for reading, creating, modifying, searching, and
 - Text extraction, search, and keyword highlighting
 - Canvas drawing, images, Base-14 fonts, and embedded TrueType fonts
 - Metadata, hierarchical bookmarks, annotations, and basic AcroForm workflows
+- AES-128/RC4-128 password encryption, permissions, password change and removal
 - File, memory, stream, and custom input sources
 
 See [docs/FeatureMatrix.md](docs/FeatureMatrix.md) for the supported feature scope and known limitations.
@@ -42,7 +43,7 @@ cmake --build build-strict
 ## Minimal example
 
 ```cpp
-#include <CPPPdf/CPPPdf.hpp>
+#include <CPPPdf/CPPPdf.h>
 
 int main() {
     CPPPdf::PdfWriter writer;
@@ -59,7 +60,39 @@ int main() {
 
 ## Stability status
 
-Version 0.x is suitable for controlled application workflows. Encryption, digital signatures, PDF/A, PDF/UA, advanced layout, and complete complex-script shaping are not yet implemented.
+Version 0.x is suitable for controlled application workflows. AES-256/public-key encryption, digital signatures, PDF/A, PDF/UA, advanced layout, and complete complex-script shaping are not yet implemented.
+
+## Password encryption
+
+```cpp
+CPPPdf::PdfEncryptionOptions encryption;
+encryption.userPassword = "reader-password";
+encryption.ownerPassword = "owner-password";
+encryption.permissions.copy = false;
+
+CPPPdf::PdfWriter writer;
+writer.SetEncryption(encryption); // AES-128 by default
+// Add content, then save.
+writer.Save("protected.pdf");
+
+CPPPdf::PdfReaderOptions openOptions;
+openOptions.password = "reader-password";
+auto document = CPPPdf::PdfDocument::Open("protected.pdf", openOptions);
+
+CPPPdf::PdfPasswordManager::ChangePassword(
+    "protected.pdf", "changed.pdf", "owner-password", encryption);
+CPPPdf::PdfPasswordManager::RemovePassword(
+    "changed.pdf", "clear.pdf", "owner-password");
+```
+
+Password rewrite requires different input and output paths, which prevents an
+interrupted rewrite from destroying the source file. See
+[docs/MuPDFGapAnalysis.md](docs/MuPDFGapAnalysis.md) for the remaining parity gaps.
+
+Page edits, annotations, and AcroForm updates accept `PdfReaderOptions` as their final
+argument. Encrypted incremental revisions preserve the file ID, encrypt revised
+objects, and enforce user-password permission bits. Owner-password authentication
+bypasses those restrictions.
 
 - Named destinations and URI/internal link annotations.
 

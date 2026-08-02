@@ -1,6 +1,7 @@
 #pragma once
 
 #include <CPPPdf/Core/PdfTypes.hpp>
+#include <CPPPdf/IO/PdfReader.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -69,25 +70,30 @@ struct PdfFormAppearanceResult final {
 class PdfAcroForm final {
 public:
     [[nodiscard]] static std::vector<PdfFormFieldInfo> GetFields(const PdfDocument& document);
-    [[nodiscard]] static std::vector<PdfFormFieldInfo> GetFields(const std::filesystem::path& inputPath);
+    [[nodiscard]] static std::vector<PdfFormFieldInfo> GetFields(
+        const std::filesystem::path& inputPath,
+        const PdfReaderOptions& readerOptions = {});
 
     [[nodiscard]] static PdfFormUpdateResult SetFieldValues(
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
         const std::vector<PdfFormFieldUpdate>& updates,
-        const PdfFormUpdateOptions& options = {});
+        const PdfFormUpdateOptions& options = {},
+        const PdfReaderOptions& readerOptions = {});
 
     [[nodiscard]] static PdfFormAppearanceResult GenerateAppearances(
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
         const std::vector<std::string>& fieldNames = {},
-        const PdfFormAppearanceOptions& options = {});
+        const PdfFormAppearanceOptions& options = {},
+        const PdfReaderOptions& readerOptions = {});
 
     [[nodiscard]] static PdfFormAppearanceResult FlattenFields(
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
         const std::vector<std::string>& fieldNames = {},
-        const PdfFormAppearanceOptions& options = {});
+        const PdfFormAppearanceOptions& options = {},
+        const PdfReaderOptions& readerOptions = {});
 };
 
 } // namespace CPPPdf

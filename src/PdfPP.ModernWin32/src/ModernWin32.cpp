@@ -30,16 +30,21 @@ void paintActionButton(HWND window, HDC dc, ActionButtonState& state) {
     GetClientRect(window, &rect);
     const bool enabled = IsWindowEnabled(window) != FALSE;
     COLORREF fill = Theme::button;
+    COLORREF borderColor = Theme::border;
+    COLORREF textColor = enabled ? Theme::text : Theme::mutedText;
     if (!enabled) fill = Theme::status;
-    else if (state.pressed) fill = Theme::buttonPressed;
-    else if (state.hover) fill = state.accent ? Theme::buttonAccent : Theme::buttonHover;
-    else if (state.accent) fill = Theme::buttonAccent;
+    else if (state.pressed) fill = state.accent ? RGB(13, 94, 193) : Theme::buttonPressed;
+    else if (state.hover) {
+        if (state.accent) { fill = RGB(26, 130, 245); textColor = RGB(255, 255, 255); }
+        else { fill = Theme::buttonHover; }
+    }
+    else if (state.accent) { fill = Theme::buttonAccent; textColor = RGB(255, 255, 255); borderColor = Theme::buttonAccent; }
 
     const HBRUSH brush = CreateSolidBrush(fill);
-    const HPEN pen = CreatePen(PS_SOLID, 1, state.accent ? Theme::buttonAccent : Theme::border);
+    const HPEN pen = CreatePen(PS_SOLID, 1, borderColor);
     const auto oldBrush = SelectObject(dc, brush);
     const auto oldPen = SelectObject(dc, pen);
-    const int scaledCorner = MulDiv(7, static_cast<int>(GetDpiForWindow(window)), 96);
+    const int scaledCorner = MulDiv(6, static_cast<int>(GetDpiForWindow(window)), 96);
     const int corner = scaledCorner > 0 ? scaledCorner : 1;
     RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, corner, corner);
     SelectObject(dc, oldPen);
@@ -50,8 +55,10 @@ void paintActionButton(HWND window, HDC dc, ActionButtonState& state) {
     wchar_t text[256]{};
     GetWindowTextW(window, text, static_cast<int>(std::size(text)));
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, enabled ? Theme::text : Theme::mutedText);
-    DrawTextW(dc, text, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    SetTextColor(dc, textColor);
+    RECT label = rect;
+    label.bottom -= 1;
+    DrawTextW(dc, text, -1, &label, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 }
 
 LRESULT CALLBACK actionButtonProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {

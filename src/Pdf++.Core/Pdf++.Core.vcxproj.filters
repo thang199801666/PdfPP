@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
   <ItemGroup>
-    <ClInclude Include="include\CPPPdf\CPPPdf.hpp" />
+    <ClInclude Include="include\CPPPdf\CPPPdf.h" />
     <ClInclude Include="include\CPPPdf\Core\PdfTypes.hpp" />
     <ClInclude Include="include\CPPPdf\Document\PdfDocument.hpp" />
     <ClInclude Include="include\CPPPdf\Document\PdfPage.hpp" />
@@ -34,6 +34,7 @@
     <ClInclude Include="include\CPPPdf\Document\PdfPageOrganizer.hpp" />
     <ClInclude Include="include\CPPPdf\Document\PdfPageImporter.hpp" />
     <ClInclude Include="src\Internal\Writer\PdfObjectSerializer.hpp" />
+    <ClInclude Include="src\Internal\Writer\PdfObjectCollectionWriter.hpp" />
     <ClInclude Include="include\CPPPdf\Forms\PdfAcroForm.hpp" />
     <ClInclude Include="include\CPPPdf\Api.hpp" />
     <ClInclude Include="include\CPPPdf\Version.hpp" />
@@ -59,6 +60,8 @@
     <ClCompile Include="src\Fonts\PdfTrueTypeFont.cpp" />
     <ClCompile Include="src\Content\PdfContentProcessor.cpp" />
     <ClCompile Include="src\Writer\PdfWriter.cpp" />
+    <ClCompile Include="src\Security\PdfStandardSecurity.cpp" />
+    <ClCompile Include="src\Security\PdfCrypto.cpp" />
     <ClCompile Include="src\Graphics\PdfCanvas.cpp" />
     <ClCompile Include="src\Graphics\PdfImage.cpp" />
     <ClCompile Include="src\Rendering\PdfBitmap.cpp" />
@@ -71,6 +74,7 @@
     <ClCompile Include="src\Document\PdfPageOrganizer.cpp" />
     <ClCompile Include="src\Document\PdfPageImporter.cpp" />
     <ClCompile Include="src\Internal\Writer\PdfObjectSerializer.cpp" />
+    <ClCompile Include="src\Internal\Writer\PdfObjectCollectionWriter.cpp" />
     <ClCompile Include="src\Forms\PdfAcroForm.cpp" />
   </ItemGroup>
 </Project>

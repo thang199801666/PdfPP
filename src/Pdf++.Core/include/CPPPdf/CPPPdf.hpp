@@ -1,4 +1,4 @@
 #pragma once
 
-// Compatibility umbrella. New code should include <CPPPdf/Api.hpp>.
-#include <CPPPdf/Api.hpp>
+// Compatibility wrapper. New code should include <CPPPdf/CPPPdf.h>.
+#include <CPPPdf/CPPPdf.h>

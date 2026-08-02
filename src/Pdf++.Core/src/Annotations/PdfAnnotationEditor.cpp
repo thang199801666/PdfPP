@@ -4,6 +4,7 @@
 #include <CPPPdf/Objects/PdfObject.hpp>
 #include <CPPPdf/PdfError.hpp>
 #include "Internal/Parsing/PdfObjectParser.hpp"
+#include "Internal/Writer/PdfIncrementalWriter.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -192,19 +193,23 @@ void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation) {
 PdfAnnotationEditResult PdfAnnotationEditor::AddAnnotations(
     const std::filesystem::path& inputPath,
     const std::filesystem::path& outputPath,
-    const std::vector<PdfAnnotation>& annotations) {
-    PdfDocument document = PdfDocument::Open(inputPath);
-    if (document.IsEncrypted()) {
-        throw PdfException(PdfErrorCode::UnsupportedFeature, "Incremental annotations do not support encrypted PDFs yet.");
+    const std::vector<PdfAnnotation>& annotations,
+    const PdfReaderOptions& readerOptions) {
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (document.IsEncrypted() && !document.IsOwnerPasswordAuthenticated() &&
+        (static_cast<std::uint32_t>(document.GetPermissionBits()) & 32U) == 0U) {
+        throw PdfException(PdfErrorCode::PermissionDenied,
+                           "The user password does not permit annotation modification.");
     }
 
     PdfAnnotationEditResult result{outputPath, annotations.size(), 0U};
-    const std::string original = readFile(inputPath);
-    std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
-    if (!output) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot create output PDF: " + outputPath.string());
-    output.write(original.data(), static_cast<std::streamsize>(original.size()));
-    if (original.empty() || (original.back() != '\n' && original.back() != '\r')) output << '\n';
-    if (annotations.empty()) return result;
+    if (annotations.empty()) {
+        const std::string original = readFile(inputPath);
+        std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
+        output.write(original.data(), static_cast<std::streamsize>(original.size()));
+        return result;
+    }
+    Internal::PdfIncrementalWriter writer(inputPath, outputPath, document);
 
     std::map<std::size_t, std::vector<const PdfAnnotation*>> byPage;
     for (const auto& annotation : annotations) {
@@ -215,19 +220,17 @@ PdfAnnotationEditResult PdfAnnotationEditor::AddAnnotations(
     }
     result.modifiedPageCount = byPage.size();
 
-    std::uint32_t newObjectNumber = nextObjectNumber(document);
-    std::map<std::uint32_t, std::pair<std::uint64_t, std::uint16_t>> xrefEntries;
+    std::uint32_t newObjectNumber = Internal::PdfIncrementalWriter::NextObjectNumber(document);
     std::unordered_map<std::size_t, std::vector<PdfReference>> annotationReferences;
 
     for (const auto& [pageIndex, pageAnnotations] : byPage) {
         auto& references = annotationReferences[pageIndex];
         for (const PdfAnnotation* annotation : pageAnnotations) {
             const std::uint32_t objectNumber = newObjectNumber++;
-            xrefEntries[objectNumber] = {static_cast<std::uint64_t>(output.tellp()), 0U};
             references.push_back(PdfReference{objectNumber, 0U});
-            output << objectNumber << " 0 obj\n";
-            writeAnnotation(output, *annotation);
-            output << "endobj\n";
+            std::ostringstream body;
+            writeAnnotation(body, *annotation);
+            writer.WriteRawObject(PdfReference{objectNumber, 0U}, body.str());
         }
     }
 
@@ -239,35 +242,9 @@ PdfAnnotationEditResult PdfAnnotationEditor::AddAnnotations(
             annots.push_back(PdfObject::IndirectReference(reference.objectNumber, reference.generation));
         }
         pageDictionary.Put(PdfName("Annots"), PdfObject(std::move(annots)));
-        xrefEntries[pageReference.objectNumber] = {
-            static_cast<std::uint64_t>(output.tellp()), pageReference.generation};
-        output << pageReference.objectNumber << ' ' << pageReference.generation << " obj\n";
-        serializeDictionary(output, pageDictionary);
-        output << "\nendobj\n";
+        writer.WriteDictionary(pageReference, pageDictionary);
     }
-
-    const std::uint64_t xrefOffset = static_cast<std::uint64_t>(output.tellp());
-    output << "xref\n";
-    auto iterator = xrefEntries.begin();
-    while (iterator != xrefEntries.end()) {
-        const std::uint32_t first = iterator->first;
-        auto end = iterator;
-        std::uint32_t expected = first;
-        while (end != xrefEntries.end() && end->first == expected) { ++end; ++expected; }
-        output << first << ' ' << (expected - first) << '\n';
-        for (auto current = iterator; current != end; ++current) {
-            writeXrefEntry(output, current->second.first, current->second.second);
-        }
-        iterator = end;
-    }
-
-    PdfDictionary trailer = parseTrailerDictionary(document);
-    trailer.Put(PdfName("Size"), PdfObject(static_cast<std::int64_t>(newObjectNumber)));
-    trailer.Put(PdfName("Prev"), PdfObject(static_cast<std::int64_t>(document.GetStartXrefOffset())));
-    trailer.Remove(PdfName("XRefStm"));
-    output << "trailer\n";
-    serializeDictionary(output, trailer);
-    output << "\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    writer.Finish(newObjectNumber);
     return result;
 }
 

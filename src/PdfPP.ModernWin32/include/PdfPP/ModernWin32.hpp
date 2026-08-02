@@ -30,7 +30,7 @@ struct Theme final {
 
 struct Layout final {
     static constexpr int menuHeight = 24;
-    static constexpr int ribbonHeight = 58;
+    static constexpr int ribbonHeight = 42;
     static constexpr int sidebarWidth = 242;
     static constexpr int statusHeight = 26;
     static constexpr int controlHeight = 26;

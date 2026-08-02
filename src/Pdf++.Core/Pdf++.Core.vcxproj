@@ -49,7 +49,7 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="include\CPPPdf\CPPPdf.hpp" />
+    <ClInclude Include="include\CPPPdf\CPPPdf.h" />
     <ClInclude Include="include\CPPPdf\Core\PdfTypes.hpp" />
     <ClInclude Include="include\CPPPdf\Document\PdfDocument.hpp" />
     <ClInclude Include="include\CPPPdf\Document\PdfPage.hpp" />
@@ -68,6 +68,8 @@
     <ClInclude Include="include\CPPPdf\Fonts\PdfTrueTypeFont.hpp" />
     <ClInclude Include="include\CPPPdf\Content\PdfContentProcessor.hpp" />
     <ClInclude Include="include\CPPPdf\Writer\PdfWriter.hpp" />
+    <ClInclude Include="include\CPPPdf\Security\PdfSecurity.hpp" />
+    <ClInclude Include="src\Internal\Security\PdfStandardSecurity.hpp" />
     <ClInclude Include="include\CPPPdf\Graphics\PdfCanvas.hpp" />
     <ClInclude Include="include\CPPPdf\Graphics\PdfImage.hpp" />
     <ClInclude Include="include\CPPPdf\Rendering.hpp" />
@@ -82,6 +84,8 @@
     <ClInclude Include="include\CPPPdf\Document\PdfPageOrganizer.hpp" />
     <ClInclude Include="include\CPPPdf\Document\PdfPageImporter.hpp" />
     <ClInclude Include="src\Internal\Writer\PdfObjectSerializer.hpp" />
+    <ClInclude Include="src\Internal\Writer\PdfObjectCollectionWriter.hpp" />
+    <ClInclude Include="src\Internal\Writer\PdfIncrementalWriter.hpp" />
     <ClInclude Include="include\CPPPdf\Forms\PdfAcroForm.hpp" />
     <ClInclude Include="include\CPPPdf\Api.hpp" />
     <ClInclude Include="include\CPPPdf\Version.hpp" />
@@ -107,6 +111,9 @@
     <ClCompile Include="src\Fonts\PdfTrueTypeFont.cpp" />
     <ClCompile Include="src\Content\PdfContentProcessor.cpp" />
     <ClCompile Include="src\Writer\PdfWriter.cpp" />
+    <ClCompile Include="src\Security\PdfStandardSecurity.cpp" />
+    <ClCompile Include="src\Security\PdfCrypto.cpp" />
+    <ClCompile Include="src\Security\PdfPasswordManager.cpp" />
     <ClCompile Include="src\Graphics\PdfCanvas.cpp" />
     <ClCompile Include="src\Graphics\PdfImage.cpp" />
     <ClCompile Include="src\Rendering\PdfBitmap.cpp" />
@@ -119,6 +126,8 @@
     <ClCompile Include="src\Document\PdfPageOrganizer.cpp" />
     <ClCompile Include="src\Document\PdfPageImporter.cpp" />
     <ClCompile Include="src\Internal\Writer\PdfObjectSerializer.cpp" />
+    <ClCompile Include="src\Internal\Writer\PdfObjectCollectionWriter.cpp" />
+    <ClCompile Include="src\Writer\PdfIncrementalWriter.cpp" />
     <ClCompile Include="src\Forms\PdfAcroForm.cpp" />
   </ItemGroup>
   <ItemGroup>

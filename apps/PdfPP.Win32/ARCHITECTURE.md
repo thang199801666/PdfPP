@@ -5,6 +5,7 @@ The Win32 reader is organized as a thin presentation application over reusable n
 ```text
 Main
   -> ReaderApplication
+       -> AppSettings
        -> PageCache
        -> NativePdfDocument
             -> PdfPP.Native
@@ -20,7 +21,11 @@ Owns only the Windows process entry point. It must not contain document, renderi
 
 ### ReaderApplication
 
-Owns window handles and coordinates commands, input, DPI changes, asynchronous loading, rendering and painting. It may depend on all application-level modules, but reusable modules must not depend on it.
+Owns window handles and coordinates commands, input, DPI changes, tabs, asynchronous loading, rendering and painting. It may depend on all application-level modules, but reusable modules must not depend on it.
+
+### AppSettings
+
+Owns the settings file (zoom, page layout, sidebar visibility, recent files, favorites) persisted as a UTF-8 text file next to the executable. It has no Win32 window dependency and can be unit tested independently.
 
 ### NativePdfDocument
 

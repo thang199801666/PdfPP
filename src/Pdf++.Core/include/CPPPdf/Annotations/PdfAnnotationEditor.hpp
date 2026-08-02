@@ -1,6 +1,7 @@
 #pragma once
 
 #include <CPPPdf/Core/PdfTypes.hpp>
+#include <CPPPdf/IO/PdfReader.hpp>
 
 #include <filesystem>
 #include <string>
@@ -46,7 +47,8 @@ public:
     [[nodiscard]] static PdfAnnotationEditResult AddAnnotations(
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
-        const std::vector<PdfAnnotation>& annotations);
+        const std::vector<PdfAnnotation>& annotations,
+        const PdfReaderOptions& readerOptions = {});
 };
 
 } // namespace CPPPdf

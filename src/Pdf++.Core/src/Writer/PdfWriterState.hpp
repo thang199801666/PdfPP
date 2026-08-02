@@ -89,5 +89,6 @@ struct PdfWriterState {
     std::vector<PdfWriterImage> images;
     std::vector<PdfWriterExtGState> extGStates;
     std::vector<PdfWriterEmbeddedFont> embeddedFonts;
+    std::optional<PdfEncryptionOptions> encryption;
 };
 }

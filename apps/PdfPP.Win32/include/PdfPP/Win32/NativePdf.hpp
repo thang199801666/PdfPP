@@ -19,6 +19,20 @@ struct PageBitmap final {
     [[nodiscard]] bool IsValid() const noexcept;
 };
 
+struct TextChunk final {
+    std::string text;
+    double left{};
+    double bottom{};
+    double right{};
+    double top{};
+};
+
+struct TocItem final {
+    int level{};
+    int page{-1};
+    std::wstring title;
+};
+
 class NativePdfDocument final {
 public:
     static std::shared_ptr<NativePdfDocument> Open(const std::wstring& path, std::string& error);
@@ -29,9 +43,13 @@ public:
 
     [[nodiscard]] int PageCount() const noexcept;
     [[nodiscard]] std::string Title() const;
+    [[nodiscard]] std::vector<TocItem> TableOfContents() const;
     [[nodiscard]] std::string Text(int page) const;
+    [[nodiscard]] std::vector<TextChunk> TextChunks(int page) const;
     [[nodiscard]] PageBitmap Render(int page, double zoom, unsigned int dpi,
                                     std::string& error) const;
+    // Pixel dimensions of a page at the given render scale, without rendering.
+    [[nodiscard]] bool PageSize(int page, double scale, int& width, int& height) const;
 
 private:
     explicit NativePdfDocument(void* handle) noexcept;

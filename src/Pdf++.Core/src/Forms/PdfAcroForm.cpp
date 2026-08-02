@@ -5,6 +5,7 @@
 #include <CPPPdf/PdfError.hpp>
 #include "Internal/Parsing/PdfObjectParser.hpp"
 #include "Internal/Writer/PdfObjectSerializer.hpp"
+#include "Internal/Writer/PdfIncrementalWriter.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -316,33 +317,15 @@ void writeIncrementalRevisions(
     const PdfDocument& document,
     const std::map<std::uint32_t, std::pair<PdfReference, PdfDictionary>>& revisions) {
 
-    const std::string source = readFile(inputPath);
-    std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
-    if (!output) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot create output PDF: " + outputPath.string());
-    output.write(source.data(), static_cast<std::streamsize>(source.size()));
-    if (!source.empty() && source.back() != '\n') output << '\n';
-
-    std::vector<std::pair<PdfReference, std::uint64_t>> entries;
-    entries.reserve(revisions.size());
+    Internal::PdfIncrementalWriter writer(inputPath, outputPath, document);
+    std::uint32_t size = Internal::PdfIncrementalWriter::NextObjectNumber(document);
     for (const auto& [number, revision] : revisions) {
         (void)number;
         const auto& [reference, dictionary] = revision;
-        const auto offset = static_cast<std::uint64_t>(output.tellp());
-        output << reference.objectNumber << ' ' << reference.generation << " obj\n";
-        Internal::PdfObjectSerializer::WriteDictionary(output, dictionary);
-        output << "\nendobj\n";
-        entries.emplace_back(reference, offset);
+        writer.WriteDictionary(reference, dictionary);
+        size = std::max(size, reference.objectNumber + 1U);
     }
-
-    const auto xrefOffset = static_cast<std::uint64_t>(output.tellp());
-    output << "xref\n";
-    writeXrefEntries(output, entries);
-
-    PdfDictionary trailer = parseTrailer(document);
-    trailer.Put(PdfName("Prev"), PdfObject(static_cast<std::int64_t>(document.GetStartXrefOffset())));
-    output << "trailer\n";
-    Internal::PdfObjectSerializer::WriteDictionary(output, trailer);
-    output << "\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    writer.Finish(size);
 }
 
 using IncrementalObjects = std::map<std::uint32_t, std::pair<PdfReference, PdfObject>>;
@@ -473,33 +456,15 @@ void writeIncrementalObjects(
     const std::filesystem::path& outputPath,
     const PdfDocument& document,
     const IncrementalObjects& objects) {
-    const std::string source = readFile(inputPath);
-    std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
-    if (!output) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot create output PDF: " + outputPath.string());
-    output.write(source.data(), static_cast<std::streamsize>(source.size()));
-    if (!source.empty() && source.back() != '\n') output << '\n';
-
-    std::vector<std::pair<PdfReference, std::uint64_t>> entries;
+    Internal::PdfIncrementalWriter writer(inputPath, outputPath, document);
     for (const auto& [unused, entry] : objects) {
         (void)unused;
         const auto& [reference, object] = entry;
-        const auto offset = static_cast<std::uint64_t>(output.tellp());
-        output << reference.objectNumber << ' ' << reference.generation << " obj\n";
-        Internal::PdfObjectSerializer::WriteObject(output, object);
-        output << "\nendobj\n";
-        entries.emplace_back(reference, offset);
+        writer.WriteObject(reference, object);
     }
-    const auto xrefOffset = static_cast<std::uint64_t>(output.tellp());
-    output << "xref\n";
-    writeXrefEntries(output, entries);
-    PdfDictionary trailer = parseTrailer(document);
-    trailer.Put(PdfName("Prev"), PdfObject(static_cast<std::int64_t>(document.GetStartXrefOffset())));
-    std::uint32_t size = nextObjectNumber(document);
+    std::uint32_t size = Internal::PdfIncrementalWriter::NextObjectNumber(document);
     if (!objects.empty()) size = std::max(size, objects.rbegin()->first + 1U);
-    trailer.Put(PdfName("Size"), PdfObject(static_cast<std::int64_t>(size)));
-    output << "trailer\n";
-    Internal::PdfObjectSerializer::WriteDictionary(output, trailer);
-    output << "\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    writer.Finish(size);
 }
 
 } // namespace
@@ -535,8 +500,9 @@ std::vector<PdfFormFieldInfo> PdfAcroForm::GetFields(const PdfDocument& document
     return fields;
 }
 
-std::vector<PdfFormFieldInfo> PdfAcroForm::GetFields(const std::filesystem::path& inputPath) {
-    const PdfDocument document = PdfDocument::Open(inputPath);
+std::vector<PdfFormFieldInfo> PdfAcroForm::GetFields(
+    const std::filesystem::path& inputPath, const PdfReaderOptions& readerOptions) {
+    const PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
     return GetFields(document);
 }
 
@@ -544,11 +510,14 @@ PdfFormUpdateResult PdfAcroForm::SetFieldValues(
     const std::filesystem::path& inputPath,
     const std::filesystem::path& outputPath,
     const std::vector<PdfFormFieldUpdate>& updates,
-    const PdfFormUpdateOptions& options) {
+    const PdfFormUpdateOptions& options,
+    const PdfReaderOptions& readerOptions) {
 
-    PdfDocument document = PdfDocument::Open(inputPath);
-    if (document.IsEncrypted()) {
-        throw PdfException(PdfErrorCode::UnsupportedFeature, "AcroForm editing does not support encrypted PDFs yet.");
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (document.IsEncrypted() && !document.IsOwnerPasswordAuthenticated() &&
+        (static_cast<std::uint32_t>(document.GetPermissionBits()) & 256U) == 0U) {
+        throw PdfException(PdfErrorCode::PermissionDenied,
+                           "The user password does not permit form filling.");
     }
     const auto nodes = readFieldNodes(document);
     std::unordered_map<std::string, const FieldNode*> byName;
@@ -623,11 +592,14 @@ PdfFormAppearanceResult PdfAcroForm::GenerateAppearances(
     const std::filesystem::path& inputPath,
     const std::filesystem::path& outputPath,
     const std::vector<std::string>& fieldNames,
-    const PdfFormAppearanceOptions& options) {
+    const PdfFormAppearanceOptions& options,
+    const PdfReaderOptions& readerOptions) {
 
-    PdfDocument document = PdfDocument::Open(inputPath);
-    if (document.IsEncrypted()) {
-        throw PdfException(PdfErrorCode::UnsupportedFeature, "AcroForm appearance generation does not support encrypted PDFs yet.");
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (document.IsEncrypted() && !document.IsOwnerPasswordAuthenticated() &&
+        (static_cast<std::uint32_t>(document.GetPermissionBits()) & 256U) == 0U) {
+        throw PdfException(PdfErrorCode::PermissionDenied,
+                           "The user password does not permit form appearance updates.");
     }
     const auto nodes = readFieldNodes(document);
     IncrementalObjects revisions;
@@ -689,11 +661,14 @@ PdfFormAppearanceResult PdfAcroForm::FlattenFields(
     const std::filesystem::path& inputPath,
     const std::filesystem::path& outputPath,
     const std::vector<std::string>& fieldNames,
-    const PdfFormAppearanceOptions& options) {
+    const PdfFormAppearanceOptions& options,
+    const PdfReaderOptions& readerOptions) {
 
-    PdfDocument document = PdfDocument::Open(inputPath);
-    if (document.IsEncrypted()) {
-        throw PdfException(PdfErrorCode::UnsupportedFeature, "AcroForm flattening does not support encrypted PDFs yet.");
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (document.IsEncrypted() && !document.IsOwnerPasswordAuthenticated() &&
+        (static_cast<std::uint32_t>(document.GetPermissionBits()) & 256U) == 0U) {
+        throw PdfException(PdfErrorCode::PermissionDenied,
+                           "The user password does not permit form flattening.");
     }
     const auto nodes = readFieldNodes(document);
     const auto pageMap = buildWidgetPageMap(document);

@@ -1,6 +1,7 @@
 #pragma once
 #include <CPPPdf/Core/PdfTypes.hpp>
 #include <CPPPdf/Graphics/PdfCanvas.hpp>
+#include <CPPPdf/Security/PdfSecurity.hpp>
 #include <filesystem>
 #include <memory>
 #include <span>
@@ -11,12 +12,25 @@
 
 namespace CPPPdf {
 namespace Internal { struct PdfWriterState; }
+struct PdfReaderOptions;
+class PdfDocument;
 
 enum class PdfSaveMode { Rewrite, Incremental };
 
 struct PdfSaveOptions final {
     PdfSaveMode mode{PdfSaveMode::Rewrite};
     bool subsetTrueTypeFonts{true};
+    // When true, the file cross-reference table is written as an /XRef
+    // stream instead of a classic `xref` table. Modern readers prefer this
+    // form and it is required before object streams can be emitted.
+    bool writeXrefStream{true};
+    // When true, small non-stream objects are packed into an /ObjStm and
+    // referenced from the /XRef stream with compressed (type 2) entries.
+    bool writeObjectStreams{false};
+    // When true, Resave merges byte-identical stream objects (fonts, images,
+    // content streams) into a single shared object. Safe because the merged
+    // objects carry no positional identity.
+    bool deduplicateObjects{false};
 };
 
 using PdfStampPoint = PdfPoint;
@@ -222,10 +236,30 @@ public:
     void AddWatermark(std::size_t pageIndex, const PdfWatermarkOptions& options);
     void AddWatermarkToAllPages(const PdfWatermarkOptions& options);
 
+    void SetEncryption(const PdfEncryptionOptions& options);
+    void ClearEncryption() noexcept;
+    [[nodiscard]] bool HasEncryption() const noexcept;
+    [[nodiscard]] const PdfEncryptionOptions* GetEncryptionOptions() const noexcept;
+
     void Save(const std::filesystem::path& path, PdfSaveMode mode = PdfSaveMode::Rewrite) const;
     void Save(const std::filesystem::path& path, const PdfSaveOptions& options) const;
     void Save(std::ostream& output, PdfSaveMode mode = PdfSaveMode::Rewrite) const;
     void Save(std::ostream& output, const PdfSaveOptions& options) const;
+
+    // Rewrites an existing PDF through the writer pipeline: every reachable
+    // object is parsed, re-serialized cleanly, and emitted as a fresh file
+    // (xref stream by default, optional object streams). This sanitizes the
+    // output, removes incremental revisions, and drops orphan objects.
+    static void Resave(const PdfDocument& document,
+                       const std::filesystem::path& outputPath,
+                       const PdfSaveOptions& options = {});
+    static void Resave(const std::filesystem::path& inputPath,
+                       const std::filesystem::path& outputPath,
+                       const PdfSaveOptions& options = {});
+    static void Resave(const std::filesystem::path& inputPath,
+                       const std::filesystem::path& outputPath,
+                       const PdfReaderOptions& readerOptions,
+                       const PdfSaveOptions& options = {});
 private:
     std::shared_ptr<Internal::PdfWriterState> state_;
 };

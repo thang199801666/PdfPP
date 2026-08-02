@@ -47,6 +47,38 @@ std::vector<char> PdfInputSource::ReadAll() {
     return bytes;
 }
 
+class PdfFileInputSource::Impl final {
+public:
+    explicit Impl(const std::filesystem::path& path) {
+#if defined(_WIN32)
+        handle = CreateFileW(path.c_str(), GENERIC_READ,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                             nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_RANDOM_ACCESS,
+                             nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open PDF file: " + path.string());
+        }
+#else
+        input.open(path, std::ios::binary | std::ios::in);
+        if (!input) {
+            throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open PDF file: " + path.string());
+        }
+#endif
+    }
+
+    ~Impl() {
+#if defined(_WIN32)
+        if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+#endif
+    }
+
+#if defined(_WIN32)
+    HANDLE handle{INVALID_HANDLE_VALUE};
+#else
+    std::ifstream input;
+#endif
+};
+
 PdfFileInputSource::PdfFileInputSource(std::filesystem::path path)
     : path_(std::move(path)) {
     std::error_code error;
@@ -56,7 +88,12 @@ PdfFileInputSource::PdfFileInputSource(std::filesystem::path path)
                            "Cannot determine PDF size: " + path_.string());
     }
     size_ = static_cast<std::uint64_t>(size);
+    impl_ = std::make_unique<Impl>(path_);
 }
+
+PdfFileInputSource::~PdfFileInputSource() = default;
+PdfFileInputSource::PdfFileInputSource(PdfFileInputSource&&) noexcept = default;
+PdfFileInputSource& PdfFileInputSource::operator=(PdfFileInputSource&&) noexcept = default;
 
 std::uint64_t PdfFileInputSource::Size() const {
     return size_;
@@ -72,18 +109,34 @@ void PdfFileInputSource::Read(std::uint64_t offset, std::span<char> destination)
         return;
     }
 
-    std::ifstream input(path_, std::ios::binary);
-    if (!input) {
+#if defined(_WIN32)
+    LARGE_INTEGER position{};
+    position.QuadPart = static_cast<LONGLONG>(offset);
+    if (SetFilePointerEx(impl_->handle, position, nullptr, FILE_BEGIN) == 0) {
         throw PdfException(PdfErrorCode::FileOpenFailed,
-                           "Cannot open PDF file: " + path_.string());
+                           "Cannot seek PDF file: " + path_.string());
     }
-
-    input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-    if (!input || !input.read(destination.data(),
-                              static_cast<std::streamsize>(destination.size()))) {
+    std::size_t completed = 0U;
+    while (completed < destination.size()) {
+        const DWORD request = static_cast<DWORD>(std::min<std::size_t>(
+            destination.size() - completed, static_cast<std::size_t>(std::numeric_limits<DWORD>::max())));
+        DWORD read = 0U;
+        if (ReadFile(impl_->handle, destination.data() + completed, request, &read, nullptr) == 0 ||
+            read != request) {
+            throw PdfException(PdfErrorCode::FileOpenFailed,
+                               "Cannot read PDF file: " + path_.string());
+        }
+        completed += read;
+    }
+#else
+    impl_->input.clear();
+    impl_->input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!impl_->input || !impl_->input.read(destination.data(),
+                                             static_cast<std::streamsize>(destination.size()))) {
         throw PdfException(PdfErrorCode::FileOpenFailed,
                            "Cannot read PDF file: " + path_.string());
     }
+#endif
 }
 
 
@@ -96,11 +149,7 @@ std::vector<char> PdfFileInputSource::ReadAll() {
     std::vector<char> bytes(static_cast<std::size_t>(size_));
     if (bytes.empty()) return bytes;
 
-    std::ifstream input(path_, std::ios::binary);
-    if (!input || !input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) {
-        throw PdfException(PdfErrorCode::FileOpenFailed,
-                           "Cannot read PDF file: " + path_.string());
-    }
+    Read(0U, bytes);
     return bytes;
 }
 

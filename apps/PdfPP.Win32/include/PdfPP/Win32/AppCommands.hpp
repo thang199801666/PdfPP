@@ -31,6 +31,16 @@ inline constexpr int ID_VIEW_TAB = 1024;
 inline constexpr int ID_BOOKMARK_CLOSE = 1025;
 inline constexpr int ID_BOOKMARKS = 1026;
 inline constexpr int ID_FULLSCREEN = 1027;
+inline constexpr int ID_VIEW_CONTINUOUS = 1028;
+inline constexpr int ID_VIEW_SINGLE_PAGE = 1029;
+inline constexpr int ID_SELECT_TOOL = 1030;
+inline constexpr int ID_PRINT = 1031;
+inline constexpr int ID_SIDEBAR_TOGGLE = 1032;
+inline constexpr int ID_RECENT_BASE = 1033;
+inline constexpr int ID_ADD_FAVORITE = 1034;
+inline constexpr int ID_FAVORITE_BASE = 1035;
+inline constexpr int ID_TABBAR = 1036;
+inline constexpr int ID_CLOSE_TAB = 1037;
 
 inline constexpr UINT WM_RENDER_COMPLETE = WM_APP + 41;
 inline constexpr UINT WM_OPEN_COMPLETE = WM_APP + 42;

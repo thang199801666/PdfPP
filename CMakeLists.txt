@@ -22,7 +22,7 @@ set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
 add_subdirectory(third_party/zlib EXCLUDE_FROM_ALL)
 
 set(PDFPP_PUBLIC_HEADERS
-    src/Pdf++.Core/include/CPPPdf/CPPPdf.hpp
+    src/Pdf++.Core/include/CPPPdf/CPPPdf.h
     src/Pdf++.Core/include/CPPPdf/Api.hpp
     src/Pdf++.Core/include/CPPPdf/Version.hpp
     src/Pdf++.Core/include/CPPPdf/Types.hpp
@@ -50,6 +50,7 @@ set(PDFPP_PUBLIC_HEADERS
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfTrueTypeFont.hpp
     src/Pdf++.Core/include/CPPPdf/Content/PdfContentProcessor.hpp
     src/Pdf++.Core/include/CPPPdf/Writer/PdfWriter.hpp
+    src/Pdf++.Core/include/CPPPdf/Security/PdfSecurity.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfCanvas.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfImage.hpp
     src/Pdf++.Core/include/CPPPdf/Rendering/PdfBitmap.hpp
@@ -71,6 +72,8 @@ set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Document/PdfPageImporter.cpp
     src/Pdf++.Core/src/Internal/Writer/PdfObjectSerializer.cpp
     src/Pdf++.Core/src/Internal/Writer/PdfObjectSerializer.hpp
+    src/Pdf++.Core/src/Internal/Writer/PdfIncrementalWriter.hpp
+    src/Pdf++.Core/src/Writer/PdfIncrementalWriter.cpp
     src/Pdf++.Core/src/Filters/PdfFilterPipeline.cpp
     src/Pdf++.Core/src/IO/PdfInputSource.cpp
     src/Pdf++.Core/src/Objects/PdfObject.cpp
@@ -83,6 +86,9 @@ set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Content/PdfContentProcessor.cpp
     src/Pdf++.Core/src/Writer/PdfWriter.cpp
     src/Pdf++.Core/src/Writer/PdfWriterState.hpp
+    src/Pdf++.Core/src/Security/PdfStandardSecurity.cpp
+    src/Pdf++.Core/src/Security/PdfPasswordManager.cpp
+    src/Pdf++.Core/src/Internal/Security/PdfStandardSecurity.hpp
     src/Pdf++.Core/src/Graphics/PdfCanvas.cpp
     src/Pdf++.Core/src/Graphics/PdfImage.cpp
     src/Pdf++.Core/src/Rendering/PdfBitmap.cpp

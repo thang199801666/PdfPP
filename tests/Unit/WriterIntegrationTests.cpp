@@ -1,4 +1,5 @@
-#include <CPPPdf/CPPPdf.hpp>
+#include <CPPPdf/CPPPdf.h>
+#include "Internal/Writer/PdfIncrementalWriter.hpp"
 #include <cassert>
 #include <filesystem>
 #include <array>
@@ -188,6 +189,366 @@ int RunWriterIntegrationTests() {
         PDFPP_TEST_CHECK(extracted.find("tự động xuống dòng") != std::string::npos);
         std::filesystem::remove(unicodePath);
         std::filesystem::remove(fullFontPath);
+    }
+
+    {
+        PdfWriter streamWriter;
+        const auto streamPage = streamWriter.AddPage({0, 0, 400, 500});
+        streamWriter.GetCanvas(streamPage).BeginText().SetFontAndSize("Helvetica", 12)
+            .MoveText(36, 460).ShowText("XRef stream output").EndText();
+        std::ostringstream xrefStreamOutput;
+        streamWriter.Save(xrefStreamOutput);
+        const std::string xrefStreamBytes = xrefStreamOutput.str();
+        PDFPP_TEST_CHECK(xrefStreamBytes.find("/Type /XRef") != std::string::npos);
+        PDFPP_TEST_CHECK(xrefStreamBytes.find("xref\n0 ") == std::string::npos);
+        PDFPP_TEST_CHECK(xrefStreamBytes.find("trailer\n<< /Size") == std::string::npos);
+        const auto xrefStreamPath = std::filesystem::temp_directory_path() / "pdfpp_xref_stream_test.pdf";
+        {
+            std::ofstream file(xrefStreamPath, std::ios::binary);
+            file.write(xrefStreamBytes.data(), static_cast<std::streamsize>(xrefStreamBytes.size()));
+        }
+        auto xrefStreamDocument = PdfDocument::Open(xrefStreamPath);
+        PDFPP_TEST_CHECK(xrefStreamDocument.GetPageText(0U).find("XRef stream output") != std::string::npos);
+
+        PdfSaveOptions classicOptions;
+        classicOptions.writeXrefStream = false;
+        std::ostringstream classicOutput;
+        streamWriter.Save(classicOutput, classicOptions);
+        const std::string classicBytes = classicOutput.str();
+        PDFPP_TEST_CHECK(classicBytes.find("xref\n0 ") != std::string::npos);
+        PDFPP_TEST_CHECK(classicBytes.find("/Type /XRef") == std::string::npos);
+        const auto classicPath = std::filesystem::temp_directory_path() / "pdfpp_classic_xref_test.pdf";
+        {
+            std::ofstream file(classicPath, std::ios::binary);
+            file.write(classicBytes.data(), static_cast<std::streamsize>(classicBytes.size()));
+        }
+        auto classicDocument = PdfDocument::Open(classicPath);
+        PDFPP_TEST_CHECK(classicDocument.GetPageText(0U).find("XRef stream output") != std::string::npos);
+        std::filesystem::remove(xrefStreamPath);
+        std::filesystem::remove(classicPath);
+    }
+
+    {
+        // Object streams must round-trip every feature through the reader.
+        PdfWriter objectStreamWriter;
+        const auto labelPage = objectStreamWriter.AddPage({0, 0, 400, 500});
+        objectStreamWriter.GetCanvas(labelPage).BeginText().SetFontAndSize("Helvetica", 12)
+            .MoveText(36, 460).ShowText("Object stream round trip").EndText();
+        const auto secondLabelPage = objectStreamWriter.AddPage({0, 0, 400, 500});
+        objectStreamWriter.GetCanvas(secondLabelPage).BeginText().SetFontAndSize("Helvetica", 12)
+            .MoveText(36, 460).ShowText("Second label page").EndText();
+        objectStreamWriter.AddPageLabel(0U, PdfPageLabelOptions{});
+        objectStreamWriter.AddPageLabel(1U, {PdfPageLabelStyle::LowerRoman, "P-", 5U});
+        const auto bookmarkIndex = objectStreamWriter.AddBookmark(PdfBookmarkOptions{"ObjStm bookmark", 0U});
+        (void)bookmarkIndex;
+        objectStreamWriter.AddNamedDestination("objstm-dest", PdfDestinationOptions{});
+        objectStreamWriter.AddUriLink(0U, "https://example.com/objstm", PdfLinkOptions{});
+
+        PdfSaveOptions objectStreamOptions;
+        objectStreamOptions.writeObjectStreams = true;
+        const auto objectStreamPath = std::filesystem::temp_directory_path() / "pdfpp_objstm_test.pdf";
+        objectStreamWriter.Save(objectStreamPath, objectStreamOptions);
+        auto objectStreamDocument = PdfDocument::Open(objectStreamPath);
+        PDFPP_TEST_CHECK(objectStreamDocument.GetPageCount() == 2U);
+        PDFPP_TEST_CHECK(objectStreamDocument.GetPageText(0U).find("Object stream round trip") != std::string::npos);
+        PDFPP_TEST_CHECK(objectStreamDocument.GetPageText(1U).find("Second label page") != std::string::npos);
+        std::size_t compressedCount = 0U;
+        bool compressedObjectReadable = false;
+        for (std::uint32_t number = 1U; number < 80U; ++number) {
+            const auto entry = objectStreamDocument.GetXrefEntry(number);
+            if (!entry || entry->type != PdfXrefEntry::Type::Compressed) continue;
+            ++compressedCount;
+            const auto& object = objectStreamDocument.GetObject(PdfReference{number, 0U});
+            if (const PdfDictionary* dictionary = object.AsDictionary()) {
+                if (const PdfDictionary* action = dictionary->GetAsDictionary(PdfName("A"))) {
+                    const auto subtype = action->GetAsName(PdfName("S"));
+                    if (subtype && subtype->value() == "URI") {
+                        const PdfObject* uri = action->Find(PdfName("URI"));
+                        compressedObjectReadable = uri && uri->AsString() &&
+                            *uri->AsString() == "https://example.com/objstm";
+                    }
+                }
+            }
+        }
+        PDFPP_TEST_CHECK(compressedCount > 0U);
+        PDFPP_TEST_CHECK(compressedObjectReadable);
+        std::filesystem::remove(objectStreamPath);
+    }
+
+    {
+        // An incremental revision can pack its small objects into an object
+        // stream and reference them from a new xref stream that chains through
+        // /Prev to the original file.
+        const auto incrementalInput =
+            std::filesystem::temp_directory_path() / "pdfpp_incremental_objstm_input.pdf";
+        const auto incrementalOutput =
+            std::filesystem::temp_directory_path() / "pdfpp_incremental_objstm_output.pdf";
+        PdfWriter baseWriter;
+        const auto basePage = baseWriter.AddPage({0, 0, 300, 400});
+        baseWriter.GetCanvas(basePage).BeginText().SetFontAndSize("Helvetica", 12)
+            .MoveText(24, 360).ShowText("Base document").EndText();
+        baseWriter.Save(incrementalInput);
+
+        auto baseDocument = CPPPdf::PdfDocument::Open(incrementalInput);
+        const auto first = CPPPdf::Internal::PdfIncrementalWriter::NextObjectNumber(baseDocument);
+        {
+            CPPPdf::Internal::PdfIncrementalWriterOptions options;
+            options.writeObjectStreams = true;
+            CPPPdf::Internal::PdfIncrementalWriter incremental(incrementalInput, incrementalOutput,
+                                                               baseDocument, options);
+            CPPPdf::PdfDictionary alpha;
+            alpha.Put(CPPPdf::PdfName("Kind"), CPPPdf::PdfObject(CPPPdf::PdfName("Alpha")));
+            CPPPdf::PdfDictionary beta;
+            beta.Put(CPPPdf::PdfName("Kind"), CPPPdf::PdfObject(CPPPdf::PdfName("Beta")));
+            CPPPdf::PdfDictionary gamma;
+            gamma.Put(CPPPdf::PdfName("Kind"), CPPPdf::PdfObject(CPPPdf::PdfName("Gamma")));
+            incremental.WriteDictionary(CPPPdf::PdfReference{first, 0U}, alpha);
+            incremental.WriteDictionary(CPPPdf::PdfReference{first + 1U, 0U}, beta);
+            incremental.WriteDictionary(CPPPdf::PdfReference{first + 2U, 0U}, gamma);
+            incremental.WriteRawObject(CPPPdf::PdfReference{first + 3U, 0U},
+                "<< /Length 5 >>\nstream\nhello\nendstream");
+            incremental.Finish(first + 4U);
+        }
+
+        auto updatedDocument = CPPPdf::PdfDocument::Open(incrementalOutput);
+        PDFPP_TEST_CHECK(updatedDocument.GetPageText(0U).find("Base document") != std::string::npos);
+        bool compressedSeen = false;
+        for (std::uint32_t number = 1U; number < 80U; ++number) {
+            const auto entry = updatedDocument.GetXrefEntry(number);
+            if (!entry || entry->type != CPPPdf::PdfXrefEntry::Type::Compressed) continue;
+            compressedSeen = true;
+            const auto& object = updatedDocument.GetObject(CPPPdf::PdfReference{number, 0U});
+            const auto* dictionary = object.AsDictionary();
+            const auto kind = dictionary ? dictionary->GetAsName(CPPPdf::PdfName("Kind")) : std::nullopt;
+            if (number == first) PDFPP_TEST_CHECK(kind && kind->value() == "Alpha");
+            if (number == first + 1U) PDFPP_TEST_CHECK(kind && kind->value() == "Beta");
+            if (number == first + 2U) PDFPP_TEST_CHECK(kind && kind->value() == "Gamma");
+        }
+        PDFPP_TEST_CHECK(compressedSeen);
+        const auto& streamObject = updatedDocument.GetObject(CPPPdf::PdfReference{first + 3U, 0U});
+        PDFPP_TEST_CHECK(streamObject.AsStream() != nullptr);
+        PDFPP_TEST_CHECK(updatedDocument.GetTrailerDictionary().find("/Type /XRef") != std::string::npos);
+        std::filesystem::remove(incrementalInput);
+        std::filesystem::remove(incrementalOutput);
+    }
+
+    {
+        // An encrypted document accepts an object-stream incremental revision;
+        // the object stream itself is encrypted with the stream object number.
+        const auto encryptedInput =
+            std::filesystem::temp_directory_path() / "pdfpp_incremental_encrypted_input.pdf";
+        const auto encryptedOutput =
+            std::filesystem::temp_directory_path() / "pdfpp_incremental_encrypted_output.pdf";
+        PdfWriter encryptedWriter;
+        const auto encryptedPage = encryptedWriter.AddPage({0, 0, 300, 400});
+        encryptedWriter.GetCanvas(encryptedPage).BeginText().SetFontAndSize("Helvetica", 12)
+            .MoveText(24, 360).ShowText("Encrypted base").EndText();
+        PdfEncryptionOptions encryptionOptions;
+        encryptionOptions.userPassword = "objstm-user";
+        encryptionOptions.ownerPassword = "objstm-owner";
+        encryptionOptions.algorithm = PdfEncryptionAlgorithm::Aes128;
+        encryptedWriter.SetEncryption(encryptionOptions);
+        encryptedWriter.Save(encryptedInput);
+
+        PdfReaderOptions readerOptions;
+        readerOptions.password = "objstm-user";
+        auto encryptedDocument = CPPPdf::PdfDocument::Open(encryptedInput, readerOptions);
+        const auto first = CPPPdf::Internal::PdfIncrementalWriter::NextObjectNumber(encryptedDocument);
+        {
+            CPPPdf::Internal::PdfIncrementalWriterOptions options;
+            options.writeObjectStreams = true;
+            CPPPdf::Internal::PdfIncrementalWriter incremental(encryptedInput, encryptedOutput,
+                                                               encryptedDocument, options);
+            CPPPdf::PdfDictionary alpha;
+            alpha.Put(CPPPdf::PdfName("Secret"), CPPPdf::PdfObject(CPPPdf::PdfName("HiddenValue")));
+            incremental.WriteDictionary(CPPPdf::PdfReference{first, 0U}, alpha);
+            incremental.Finish(first + 1U);
+        }
+
+        PdfReaderOptions reopenOptions;
+        reopenOptions.password = "objstm-user";
+        auto reopened = CPPPdf::PdfDocument::Open(encryptedOutput, reopenOptions);
+        PDFPP_TEST_CHECK(reopened.GetPageText(0U).find("Encrypted base") != std::string::npos);
+        const auto& secret = reopened.GetObject(CPPPdf::PdfReference{first, 0U});
+        const auto* secretDictionary = secret.AsDictionary();
+        const auto secretValue = secretDictionary
+            ? secretDictionary->GetAsName(CPPPdf::PdfName("Secret")) : std::nullopt;
+        PDFPP_TEST_CHECK(secretValue && secretValue->value() == "HiddenValue");
+        std::filesystem::remove(encryptedInput);
+        std::filesystem::remove(encryptedOutput);
+    }
+
+    {
+        // Resave rewrites a document through the writer pipeline: incremental
+        // revisions collapse into one clean file, orphan objects are dropped,
+        // and reachable objects (including ones added incrementally) survive.
+        const auto resaveInput =
+            std::filesystem::temp_directory_path() / "pdfpp_resave_input.pdf";
+        const auto resaveIncremental =
+            std::filesystem::temp_directory_path() / "pdfpp_resave_incremental.pdf";
+        const auto resaveOutput =
+            std::filesystem::temp_directory_path() / "pdfpp_resave_output.pdf";
+        const auto resaveOutputObjStm =
+            std::filesystem::temp_directory_path() / "pdfpp_resave_output_objstm.pdf";
+        PdfWriter sourceWriter;
+        const auto sourcePage = sourceWriter.AddPage({0, 0, 400, 500});
+        sourceWriter.GetCanvas(sourcePage).BeginText().SetFontAndSize("Helvetica", 12)
+            .MoveText(36, 460).ShowText("Resave target text").EndText();
+        PdfSaveOptions sourceOptions;
+        sourceOptions.writeObjectStreams = true;
+        sourceWriter.Save(resaveInput, sourceOptions);
+
+        auto sourceDocument = PdfDocument::Open(resaveInput);
+        const auto pageReference = sourceDocument.GetPageReference(0U);
+        const auto& pageObject = sourceDocument.GetObject(pageReference);
+        const auto* pageDictionary = pageObject.AsDictionary();
+        PdfDictionary newPage;
+        if (pageDictionary) {
+            for (const auto& [key, value] : pageDictionary->values()) newPage.Put(key, value);
+        }
+        {
+            CPPPdf::Internal::PdfIncrementalWriterOptions incrementalOptions;
+            incrementalOptions.writeObjectStreams = true;
+            CPPPdf::Internal::PdfIncrementalWriter incremental(resaveInput, resaveIncremental,
+                                                               sourceDocument, incrementalOptions);
+            const auto first = CPPPdf::Internal::PdfIncrementalWriter::NextObjectNumber(sourceDocument);
+            CPPPdf::PdfDictionary action;
+            action.Put(PdfName("S"), PdfObject(PdfName("URI")));
+            action.Put(PdfName("URI"), PdfObject(std::string("https://example.com/resaved")));
+            CPPPdf::PdfDictionary link;
+            link.Put(PdfName("Type"), PdfObject(PdfName("Annot")));
+            link.Put(PdfName("Subtype"), PdfObject(PdfName("Link")));
+            CPPPdf::PdfArray rectangle;
+            rectangle.push_back(PdfObject(std::int64_t{10}));
+            rectangle.push_back(PdfObject(std::int64_t{10}));
+            rectangle.push_back(PdfObject(std::int64_t{100}));
+            rectangle.push_back(PdfObject(std::int64_t{50}));
+            link.Put(PdfName("Rect"), PdfObject(std::move(rectangle)));
+            link.Put(PdfName("A"), PdfObject(std::move(action)));
+            incremental.WriteDictionary(PdfReference{first, 0U}, link);
+            CPPPdf::PdfArray annots;
+            annots.push_back(PdfObject::IndirectReference(first, 0U));
+            newPage.Put(PdfName("Annots"), PdfObject(std::move(annots)));
+            incremental.WriteDictionary(pageReference, newPage);
+            incremental.Finish(first + 1U);
+        }
+
+        PdfWriter::Resave(resaveIncremental, resaveOutput);
+        auto resaved = PdfDocument::Open(resaveOutput);
+        PDFPP_TEST_CHECK(resaved.GetPageText(0U).find("Resave target text") != std::string::npos);
+        PDFPP_TEST_CHECK(resaved.GetTrailerDictionary().find("/Prev") == std::string::npos);
+        const auto& resavedPage = resaved.GetObject(resaved.GetPageReference(0U));
+        const auto* resavedPageDictionary = resavedPage.AsDictionary();
+        const auto* annots = resavedPageDictionary
+            ? resavedPageDictionary->GetAsArray(PdfName("Annots")) : nullptr;
+        PDFPP_TEST_CHECK(annots != nullptr && annots->size() == 1U);
+
+        PdfSaveOptions objStmResaveOptions;
+        objStmResaveOptions.writeObjectStreams = true;
+        PdfWriter::Resave(resaveIncremental, resaveOutputObjStm, objStmResaveOptions);
+        auto resavedObjStm = PdfDocument::Open(resaveOutputObjStm);
+        PDFPP_TEST_CHECK(resavedObjStm.GetPageText(0U).find("Resave target text") != std::string::npos);
+        bool objStmPresent = false;
+        for (std::uint32_t number = 1U; number < 80U; ++number) {
+            const auto entry = resavedObjStm.GetXrefEntry(number);
+            if (entry && entry->type == CPPPdf::PdfXrefEntry::Type::Compressed) {
+                objStmPresent = true;
+                break;
+            }
+        }
+        PDFPP_TEST_CHECK(objStmPresent);
+        std::filesystem::remove(resaveInput);
+        std::filesystem::remove(resaveIncremental);
+        std::filesystem::remove(resaveOutput);
+        std::filesystem::remove(resaveOutputObjStm);
+    }
+
+    {
+        // Resave with deduplicateObjects merges byte-identical stream objects:
+        // two pages with identical content share a single content stream.
+        const auto dedupInput =
+            std::filesystem::temp_directory_path() / "pdfpp_dedup_input.pdf";
+        const auto dedupPlain =
+            std::filesystem::temp_directory_path() / "pdfpp_dedup_plain.pdf";
+        const auto dedupOutput =
+            std::filesystem::temp_directory_path() / "pdfpp_dedup_output.pdf";
+        PdfWriter dedupWriter;
+        const std::size_t dedupPage0 = dedupWriter.AddPage({0, 0, 400, 500});
+        const std::size_t dedupPage1 = dedupWriter.AddPage({0, 0, 400, 500});
+        const auto drawDupText = [&dedupWriter](const std::size_t page) {
+            dedupWriter.GetCanvas(page).BeginText().SetFontAndSize("Helvetica", 12)
+                .MoveText(36, 460).ShowText("Shared stream text").EndText();
+        };
+        drawDupText(dedupPage0);
+        drawDupText(dedupPage1);
+        dedupWriter.Save(dedupInput);
+
+        auto dedupSource = PdfDocument::Open(dedupInput);
+        const auto contentRefOf = [](const PdfDocument& document, const PdfReference page) -> PdfReference {
+            const auto& object = document.GetObject(page);
+            const auto* dictionary = object.AsDictionary();
+            const auto* contents = dictionary ? dictionary->Find(PdfName("Contents")) : nullptr;
+            const auto reference = contents ? contents->AsReference() : std::nullopt;
+            if (!reference) return {0U, 0U};
+            return {reference->first, reference->second};
+        };
+        const auto sourceContent0 = contentRefOf(dedupSource, dedupSource.GetPageReference(0U));
+        const auto sourceContent1 = contentRefOf(dedupSource, dedupSource.GetPageReference(1U));
+        PDFPP_TEST_CHECK(sourceContent0.objectNumber != 0U);
+        PDFPP_TEST_CHECK(sourceContent0.objectNumber != sourceContent1.objectNumber);
+
+        PdfSaveOptions plainOptions;
+        PdfWriter::Resave(dedupInput, dedupPlain, plainOptions);
+        auto plainResaved = PdfDocument::Open(dedupPlain);
+        PDFPP_TEST_CHECK(plainResaved.GetPageText(0U).find("Shared stream text") != std::string::npos);
+        PDFPP_TEST_CHECK(plainResaved.GetPageText(1U).find("Shared stream text") != std::string::npos);
+        const auto plainContent0 = contentRefOf(plainResaved, plainResaved.GetPageReference(0U));
+        const auto plainContent1 = contentRefOf(plainResaved, plainResaved.GetPageReference(1U));
+        PDFPP_TEST_CHECK(plainContent0.objectNumber != plainContent1.objectNumber);
+
+        PdfSaveOptions dedupOptions;
+        dedupOptions.deduplicateObjects = true;
+        PdfWriter::Resave(dedupInput, dedupOutput, dedupOptions);
+        auto dedupResaved = PdfDocument::Open(dedupOutput);
+        PDFPP_TEST_CHECK(dedupResaved.GetPageText(0U).find("Shared stream text") != std::string::npos);
+        PDFPP_TEST_CHECK(dedupResaved.GetPageText(1U).find("Shared stream text") != std::string::npos);
+        const auto dedupContent0 = contentRefOf(dedupResaved, dedupResaved.GetPageReference(0U));
+        const auto dedupContent1 = contentRefOf(dedupResaved, dedupResaved.GetPageReference(1U));
+        PDFPP_TEST_CHECK(dedupContent0.objectNumber != 0U);
+        PDFPP_TEST_CHECK(dedupContent0.objectNumber == dedupContent1.objectNumber);
+        std::filesystem::remove(dedupInput);
+        std::filesystem::remove(dedupPlain);
+        std::filesystem::remove(dedupOutput);
+    }
+
+    {
+        // Resaving an encrypted document preserves the same passwords.
+        const auto encryptedInput =
+            std::filesystem::temp_directory_path() / "pdfpp_resave_encrypted_input.pdf";
+        const auto encryptedOutput =
+            std::filesystem::temp_directory_path() / "pdfpp_resave_encrypted_output.pdf";
+        PdfWriter encryptedWriter;
+        const auto encryptedPage = encryptedWriter.AddPage({0, 0, 300, 400});
+        encryptedWriter.GetCanvas(encryptedPage).BeginText().SetFontAndSize("Helvetica", 12)
+            .MoveText(24, 360).ShowText("Encrypted resave text").EndText();
+        PdfEncryptionOptions encryptionOptions;
+        encryptionOptions.userPassword = "resave-user";
+        encryptionOptions.ownerPassword = "resave-owner";
+        encryptionOptions.algorithm = PdfEncryptionAlgorithm::Aes128;
+        encryptedWriter.SetEncryption(encryptionOptions);
+        encryptedWriter.Save(encryptedInput);
+
+        PdfReaderOptions readerOptions;
+        readerOptions.password = "resave-user";
+        PdfWriter::Resave(encryptedInput, encryptedOutput, readerOptions);
+
+        PdfReaderOptions reopenOptions;
+        reopenOptions.password = "resave-user";
+        auto resavedEncrypted = PdfDocument::Open(encryptedOutput, reopenOptions);
+        PDFPP_TEST_CHECK(resavedEncrypted.IsEncrypted());
+        PDFPP_TEST_CHECK(resavedEncrypted.GetPageText(0U).find("Encrypted resave text") != std::string::npos);
+        std::filesystem::remove(encryptedInput);
+        std::filesystem::remove(encryptedOutput);
     }
 
     PdfWriter writer;

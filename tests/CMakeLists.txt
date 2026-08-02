@@ -4,6 +4,7 @@ add_executable(PdfPP.UnitTests
     Unit/WriterIntegrationTests.cpp
     Unit/ApiCoverageTests.cpp
     Unit/FeatureUnitTests.cpp
+    Unit/SecurityTests.cpp
 )
 target_link_libraries(PdfPP.UnitTests PRIVATE CPPPdf::Core)
 target_compile_features(PdfPP.UnitTests PRIVATE cxx_std_20)

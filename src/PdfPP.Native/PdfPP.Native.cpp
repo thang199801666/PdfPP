@@ -7,6 +7,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#ifdef GetObject
+#undef GetObject
+#endif
 #include <gdiplus.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Data.Pdf.h>
@@ -21,12 +24,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <functional>
 #include <filesystem>
 #include <memory>
 #include <numeric>
 #include <limits>
 #include <span>
 #include <string>
+#include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #pragma comment(lib, "gdiplus.lib")
@@ -65,6 +72,49 @@ std::wstring utf8ToWide(const std::string& value) {
     std::wstring result(static_cast<std::size_t>(length), L'\0');
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
                         static_cast<int>(value.size()), result.data(), length);
+    return result;
+}
+
+// PDF outline titles are PDF strings, not necessarily UTF-8.  A BOM marks
+// UTF-16BE; strings without a BOM use PDFDocEncoding (which is close to
+// Windows-1252 for the printable range). Normalize both forms to UTF-8 before
+// handing the title to the Win32 tree view.
+std::string pdfStringToUtf8(const std::string& value) {
+    if (value.empty()) return {};
+    if (value.size() >= 2U &&
+        static_cast<unsigned char>(value[0]) == 0xFEU &&
+        static_cast<unsigned char>(value[1]) == 0xFFU) {
+        std::wstring wide;
+        wide.reserve((value.size() - 2U) / 2U);
+        for (std::size_t i = 2U; i + 1U < value.size(); i += 2U) {
+            wide.push_back(static_cast<wchar_t>(
+                (static_cast<unsigned int>(static_cast<unsigned char>(value[i])) << 8U) |
+                static_cast<unsigned int>(static_cast<unsigned char>(value[i + 1U]))));
+        }
+        const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+            wide.data(), static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
+        if (length <= 0) return {};
+        std::string result(static_cast<std::size_t>(length), '\0');
+        WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(),
+            static_cast<int>(wide.size()), result.data(), length, nullptr, nullptr);
+        return result;
+    }
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), nullptr, 0) > 0) {
+        return value;
+    }
+    const int wideLength = MultiByteToWideChar(1252, 0, value.data(),
+        static_cast<int>(value.size()), nullptr, 0);
+    if (wideLength <= 0) return {};
+    std::wstring wide(static_cast<std::size_t>(wideLength), L'\0');
+    MultiByteToWideChar(1252, 0, value.data(), static_cast<int>(value.size()),
+                        wide.data(), wideLength);
+    const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLength,
+        nullptr, 0, nullptr, nullptr);
+    if (utf8Length <= 0) return {};
+    std::string result(static_cast<std::size_t>(utf8Length), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLength, result.data(),
+                        utf8Length, nullptr, nullptr);
     return result;
 }
 
@@ -476,6 +526,26 @@ PDFPP_EXPORT int pdfpp_page_count(void* handle) {
     try { return static_cast<int>(static_cast<NativeDocument*>(handle)->document.GetPageCount()); }
     catch (...) { return 0; }
 }
+// Returns the page's pixel dimensions at the given render scale without
+// actually rendering it, so the reader can size the scrollbar to the whole
+// document. 0,0 is returned for failures. The scale matches pdfpp_render:
+// pixels = points * (96/72) * scale, i.e. the page size at 96 DPI scaled up.
+PDFPP_EXPORT void pdfpp_page_size(void* handle, int page, double scale, int* width, int* height) {
+    *width = 0;
+    *height = 0;
+    try {
+        const auto info = static_cast<NativeDocument*>(handle)
+            ->document.GetPageInfo(static_cast<std::size_t>(page));
+        const double pointsWidth = info.cropBox.empty() ? info.mediaBox.width() : info.cropBox.width();
+        const double pointsHeight = info.cropBox.empty() ? info.mediaBox.height() : info.cropBox.height();
+        const double pixelsPerPoint = 96.0 / 72.0;
+        *width = static_cast<int>(std::lround(pointsWidth * pixelsPerPoint * scale));
+        *height = static_cast<int>(std::lround(pointsHeight * pixelsPerPoint * scale));
+    } catch (...) {
+        *width = 0;
+        *height = 0;
+    }
+}
 PDFPP_EXPORT const char* pdfpp_title(void* handle) {
     lastString = static_cast<NativeDocument*>(handle)->document.GetDocumentInfo().title; return lastString.c_str();
 }
@@ -486,6 +556,140 @@ PDFPP_EXPORT const char* pdfpp_text(void* handle, int page) {
     try { lastString = static_cast<NativeDocument*>(handle)->document.ExtractText(static_cast<std::size_t>(page), {}); }
     catch (...) { lastString.clear(); }
     return lastString.c_str();
+}
+
+PDFPP_EXPORT const char* pdfpp_toc(void* handle) {
+    lastString.clear();
+    try {
+        auto& document = static_cast<NativeDocument*>(handle)->document;
+        const auto* catalog = document.GetObject(document.GetCatalogReference()).AsDictionary();
+        if (!catalog) return lastString.c_str();
+        const auto* outlinesObject = catalog->Find(CPPPdf::PdfName("Outlines"));
+        const auto outlinesReference = outlinesObject ? outlinesObject->AsReference() : std::nullopt;
+        if (!outlinesReference) return lastString.c_str();
+        const auto* outlines = document.GetObject(
+            CPPPdf::PdfReference{outlinesReference->first, outlinesReference->second}).AsDictionary();
+        if (!outlines) return lastString.c_str();
+        std::unordered_map<std::uint32_t, int> pageByObject;
+        for (std::size_t page = 0; page < document.GetPageCount(); ++page) {
+            pageByObject.emplace(document.GetPageReference(page).objectNumber, static_cast<int>(page));
+        }
+        auto resolveDictionary = [&](const CPPPdf::PdfObject* object) -> const CPPPdf::PdfDictionary* {
+            if (!object) return nullptr;
+            if (const auto reference = object->AsReference()) {
+                return document.GetObject(CPPPdf::PdfReference{reference->first, reference->second}).AsDictionary();
+            }
+            return object->AsDictionary();
+        };
+        std::function<int(const CPPPdf::PdfObject*)> destinationPage;
+        destinationPage = [&](const CPPPdf::PdfObject* object) -> int {
+            if (!object) return -1;
+            const CPPPdf::PdfObject* value = object;
+            CPPPdf::PdfObject resolved;
+            if (const auto reference = object->AsReference()) {
+                resolved = document.GetObject(CPPPdf::PdfReference{reference->first, reference->second});
+                value = &resolved;
+            }
+            const auto* array = value->AsArray();
+            if (!array || array->empty()) return -1;
+            const auto pageReference = array->at(0).AsReference();
+            if (!pageReference) return -1;
+            const auto found = pageByObject.find(pageReference->first);
+            return found == pageByObject.end() ? -1 : found->second;
+        };
+        std::unordered_set<std::uint64_t> visited;
+        std::function<void(const CPPPdf::PdfObject*, int)> walk;
+        walk = [&](const CPPPdf::PdfObject* firstObject, const int level) {
+            const CPPPdf::PdfObject* current = firstObject;
+            for (std::size_t count = 0; current && count < 10000U; ++count) {
+                const auto reference = current->AsReference();
+                const auto* item = resolveDictionary(current);
+                if (!item) break;
+                if (reference) {
+                    const std::uint64_t key = (static_cast<std::uint64_t>(reference->first) << 16U) | reference->second;
+                    if (!visited.insert(key).second) break;
+                }
+                const auto title = item->Find(CPPPdf::PdfName("Title"));
+                if (title && title->AsString()) {
+                    int page = destinationPage(item->Find(CPPPdf::PdfName("Dest")));
+                    if (page < 0) {
+                        if (const auto* action = resolveDictionary(item->Find(CPPPdf::PdfName("A")))) {
+                            page = destinationPage(action->Find(CPPPdf::PdfName("D")));
+                        }
+                    }
+                    std::string safe = pdfStringToUtf8(*title->AsString());
+                    for (char& character : safe) {
+                        if (character == '\t' || character == '\r' || character == '\n') character = ' ';
+                    }
+                    lastString += std::to_string(level) + '\t' + std::to_string(page) + '\t' + safe + '\n';
+                }
+                if (const auto* child = item->Find(CPPPdf::PdfName("First"))) walk(child, level + 1);
+                current = item->Find(CPPPdf::PdfName("Next"));
+            }
+        };
+        walk(outlines->Find(CPPPdf::PdfName("First")), 0);
+    } catch (...) {
+        lastString.clear();
+    }
+    return lastString.c_str();
+}
+
+struct PdfTextChunkView final {
+    char* text{};
+    double left{};
+    double bottom{};
+    double right{};
+    double top{};
+};
+
+PDFPP_EXPORT void* pdfpp_text_chunks(void* handle, int page, int* count) {
+    if (count) *count = 0;
+    try {
+        if (!handle || !count || page < 0) return nullptr;
+        const auto chunks = static_cast<NativeDocument*>(handle)->document
+            .ExtractTextChunks(static_cast<std::size_t>(page), {});
+        if (chunks.empty()) return nullptr;
+        auto* output = static_cast<PdfTextChunkView*>(
+            std::calloc(chunks.size(), sizeof(PdfTextChunkView)));
+        if (!output) return nullptr;
+        std::size_t initialized = 0;
+        try {
+            for (const auto& chunk : chunks) {
+                const auto& text = chunk.utf8Text;
+                output[initialized].text = static_cast<char*>(std::malloc(text.size() + 1U));
+                if (!output[initialized].text) throw std::bad_alloc();
+                std::memcpy(output[initialized].text, text.data(), text.size());
+                output[initialized].text[text.size()] = '\0';
+                output[initialized].left = chunk.boundingBox.left;
+                output[initialized].bottom = chunk.boundingBox.bottom;
+                output[initialized].right = chunk.boundingBox.right;
+                output[initialized].top = chunk.boundingBox.top;
+                ++initialized;
+            }
+        } catch (...) {
+            for (std::size_t index = 0; index < initialized; ++index) std::free(output[index].text);
+            std::free(output);
+            throw;
+        }
+        *count = static_cast<int>(chunks.size());
+        return output;
+    } catch (const std::exception& exception) {
+        lastError = exception.what();
+        return nullptr;
+    } catch (...) {
+        lastError = "Unable to extract text geometry.";
+        return nullptr;
+    }
+}
+
+PDFPP_EXPORT void pdfpp_free_text_chunks(void* memory, int count) {
+    if (!memory || count <= 0) {
+        std::free(memory);
+        return;
+    }
+    auto* chunks = static_cast<PdfTextChunkView*>(memory);
+    for (int index = 0; index < count; ++index) std::free(chunks[index].text);
+    std::free(chunks);
 }
 
 PDFPP_EXPORT void* pdfpp_render(void* handle, int page, double scale, int* width, int* height, int* stride) {

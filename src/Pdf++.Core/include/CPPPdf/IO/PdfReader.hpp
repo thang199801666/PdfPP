@@ -6,6 +6,7 @@
 #include <istream>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace CPPPdf {
@@ -13,6 +14,9 @@ namespace CPPPdf {
 enum class PdfOpenMode { ReadOnly, Modify, Append };
 
 struct PdfReaderLimits {
+    // Maximum serialized size of one indirect object materialized by the reader.
+    // This prevents malformed xref entries from forcing unbounded allocations.
+    std::size_t maxIndirectObjectBytes{256ULL * 1024ULL * 1024ULL};
     std::size_t maxObjectCount{5'000'000};
     std::size_t maxRecursionDepth{256};
     std::size_t maxDecodedStreamSize{512ULL * 1024ULL * 1024ULL};
@@ -21,12 +25,28 @@ struct PdfReaderLimits {
     // Maximum number of parsed indirect objects retained in the resolver LRU cache.
     // Zero disables retention while preserving cycle/recursion checks.
     std::size_t maxCachedObjects{16'384};
+    // Decoded /ObjStm data is substantially more expensive than parsed object
+    // metadata, so it has independent count and memory budgets. Either zero
+    // value disables decoded object-stream retention.
+    std::size_t maxCachedObjectStreams{64};
+    std::size_t maxCachedObjectStreamBytes{128ULL * 1024ULL * 1024ULL};
+    // Maximum number of indirect font resources retained by a document.
+    std::size_t maxCachedFontResources{256};
+    // Decoded page/content streams have independent count and byte budgets.
+    std::size_t maxCachedContentStreams{128};
+    std::size_t maxCachedContentStreamBytes{64ULL * 1024ULL * 1024ULL};
+    // Files at or above this size opened by path use a read-only mapping.
+    // Set to zero to keep the buffered file source for every path.
+    std::uint64_t memoryMapThresholdBytes{256ULL * 1024ULL * 1024ULL};
 };
 
 struct PdfReaderOptions {
     PdfOpenMode mode{PdfOpenMode::ReadOnly};
     bool repairDamagedXref{true};
     bool strictParsing{false};
+    // Empty also attempts the standard empty user password. If that fails the
+    // document remains open for metadata inspection and reports PasswordRequired.
+    std::string password;
     PdfReaderLimits limits{};
 };
 
@@ -45,6 +65,11 @@ public:
 class PdfFileInputSource final : public PdfInputSource {
 public:
     explicit PdfFileInputSource(std::filesystem::path path);
+    ~PdfFileInputSource() override;
+    PdfFileInputSource(PdfFileInputSource&&) noexcept;
+    PdfFileInputSource& operator=(PdfFileInputSource&&) noexcept;
+    PdfFileInputSource(const PdfFileInputSource&) = delete;
+    PdfFileInputSource& operator=(const PdfFileInputSource&) = delete;
     [[nodiscard]] std::uint64_t Size() const override;
     void Read(std::uint64_t offset, std::span<char> destination) override;
     [[nodiscard]] std::span<const char> View() const noexcept override;
@@ -52,6 +77,8 @@ public:
 private:
     std::filesystem::path path_;
     std::uint64_t size_{};
+    class Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 

@@ -2,6 +2,9 @@
 #include "CPPPdf/PdfError.hpp"
 #include "CPPPdf/PdfPage.hpp"
 #include "Internal/Document/PdfObjectResolver.hpp"
+#include "Internal/Security/PdfStandardSecurity.hpp"
+#include "Internal/Parsing/PdfObjectParser.hpp"
+#include "Internal/Writer/PdfObjectSerializer.hpp"
 #include "CPPPdf/Filters/PdfFilterPipeline.hpp"
 #include "CPPPdf/Fonts/PdfFontResource.hpp"
 #include "CPPPdf/Graphics/PdfImage.hpp"
@@ -238,105 +241,6 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
 }
 
 
-[[nodiscard]] int parseOptionalIntegerAfterKey(const std::string& dictionary,
-                                                const std::string& key,
-                                                int defaultValue) {
-    const std::regex expression("/" + key + R"(\s+(\d+))");
-    std::smatch match;
-    if (!std::regex_search(dictionary, match, expression)) return defaultValue;
-    return std::stoi(match[1].str());
-}
-
-[[nodiscard]] unsigned char paethPredictor(unsigned char left,
-                                           unsigned char above,
-                                           unsigned char upperLeft) {
-    const int p = static_cast<int>(left) + static_cast<int>(above) - static_cast<int>(upperLeft);
-    const int pa = std::abs(p - static_cast<int>(left));
-    const int pb = std::abs(p - static_cast<int>(above));
-    const int pc = std::abs(p - static_cast<int>(upperLeft));
-    if (pa <= pb && pa <= pc) return left;
-    if (pb <= pc) return above;
-    return upperLeft;
-}
-
-[[nodiscard]] std::string applyFlateDecodeParms(const std::string& dictionary,
-                                                std::string decoded) {
-    const int predictor = parseOptionalIntegerAfterKey(dictionary, "Predictor", 1);
-    if (predictor <= 1) return decoded;
-
-    const int colors = parseOptionalIntegerAfterKey(dictionary, "Colors", 1);
-    const int bitsPerComponent = parseOptionalIntegerAfterKey(dictionary, "BitsPerComponent", 8);
-    const int columns = parseOptionalIntegerAfterKey(dictionary, "Columns", 1);
-    if (colors <= 0 || columns <= 0 || bitsPerComponent <= 0) {
-        throw PdfException(PdfErrorCode::MalformedXref, "Invalid FlateDecode predictor parameters.");
-    }
-
-    const std::size_t rowBytes =
-        (static_cast<std::size_t>(colors) * static_cast<std::size_t>(columns) *
-             static_cast<std::size_t>(bitsPerComponent) + 7U) / 8U;
-    const std::size_t bytesPerPixel = std::max<std::size_t>(
-        1U, (static_cast<std::size_t>(colors) * static_cast<std::size_t>(bitsPerComponent) + 7U) / 8U);
-
-    if (predictor == 2) {
-        if (rowBytes == 0U || decoded.size() % rowBytes != 0U) {
-            throw PdfException(PdfErrorCode::MalformedXref, "TIFF predictor data has an invalid row length.");
-        }
-        for (std::size_t row = 0; row < decoded.size(); row += rowBytes) {
-            for (std::size_t i = bytesPerPixel; i < rowBytes; ++i) {
-                decoded[row + i] = static_cast<char>(
-                    static_cast<unsigned char>(decoded[row + i]) +
-                    static_cast<unsigned char>(decoded[row + i - bytesPerPixel]));
-            }
-        }
-        return decoded;
-    }
-
-    if (predictor < 10 || predictor > 15) {
-        throw PdfException(PdfErrorCode::MalformedXref, "Unsupported FlateDecode predictor.");
-    }
-
-    const std::size_t encodedRowBytes = rowBytes + 1U;
-    if (rowBytes == 0U || decoded.size() % encodedRowBytes != 0U) {
-        throw PdfException(PdfErrorCode::MalformedXref, "PNG predictor data has an invalid row length.");
-    }
-
-    const std::size_t rowCount = decoded.size() / encodedRowBytes;
-    std::string output(rowCount * rowBytes, '\0');
-    for (std::size_t row = 0; row < rowCount; ++row) {
-        const auto filter = static_cast<unsigned char>(decoded[row * encodedRowBytes]);
-        const auto* source = reinterpret_cast<const unsigned char*>(
-            decoded.data() + row * encodedRowBytes + 1U);
-        auto* target = reinterpret_cast<unsigned char*>(output.data() + row * rowBytes);
-        const auto* previous = row == 0U ? nullptr :
-            reinterpret_cast<const unsigned char*>(output.data() + (row - 1U) * rowBytes);
-
-        for (std::size_t i = 0; i < rowBytes; ++i) {
-            const unsigned char left = i >= bytesPerPixel ? target[i - bytesPerPixel] : 0U;
-            const unsigned char above = previous ? previous[i] : 0U;
-            const unsigned char upperLeft =
-                previous && i >= bytesPerPixel ? previous[i - bytesPerPixel] : 0U;
-            switch (filter) {
-            case 0: target[i] = source[i]; break;
-            case 1: target[i] = static_cast<unsigned char>(source[i] + left); break;
-            case 2: target[i] = static_cast<unsigned char>(source[i] + above); break;
-            case 3:
-                target[i] = static_cast<unsigned char>(
-                    source[i] + (static_cast<unsigned int>(left) +
-                                 static_cast<unsigned int>(above)) / 2U);
-                break;
-            case 4:
-                target[i] = static_cast<unsigned char>(
-                    source[i] + paethPredictor(left, above, upperLeft));
-                break;
-            default:
-                throw PdfException(PdfErrorCode::MalformedXref,
-                                   "Unsupported PNG predictor row filter.");
-            }
-        }
-    }
-    return output;
-}
-
 [[nodiscard]] std::size_t skipContentWhitespace(std::string_view content, std::size_t pos) {
     while (pos < content.size()) {
         const unsigned char ch = static_cast<unsigned char>(content[pos]);
@@ -399,6 +303,14 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
     return nullptr;
 }
 
+// Returns the dictionary of a parsed object whether it is a plain dictionary
+// or a stream (whose dictionary wraps the stream data).
+[[nodiscard]] const PdfDictionary* asDictionary(const PdfObject& object) {
+    if (const auto* dictionary = object.AsDictionary()) return dictionary;
+    if (const auto* stream = object.AsStream()) return &stream->dictionary();
+    return nullptr;
+}
+
 [[nodiscard]] const PdfDictionary* inheritedPageResources(
     const PdfDocument& document,
     PdfReference pageReference) {
@@ -439,9 +351,14 @@ using PageFontMap = std::unordered_map<std::string, PdfFontResource>;
         const auto* dictionary = objectDictionary(document, &fontObject);
         if (dictionary == nullptr) continue;
         try {
-            fonts->insert_or_assign(
-                resourceName.value(),
-                PdfFontResource::Create(*dictionary, resolver));
+            if (const auto indirect = fontObject.AsReference()) {
+                const PdfReference reference{indirect->first, indirect->second};
+                if (const auto cached = document.GetCachedFontResource(reference)) {
+                    fonts->insert_or_assign(resourceName.value(), *cached);
+                    continue;
+                }
+            }
+            fonts->insert_or_assign(resourceName.value(), PdfFontResource::Create(*dictionary, resolver));
         } catch (const std::exception&) {
             // Keep extraction alive when one font resource is malformed.
         }
@@ -490,6 +407,26 @@ void attachPageFontResolver(
 }
 
 using StreamDecoder = std::function<std::string(const PdfReference&)>;
+
+[[nodiscard]] std::string joinDecodedStreams(
+    const std::vector<PdfReference>& references,
+    const StreamDecoder& decoder) {
+    if (references.empty()) return {};
+    std::vector<std::string> decoded;
+    decoded.reserve(references.size());
+    std::size_t totalBytes = references.size() - 1U;
+    for (const auto& reference : references) {
+        decoded.push_back(decoder(reference));
+        totalBytes += decoded.back().size();
+    }
+    std::string content;
+    content.reserve(totalBytes);
+    for (std::size_t index = 0; index < decoded.size(); ++index) {
+        if (index != 0U) content.push_back('\n');
+        content.append(decoded[index]);
+    }
+    return content;
+}
 
 void extractContentRecursively(
     const PdfDocument& document,
@@ -764,6 +701,7 @@ void processPageContentRecursively(
     append("Colors", 1);
     append("BitsPerComponent", 8);
     append("Columns", 1);
+    append("EarlyChange", 1);
     output << " >>";
     return output.str();
 }
@@ -785,6 +723,42 @@ void processPageContentRecursively(
         }
     }
     return result;
+}
+
+// Builds the ordered filter chain for a stream from its typed dictionary.
+// Each filter receives the serialized /DecodeParms entry that applies to it so
+// the shared decoding pipeline can configure predictors.
+[[nodiscard]] std::vector<PdfFilterSpec> filterSpecsFromDictionary(
+    const PdfDictionary& dictionary) {
+    std::vector<PdfFilterSpec> specs;
+    const PdfObject* filterObject = dictionary.Find(PdfName("Filter"));
+    if (filterObject == nullptr) return specs;
+    if (const PdfName* name = filterObject->AsName()) {
+        specs.push_back(PdfFilterSpec{name->value(), {}});
+    } else if (const PdfArray* array = filterObject->AsArray()) {
+        specs.reserve(array->size());
+        for (const PdfObject& item : array->values()) {
+            if (const PdfName* filterName = item.AsName()) {
+                specs.push_back(PdfFilterSpec{filterName->value(), {}});
+            }
+        }
+    }
+
+    const PdfObject* parameters = dictionary.Find(PdfName("DecodeParms"));
+    if (parameters == nullptr) parameters = dictionary.Find(PdfName("DP"));
+    if (parameters == nullptr) return specs;
+    if (const auto* single = parameters->AsDictionary()) {
+        if (!specs.empty()) specs.front().decodeParameters = predictorParameters(single);
+        return specs;
+    }
+    if (const auto* array = parameters->AsArray()) {
+        for (std::size_t i = 0; i < specs.size() && i < array->size(); ++i) {
+            if (const auto* parms = array->at(i).AsDictionary()) {
+                specs[i].decodeParameters = predictorParameters(parms);
+            }
+        }
+    }
+    return specs;
 }
 
 [[nodiscard]] std::string stripInlineName(std::string value) {
@@ -986,6 +960,7 @@ void extractImagesRecursively(
 } // namespace
 
 
+PdfDocument::PdfDocument() = default;
 PdfDocument::~PdfDocument() = default;
 PdfDocument::PdfDocument(PdfDocument&&) noexcept = default;
 PdfDocument& PdfDocument::operator=(PdfDocument&&) noexcept = default;
@@ -995,6 +970,13 @@ PdfDocument PdfDocument::Open(const std::filesystem::path& path) {
 }
 
 PdfDocument PdfDocument::Open(const std::filesystem::path& path, const PdfReaderOptions& options) {
+    if (options.limits.memoryMapThresholdBytes != 0U) {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path, error);
+        if (!error && static_cast<std::uint64_t>(size) >= options.limits.memoryMapThresholdBytes) {
+            return OpenMapped(path, options);
+        }
+    }
     auto source = std::make_unique<PdfFileInputSource>(path);
     PdfDocument document = Open(std::move(source), options);
     document.path_ = path;
@@ -1037,7 +1019,125 @@ PdfDocument PdfDocument::Open(std::unique_ptr<PdfInputSource> source, const PdfR
 
 void PdfDocument::parse() {
     parseHeader();
-    parseXrefSection(findStartXref());
+    try {
+        parseXrefSection(findStartXref());
+    } catch (...) {
+        if (readerOptions_.strictParsing || !readerOptions_.repairDamagedXref) throw;
+        bool recovered = false;
+        for (const std::uint64_t candidate : findRecoveredXrefOffsets()) {
+            xref_.clear();
+            parsedXrefOffsets_.clear();
+            trailerDictionary_.clear();
+            try {
+                parseXrefSection(candidate);
+                if (!xref_.empty() && !trailerDictionary_.empty()) {
+                    recovered = true;
+                    break;
+                }
+            } catch (...) {
+                // Try the next xref marker; damaged files often contain stale
+                // fragments before the last usable table or stream.
+            }
+        }
+        if (!recovered) {
+            throw PdfException(PdfErrorCode::MalformedXref,
+                               "Unable to recover a usable xref table or stream.");
+        }
+    }
+    initializeEncryption();
+}
+
+std::vector<std::uint64_t> PdfDocument::findRecoveredXrefOffsets() const {
+    std::vector<std::uint64_t> offsets;
+    const std::string_view input(bytes_.data(), bytes_.size());
+    std::size_t position = 0U;
+    while ((position = input.find("xref", position)) != std::string_view::npos) {
+        const bool leftBoundary = position == 0U ||
+            std::isspace(static_cast<unsigned char>(input[position - 1U]));
+        const std::size_t after = position + 4U;
+        const bool rightBoundary = after >= input.size() ||
+            std::isspace(static_cast<unsigned char>(input[after]));
+        if (leftBoundary && rightBoundary) offsets.push_back(static_cast<std::uint64_t>(position));
+        position = after;
+    }
+
+    position = 0U;
+    while ((position = input.find("/Type /XRef", position)) != std::string_view::npos) {
+        const std::size_t objectMarker = input.rfind("obj", position);
+        if (objectMarker != std::string_view::npos && objectMarker < position) {
+            const std::size_t lineBegin = input.rfind('\n', objectMarker);
+            const std::size_t candidate = lineBegin == std::string_view::npos
+                ? 0U : lineBegin + 1U;
+            if (candidate < objectMarker) offsets.push_back(static_cast<std::uint64_t>(candidate));
+        }
+        position += 10U;
+    }
+    std::sort(offsets.begin(), offsets.end(), std::greater<>());
+    offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+    return offsets;
+}
+
+void PdfDocument::initializeEncryption() {
+    if (trailerDictionary_.find("/Encrypt") == std::string::npos) return;
+
+    const PdfObject trailerObject = Internal::PdfObjectParser::Parse(
+        trailerDictionary_, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* trailer = trailerObject.AsDictionary();
+    const PdfObject* encryptObject = trailer ? trailer->Find(PdfName("Encrypt")) : nullptr;
+    const auto encryptReference = encryptObject ? encryptObject->AsReference() : std::nullopt;
+    if (!encryptReference.has_value()) {
+        throw PdfException(PdfErrorCode::UnsupportedEncryption,
+                           "Encrypted PDF trailer does not contain a valid /Encrypt reference.");
+    }
+    encryptionReference_ = PdfReference{encryptReference->first, encryptReference->second};
+    const std::string dictionary = readRawIndirectObject(encryptionReference_->objectNumber);
+    const PdfObject* idObject = trailer ? trailer->Find(PdfName("ID")) : nullptr;
+    const PdfArray* ids = idObject ? idObject->AsArray() : nullptr;
+    const std::string* firstId = ids && !ids->empty() ? ids->values()[0].AsString() : nullptr;
+    if (!firstId || firstId->size() < 16U) {
+        throw PdfException(PdfErrorCode::UnsupportedEncryption,
+                           "Encrypted PDF trailer does not contain a valid file ID.");
+    }
+    const std::vector<std::uint8_t> id(firstId->begin(), firstId->end());
+    encryption_ = std::make_unique<Internal::PdfStandardSecurity>(
+        Internal::PdfStandardSecurity::Parse(dictionary, id));
+
+    if (encryption_->Authenticate(readerOptions_.password)) return;
+    if (!readerOptions_.password.empty()) {
+        throw PdfException(PdfErrorCode::InvalidPassword, "The PDF password is invalid.");
+    }
+}
+
+bool PdfDocument::IsPasswordRequired() const noexcept {
+    return encryption_ && !encryption_->IsAuthenticated();
+}
+
+bool PdfDocument::AuthenticatePassword(const std::string_view password) {
+    if (!encryption_) return true;
+    if (!encryption_->Authenticate(password)) return false;
+    ClearObjectCache();
+    pageReferencesCached_ = false;
+    pageReferencesCache_.clear();
+    readerOptions_.password.assign(password);
+    return true;
+}
+
+bool PdfDocument::IsOwnerPasswordAuthenticated() const noexcept {
+    return encryption_ && encryption_->IsOwnerAuthenticated();
+}
+
+std::string PdfDocument::EncryptObjectForIncrementalWrite(
+    const std::string_view object, const PdfReference& reference) const {
+    if (!encryption_) return std::string(object);
+    if (!encryption_->IsAuthenticated()) {
+        throw PdfException(PdfErrorCode::PasswordRequired,
+                           "A valid password is required to update this encrypted PDF.");
+    }
+    return encryption_->EncryptObject(object, reference.objectNumber, reference.generation);
+}
+
+std::int32_t PdfDocument::GetPermissionBits() const noexcept {
+    return encryption_ ? encryption_->PermissionBits() : -1;
 }
 
 void PdfDocument::parseHeader() {
@@ -1102,20 +1202,22 @@ void PdfDocument::parseXrefSection(std::uint64_t offset) {
     }
 }
 
-std::vector<std::size_t> PdfDocument::parseIntegerArrayAfterKey(
-    const std::string& dictionary, const std::string& key) {
-    const std::regex expression("/" + key + R"(\s*\[([^\]]*)\])");
-    std::smatch match;
-    if (!std::regex_search(dictionary, match, expression)) return {};
-    std::vector<std::size_t> values;
-    std::istringstream stream(match[1].str());
-    std::size_t value{};
-    while (stream >> value) values.push_back(value);
-    return values;
-}
-
-std::string PdfDocument::extractStreamData(const std::string& streamObject) const {
-    const std::size_t streamKeyword = streamObject.find("stream");
+std::string_view PdfDocument::extractStreamDataView(const std::string& streamObject) const {
+    // Locate the stream keyword after the dictionary, not inside a string or a
+    // name that happens to contain the token.
+    std::size_t streamKeyword = std::string::npos;
+    const std::size_t dictBegin = streamObject.find("<<");
+    if (dictBegin != std::string::npos) {
+        try {
+            const std::size_t dictEnd = findDictionaryEnd(
+                std::span<const char>(streamObject.data(), streamObject.size()), dictBegin);
+            streamKeyword = streamObject.find("stream", dictEnd);
+        } catch (const PdfException&) {
+            return {};
+        }
+    } else {
+        streamKeyword = streamObject.find("stream");
+    }
     if (streamKeyword == std::string::npos) return {};
     std::size_t dataBegin = streamKeyword + 6U;
     if (dataBegin < streamObject.size() && streamObject[dataBegin] == '\r') ++dataBegin;
@@ -1124,20 +1226,23 @@ std::string PdfDocument::extractStreamData(const std::string& streamObject) cons
     std::size_t dataEnd = std::string::npos;
     try {
         std::size_t length{};
-        const std::regex indirectLength(R"(/Length\s+(\d+)\s+(\d+)\s+R)");
-        std::smatch indirectMatch;
-        if (std::regex_search(streamObject, indirectMatch, indirectLength)) {
-            const auto lengthObject = readIndirectObject(
-                static_cast<std::uint32_t>(std::stoul(indirectMatch[1].str())));
-            const std::regex integer(R"(obj\s+([0-9]+))");
-            std::smatch integerMatch;
-            if (!std::regex_search(lengthObject, integerMatch, integer)) {
-                throw PdfException(PdfErrorCode::MalformedObject,
-                                   "Indirect stream length is not an integer.");
+        const PdfObject parsed = Internal::PdfObjectParser::Parse(
+            streamObject, readerOptions_.limits.maxRecursionDepth);
+        const PdfDictionary* dict = asDictionary(parsed);
+        const PdfObject* lengthObject = dict ? dict->Find(PdfName("Length")) : nullptr;
+        if (lengthObject != nullptr) {
+            if (const auto direct = lengthObject->AsInteger()) {
+                if (*direct >= 0) length = static_cast<std::size_t>(*direct);
+            } else if (const auto reference = lengthObject->AsReference()) {
+                const PdfObject lengthParsed = Internal::PdfObjectParser::Parse(
+                    readIndirectObject(reference->first), readerOptions_.limits.maxRecursionDepth);
+                const auto indirect = lengthParsed.AsInteger();
+                if (!indirect.has_value() || *indirect < 0) {
+                    throw PdfException(PdfErrorCode::MalformedObject,
+                                       "Indirect stream length is not an integer.");
+                }
+                length = static_cast<std::size_t>(*indirect);
             }
-            length = static_cast<std::size_t>(std::stoull(integerMatch[1].str()));
-        } else {
-            length = parseIntegerAfterKey(streamObject, "Length");
         }
         if (dataBegin + length <= streamObject.size()) dataEnd = dataBegin + length;
     } catch (...) {
@@ -1146,7 +1251,12 @@ std::string PdfDocument::extractStreamData(const std::string& streamObject) cons
     if (dataEnd == std::string::npos || dataEnd < dataBegin) {
         throw PdfException(PdfErrorCode::MalformedObject, "Stream has no valid endstream marker.");
     }
-    return streamObject.substr(dataBegin, dataEnd - dataBegin);
+    return std::string_view(streamObject).substr(dataBegin, dataEnd - dataBegin);
+}
+
+std::string PdfDocument::extractStreamData(const std::string& streamObject) const {
+    const auto view = extractStreamDataView(streamObject);
+    return std::string(view);
 }
 
 void PdfDocument::parseXrefStream(std::uint64_t offset64) {
@@ -1161,29 +1271,58 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
         throw PdfException(PdfErrorCode::MalformedXref, "XRef stream object has no endobj marker.");
     }
     const std::string object(remaining.substr(0, endRelative + 6U));
-    if (parseNameAfterKey(object, "Type") != "XRef") {
+
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(
+        object, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* dictionary = asDictionary(parsed);
+    if (dictionary == nullptr) {
+        throw PdfException(PdfErrorCode::UnsupportedXrefStream,
+                           "startxref does not point to a classic xref table or /Type /XRef stream.");
+    }
+    const auto type = dictionary->GetAsName(PdfName("Type"));
+    if (!type.has_value() || type->value() != "XRef") {
         throw PdfException(PdfErrorCode::UnsupportedXrefStream,
                            "startxref does not point to a classic xref table or /Type /XRef stream.");
     }
 
-    const auto widths = parseIntegerArrayAfterKey(object, "W");
-    if (widths.size() != 3U) {
+    const PdfArray* widthArray = dictionary->GetAsArray(PdfName("W"));
+    if (widthArray == nullptr || widthArray->size() < 3U) {
         throw PdfException(PdfErrorCode::MalformedXref, "XRef stream /W must contain three integers.");
     }
+    std::array<std::size_t, 3> widths{0U, 0U, 0U};
+    for (std::size_t i = 0U; i < 3U; ++i) {
+        if (const auto width = widthArray->at(i).AsInteger(); width.has_value() && *width > 0 && *width <= 8) {
+            widths[i] = static_cast<std::size_t>(*width);
+        }
+    }
 
-    std::vector<std::size_t> index = parseIntegerArrayAfterKey(object, "Index");
-    if (index.empty()) index = {0U, parseIntegerAfterKey(object, "Size")};
+    std::vector<std::size_t> index;
+    if (const PdfArray* indexArray = dictionary->GetAsArray(PdfName("Index"))) {
+        for (const PdfObject& item : indexArray->values()) {
+            if (const auto value = item.AsInteger(); value.has_value() && *value >= 0) {
+                index.push_back(static_cast<std::size_t>(*value));
+            }
+        }
+    }
+    if (index.empty()) {
+        const PdfObject* sizeObject = dictionary->Find(PdfName("Size"));
+        const auto size = sizeObject ? sizeObject->AsInteger() : std::nullopt;
+        if (!size.has_value() || *size < 0) {
+            throw PdfException(PdfErrorCode::MalformedXref, "XRef stream /Size is missing or invalid.");
+        }
+        index = {0U, static_cast<std::size_t>(*size)};
+    }
     if ((index.size() % 2U) != 0U) {
         throw PdfException(PdfErrorCode::MalformedXref, "XRef stream /Index must contain pairs.");
     }
 
     std::string decoded = extractStreamData(object);
-    if (object.find("/FlateDecode") != std::string::npos) {
-        decoded = applyFlateDecodeParms(
-            object, inflateZlib(decoded, readerOptions_.limits.maxDecodedStreamSize));
-    }
-    else if (object.find("/Filter") != std::string::npos) {
-        throw PdfException(PdfErrorCode::MalformedXref, "Unsupported filter in xref stream.");
+    const auto filters = filterSpecsFromDictionary(*dictionary);
+    if (!filters.empty()) {
+        const auto* begin = reinterpret_cast<const std::byte*>(decoded.data());
+        const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize)
+            .Decode(std::span<const std::byte>(begin, decoded.size()), filters);
+        decoded.assign(reinterpret_cast<const char*>(result.data()), result.size());
     }
 
     const std::size_t entryWidth = widths[0] + widths[1] + widths[2];
@@ -1230,16 +1369,19 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
         }
     }
 
-    const std::size_t dictBegin = object.find("<<");
-    const std::size_t dictEnd = object.find("stream", dictBegin);
     if (trailerDictionary_.empty()) {
-        trailerDictionary_ = object.substr(dictBegin, dictEnd - dictBegin);
+        const std::size_t dictBegin = object.find("<<");
+        if (dictBegin != std::string::npos) {
+            const std::size_t dictEnd = findDictionaryEnd(
+                std::span<const char>(object.data(), object.size()), dictBegin);
+            trailerDictionary_ = object.substr(dictBegin, dictEnd - dictBegin);
+        }
     }
 
-    const std::regex prevExpression(R"(/Prev\s+(\d+))");
-    std::smatch prevMatch;
-    if (std::regex_search(object, prevMatch, prevExpression)) {
-        parseXrefSection(static_cast<std::uint64_t>(std::stoull(prevMatch[1].str())));
+    if (const PdfObject* prev = dictionary->Find(PdfName("Prev"))) {
+        if (const auto previous = prev->AsInteger(); previous.has_value() && *previous >= 0) {
+            parseXrefSection(static_cast<std::uint64_t>(*previous));
+        }
     }
 }
 
@@ -1248,7 +1390,7 @@ void PdfDocument::parseClassicXref(std::uint64_t offset64) {
     pos = skipWhitespace(bytes_, pos);
     if (!startsWithAt(bytes_, pos, "xref")) {
         throw PdfException(PdfErrorCode::UnsupportedXrefStream,
-                           "This basic version supports classic xref tables only; xref streams are not supported yet.");
+                           "startxref does not point to a classic xref table or /Type /XRef stream.");
     }
     pos += 4;
 
@@ -1323,20 +1465,24 @@ void PdfDocument::parseClassicXref(std::uint64_t offset64) {
     // Hybrid-reference PDFs store compressed-object entries in an xref stream
     // referenced by /XRefStm from the classic trailer. Parse it before /Prev so
     // entries from the newest revision always win over older revisions.
-    const std::regex xrefStmExpression(R"(/XRefStm\s+(\d+))");
-    std::smatch xrefStmMatch;
-    if (std::regex_search(currentTrailer, xrefStmMatch, xrefStmExpression)) {
-        parseXrefSection(static_cast<std::uint64_t>(std::stoull(xrefStmMatch[1].str())));
-    }
-
-    const std::regex prevExpression(R"(/Prev\s+(\d+))");
-    std::smatch prevMatch;
-    if (std::regex_search(currentTrailer, prevMatch, prevExpression)) {
-        parseXrefSection(static_cast<std::uint64_t>(std::stoull(prevMatch[1].str())));
+    const PdfObject parsedTrailer = Internal::PdfObjectParser::Parse(
+        currentTrailer, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* trailer = asDictionary(parsedTrailer);
+    if (trailer != nullptr) {
+        if (const PdfObject* xrefStm = trailer->Find(PdfName("XRefStm"))) {
+            if (const auto offset = xrefStm->AsInteger(); offset.has_value() && *offset >= 0) {
+                parseXrefSection(static_cast<std::uint64_t>(*offset));
+            }
+        }
+        if (const PdfObject* prev = trailer->Find(PdfName("Prev"))) {
+            if (const auto previous = prev->AsInteger(); previous.has_value() && *previous >= 0) {
+                parseXrefSection(static_cast<std::uint64_t>(*previous));
+            }
+        }
     }
 }
 
-std::string PdfDocument::readIndirectObject(std::uint32_t objectNumber) const {
+std::string PdfDocument::readRawIndirectObject(std::uint32_t objectNumber) const {
     const auto iterator = xref_.find(objectNumber);
     if (iterator == xref_.end() || !iterator->second.inUse) {
         return recoverIndirectObject(objectNumber);
@@ -1371,7 +1517,30 @@ std::string PdfDocument::readIndirectObject(std::uint32_t objectNumber) const {
         throw PdfException(PdfErrorCode::MalformedObject,
                            "endobj was not found for object " + std::to_string(objectNumber) + ".");
     }
-    return std::string(remaining.substr(0, endRelative + 6));
+    const std::size_t objectBytes = endRelative + 6U;
+    if (readerOptions_.limits.maxIndirectObjectBytes != 0U &&
+        objectBytes > readerOptions_.limits.maxIndirectObjectBytes) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Indirect object exceeds the configured size limit.");
+    }
+    return std::string(remaining.substr(0, objectBytes));
+}
+
+std::string PdfDocument::readIndirectObject(const std::uint32_t objectNumber) const {
+    const auto entry = xref_.find(objectNumber);
+    const bool compressed = entry != xref_.end() &&
+        entry->second.type == PdfXrefEntry::Type::Compressed;
+    std::string object = readRawIndirectObject(objectNumber);
+    if (!encryption_ || compressed ||
+        (encryptionReference_ && encryptionReference_->objectNumber == objectNumber)) {
+        return object;
+    }
+    if (!encryption_->IsAuthenticated()) {
+        throw PdfException(PdfErrorCode::PasswordRequired,
+                           "A valid password is required to read this encrypted PDF.");
+    }
+    const std::uint16_t generation = entry == xref_.end() ? 0U : entry->second.generation;
+    return encryption_->DecryptObject(object, objectNumber, generation);
 }
 
 
@@ -1406,8 +1575,22 @@ std::string PdfDocument::recoverIndirectObject(std::uint32_t objectNumber) const
             searchPos += number.size();
             continue;
         }
+        const std::size_t generationEnd = pos;
         pos = skipWhitespace(bytes_, pos);
         if (!startsWithAt(bytes_, pos, "obj")) {
+            searchPos += number.size();
+            continue;
+        }
+
+        const std::string_view generationText(
+            bytes_.data() + static_cast<std::ptrdiff_t>(generationBegin),
+            generationEnd - generationBegin);
+        const std::uint64_t generation = parseUnsigned64(generationText, "recovered object generation");
+        if (generation > std::numeric_limits<std::uint16_t>::max()) {
+            if (readerOptions_.strictParsing || !readerOptions_.repairDamagedXref) {
+                throw PdfException(PdfErrorCode::MalformedObject,
+                                   "Recovered object generation exceeds the PDF limit.");
+            }
             searchPos += number.size();
             continue;
         }
@@ -1416,7 +1599,13 @@ std::string PdfDocument::recoverIndirectObject(std::uint32_t objectNumber) const
                                          bytes_.size() - searchPos);
         const std::size_t endRelative = remaining.find("endobj");
         if (endRelative != std::string_view::npos) {
-            return std::string(remaining.substr(0, endRelative + 6U));
+            const std::size_t objectBytes = endRelative + 6U;
+            if (readerOptions_.limits.maxIndirectObjectBytes != 0U &&
+                objectBytes > readerOptions_.limits.maxIndirectObjectBytes) {
+                throw PdfException(PdfErrorCode::MalformedObject,
+                                   "Recovered indirect object exceeds the configured size limit.");
+            }
+            return std::string(remaining.substr(0, objectBytes));
         }
         break;
     }
@@ -1448,29 +1637,47 @@ std::string PdfDocument::recoverFromObjectStreams(std::uint32_t objectNumber) co
                                              bytes_.size() - pos);
             const std::size_t endRelative = remaining.find("endobj");
             if (endRelative == std::string_view::npos) continue;
-            objectStream = std::string(remaining.substr(0, endRelative + 6U));
+            const std::size_t objectBytes = endRelative + 6U;
+            if (readerOptions_.limits.maxIndirectObjectBytes != 0U &&
+                objectBytes > readerOptions_.limits.maxIndirectObjectBytes) {
+                continue;
+            }
+            objectStream = std::string(remaining.substr(0, objectBytes));
         } catch (...) {
             continue;
         }
 
-        if (parseNameAfterKey(objectStream, "Type") != "ObjStm") continue;
+        const PdfObject streamParsed = Internal::PdfObjectParser::Parse(
+            objectStream, readerOptions_.limits.maxRecursionDepth);
+        const PdfDictionary* streamDictionary = asDictionary(streamParsed);
+        if (streamDictionary == nullptr) continue;
+        const auto streamType = streamDictionary->GetAsName(PdfName("Type"));
+        if (!streamType.has_value() || streamType->value() != "ObjStm") continue;
 
         try {
-            const std::size_t count = parseIntegerAfterKey(objectStream, "N");
-            if (count > readerOptions_.limits.maxObjectStreamObjects) continue;
-            const std::size_t first = parseIntegerAfterKey(objectStream, "First");
+            const PdfObject* countObject = streamDictionary->Find(PdfName("N"));
+            const PdfObject* firstObject = streamDictionary->Find(PdfName("First"));
+            if (countObject == nullptr || firstObject == nullptr) continue;
+            const auto count = countObject->AsInteger();
+            const auto first = firstObject->AsInteger();
+            if (!count.has_value() || !first.has_value() || *count < 0 || *first < 0) continue;
+            if (static_cast<std::size_t>(*count) > readerOptions_.limits.maxObjectStreamObjects) continue;
+            const std::size_t countValue = static_cast<std::size_t>(*count);
+            const std::size_t firstValue = static_cast<std::size_t>(*first);
             std::string decoded = extractStreamData(objectStream);
-            if (objectStream.find("/FlateDecode") != std::string::npos) {
-                decoded = inflateZlib(decoded, readerOptions_.limits.maxDecodedStreamSize);
-            } else if (objectStream.find("/Filter") != std::string::npos) {
-                continue;
+            const auto filters = filterSpecsFromDictionary(*streamDictionary);
+            if (!filters.empty()) {
+                const auto* begin = reinterpret_cast<const std::byte*>(decoded.data());
+                const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize)
+                    .Decode(std::span<const std::byte>(begin, decoded.size()), filters);
+                decoded.assign(reinterpret_cast<const char*>(result.data()), result.size());
             }
-            if (first > decoded.size()) continue;
+            if (firstValue > decoded.size()) continue;
 
-            std::istringstream header(decoded.substr(0, first));
+            std::istringstream header(decoded.substr(0, firstValue));
             std::vector<std::pair<std::uint32_t, std::size_t>> objects;
-            objects.reserve(count);
-            for (std::size_t i = 0; i < count; ++i) {
+            objects.reserve(countValue);
+            for (std::size_t i = 0; i < countValue; ++i) {
                 std::uint32_t numberInStream{};
                 std::size_t relative{};
                 if (!(header >> numberInStream >> relative)) {
@@ -1482,9 +1689,9 @@ std::string PdfDocument::recoverFromObjectStreams(std::uint32_t objectNumber) co
 
             for (std::size_t i = 0; i < objects.size(); ++i) {
                 if (objects[i].first != objectNumber) continue;
-                const std::size_t bodyBegin = first + objects[i].second;
+                const std::size_t bodyBegin = firstValue + objects[i].second;
                 const std::size_t bodyEnd = i + 1U < objects.size()
-                    ? first + objects[i + 1U].second : decoded.size();
+                    ? firstValue + objects[i + 1U].second : decoded.size();
                 if (bodyBegin > bodyEnd || bodyEnd > decoded.size()) break;
                 return std::to_string(objectNumber) + " 0 obj\n" +
                        decoded.substr(bodyBegin, bodyEnd - bodyBegin) + "\nendobj";
@@ -1500,39 +1707,8 @@ std::string PdfDocument::recoverFromObjectStreams(std::uint32_t objectNumber) co
 
 std::string PdfDocument::readCompressedObject(std::uint32_t objectNumber,
                                               const PdfXrefEntry& entry) const {
-    const std::string objectStream = readIndirectObject(entry.objectStream);
-    if (parseNameAfterKey(objectStream, "Type") != "ObjStm") {
-        throw PdfException(PdfErrorCode::MalformedObject,
-                           "Compressed object references a stream that is not /Type /ObjStm.");
-    }
-    const std::size_t count = parseIntegerAfterKey(objectStream, "N");
-    if (count > readerOptions_.limits.maxObjectStreamObjects) {
-        throw PdfException(PdfErrorCode::MalformedObject,
-                           "Object stream exceeds configured object count limit.");
-    }
-    const std::size_t first = parseIntegerAfterKey(objectStream, "First");
-    std::string decoded = extractStreamData(objectStream);
-    if (objectStream.find("/FlateDecode") != std::string::npos) {
-        decoded = inflateZlib(decoded, readerOptions_.limits.maxDecodedStreamSize);
-    }
-    else if (objectStream.find("/Filter") != std::string::npos) {
-        throw PdfException(PdfErrorCode::MalformedObject, "Unsupported filter in object stream.");
-    }
-    if (first > decoded.size()) {
-        throw PdfException(PdfErrorCode::MalformedObject, "/First points outside object stream.");
-    }
-
-    std::istringstream header(decoded.substr(0, first));
-    std::vector<std::pair<std::uint32_t, std::size_t>> objects;
-    objects.reserve(count);
-    for (std::size_t i = 0; i < count; ++i) {
-        std::uint32_t number{};
-        std::size_t relative{};
-        if (!(header >> number >> relative)) {
-            throw PdfException(PdfErrorCode::MalformedObject, "Malformed /ObjStm object index.");
-        }
-        objects.emplace_back(number, relative);
-    }
+    const auto objectStream = loadObjectStream(entry.objectStream);
+    const auto& objects = objectStream->objects;
 
     std::size_t selected = objects.size();
     if (entry.objectIndex < objects.size() && objects[entry.objectIndex].first == objectNumber) {
@@ -1546,14 +1722,123 @@ std::string PdfDocument::readCompressedObject(std::uint32_t objectNumber,
         throw PdfException(PdfErrorCode::ObjectNotFound, "Object was not found inside /ObjStm.");
     }
 
-    const std::size_t bodyBegin = first + objects[selected].second;
+    const std::size_t bodyBegin = objectStream->first + objects[selected].second;
     const std::size_t bodyEnd = selected + 1U < objects.size()
-        ? first + objects[selected + 1U].second : decoded.size();
-    if (bodyBegin > bodyEnd || bodyEnd > decoded.size()) {
+        ? objectStream->first + objects[selected + 1U].second : objectStream->decoded.size();
+    if (bodyBegin > bodyEnd || bodyEnd > objectStream->decoded.size()) {
         throw PdfException(PdfErrorCode::MalformedObject, "Invalid object boundaries in /ObjStm.");
     }
     return std::to_string(objectNumber) + " 0 obj\n" +
-           decoded.substr(bodyBegin, bodyEnd - bodyBegin) + "\nendobj";
+           objectStream->decoded.substr(bodyBegin, bodyEnd - bodyBegin) + "\nendobj";
+}
+
+std::shared_ptr<const PdfDocument::DecodedObjectStream> PdfDocument::loadObjectStream(
+    const std::uint32_t objectStreamNumber) const {
+    if (const auto cached = objectStreamCache_.find(objectStreamNumber);
+        cached != objectStreamCache_.end()) {
+        ++objectStreamCacheHits_;
+        objectStreamRecency_.splice(
+            objectStreamRecency_.begin(), objectStreamRecency_, cached->second.recency);
+        return cached->second.stream;
+    }
+    ++objectStreamCacheMisses_;
+
+    const std::string objectStream = readIndirectObject(objectStreamNumber);
+    const PdfObject streamParsed = Internal::PdfObjectParser::Parse(
+        objectStream, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* streamDictionary = asDictionary(streamParsed);
+    const auto streamType = streamDictionary
+        ? streamDictionary->GetAsName(PdfName("Type")) : std::nullopt;
+    if (!streamType.has_value() || streamType->value() != "ObjStm") {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Compressed object references a stream that is not /Type /ObjStm.");
+    }
+    const PdfObject* countObject = streamDictionary->Find(PdfName("N"));
+    const PdfObject* firstObject = streamDictionary->Find(PdfName("First"));
+    if (countObject == nullptr || firstObject == nullptr) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Object stream /N or /First is missing.");
+    }
+    const auto count = countObject->AsInteger();
+    const auto first = firstObject->AsInteger();
+    if (!count.has_value() || !first.has_value() || *count < 0 || *first < 0) {
+        throw PdfException(PdfErrorCode::MalformedObject, "Object stream /N or /First is invalid.");
+    }
+    if (static_cast<std::size_t>(*count) > readerOptions_.limits.maxObjectStreamObjects) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Object stream exceeds configured object count limit.");
+    }
+    const std::size_t countValue = static_cast<std::size_t>(*count);
+    const std::size_t firstValue = static_cast<std::size_t>(*first);
+    std::string decoded = extractStreamData(objectStream);
+    const auto filters = filterSpecsFromDictionary(*streamDictionary);
+    if (!filters.empty()) {
+        const auto* begin = reinterpret_cast<const std::byte*>(decoded.data());
+        const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize)
+            .Decode(std::span<const std::byte>(begin, decoded.size()), filters);
+        decoded.assign(reinterpret_cast<const char*>(result.data()), result.size());
+    }
+    if (firstValue > decoded.size()) {
+        throw PdfException(PdfErrorCode::MalformedObject, "/First points outside object stream.");
+    }
+
+    auto result = std::make_shared<DecodedObjectStream>();
+    result->decoded = std::move(decoded);
+    result->first = firstValue;
+    result->objects.reserve(countValue);
+    const std::string_view header(result->decoded.data(), firstValue);
+    std::size_t position = 0U;
+    auto parseUnsigned = [&header, &position](auto& value) {
+        while (position < header.size() &&
+               std::isspace(static_cast<unsigned char>(header[position]))) {
+            ++position;
+        }
+        const char* begin = header.data() + static_cast<std::ptrdiff_t>(position);
+        const char* end = header.data() + static_cast<std::ptrdiff_t>(header.size());
+        const auto parsed = std::from_chars(begin, end, value);
+        if (parsed.ec != std::errc{} || parsed.ptr == begin) return false;
+        position = static_cast<std::size_t>(parsed.ptr - header.data());
+        return true;
+    };
+    for (std::size_t i = 0; i < countValue; ++i) {
+        std::uint32_t number{};
+        std::size_t relative{};
+        if (!parseUnsigned(number) || !parseUnsigned(relative)) {
+            throw PdfException(PdfErrorCode::MalformedObject, "Malformed /ObjStm object index.");
+        }
+        if ((!result->objects.empty() && relative < result->objects.back().second) ||
+            relative > result->decoded.size() - firstValue) {
+            throw PdfException(PdfErrorCode::MalformedObject,
+                               "Invalid or non-monotonic offsets in /ObjStm index.");
+        }
+        result->objects.emplace_back(number, relative);
+    }
+
+    const auto& limits = readerOptions_.limits;
+    const std::size_t decodedBytes = result->decoded.size();
+    if (limits.maxCachedObjectStreams == 0U ||
+        limits.maxCachedObjectStreamBytes == 0U ||
+        decodedBytes > limits.maxCachedObjectStreamBytes) {
+        return result;
+    }
+
+    while (!objectStreamRecency_.empty() &&
+           (objectStreamCache_.size() >= limits.maxCachedObjectStreams ||
+            cachedObjectStreamBytes_ > limits.maxCachedObjectStreamBytes - decodedBytes)) {
+        const std::uint32_t victim = objectStreamRecency_.back();
+        const auto victimEntry = objectStreamCache_.find(victim);
+        if (victimEntry != objectStreamCache_.end()) {
+            cachedObjectStreamBytes_ -= victimEntry->second.stream->decoded.size();
+            objectStreamCache_.erase(victimEntry);
+        }
+        objectStreamRecency_.pop_back();
+    }
+
+    objectStreamRecency_.push_front(objectStreamNumber);
+    objectStreamCache_.emplace(
+        objectStreamNumber, ObjectStreamCacheEntry{result, objectStreamRecency_.begin()});
+    cachedObjectStreamBytes_ += decodedBytes;
+    return result;
 }
 
 std::vector<std::uint32_t> PdfDocument::objectNumbers() const {
@@ -1568,129 +1853,121 @@ std::vector<std::uint32_t> PdfDocument::objectNumbers() const {
     return result;
 }
 
+std::optional<PdfXrefEntry> PdfDocument::GetXrefEntry(const std::uint32_t objectNumber) const {
+    const auto found = xref_.find(objectNumber);
+    if (found == xref_.end()) return std::nullopt;
+    return found->second;
+}
+
 PdfReference PdfDocument::parseReferenceAfterKey(const std::string& dictionary,
-                                                 const std::string& key) {
-    const std::regex expression("/" + key + R"(\s+(\d+)\s+(\d+)\s+R)");
-    std::smatch match;
-    if (!std::regex_search(dictionary, match, expression)) {
+                                                 const std::string& key,
+                                                 std::size_t maxDepth) {
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(dictionary, maxDepth);
+    const PdfDictionary* dict = asDictionary(parsed);
+    if (dict == nullptr) {
         throw PdfException(PdfErrorCode::MalformedObject,
                            "Reference /" + key + " was not found.");
     }
-    return PdfReference{
-        static_cast<std::uint32_t>(std::stoul(match[1].str())),
-        static_cast<std::uint16_t>(std::stoul(match[2].str()))};
+    const PdfObject* value = dict->Find(PdfName(key));
+    const auto reference = value ? value->AsReference() : std::nullopt;
+    if (!reference.has_value()) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Reference /" + key + " was not found.");
+    }
+    return PdfReference{reference->first, reference->second};
 }
 
 std::vector<PdfReference> PdfDocument::parseReferenceArrayAfterKey(const std::string& dictionary,
-                                                                   const std::string& key) {
-    const std::regex arrayExpression("/" + key + R"(\s*\[([^\]]*)\])");
-    std::smatch arrayMatch;
-    if (!std::regex_search(dictionary, arrayMatch, arrayExpression)) {
-        return {};
-    }
-
+                                                                   const std::string& key,
+                                                                   std::size_t maxDepth) {
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(dictionary, maxDepth);
+    const PdfDictionary* dict = asDictionary(parsed);
     std::vector<PdfReference> references;
-    const std::string contents = arrayMatch[1].str();
-    const std::regex referenceExpression(R"((\d+)\s+(\d+)\s+R)");
-    for (std::sregex_iterator it(contents.begin(), contents.end(), referenceExpression), end;
-         it != end; ++it) {
-        references.push_back(PdfReference{
-            static_cast<std::uint32_t>(std::stoul((*it)[1].str())),
-            static_cast<std::uint16_t>(std::stoul((*it)[2].str()))});
+    if (dict == nullptr) return references;
+
+    const PdfObject* value = dict->Find(PdfName(key));
+    if (value == nullptr) return references;
+    if (const PdfArray* array = value->AsArray()) {
+        references.reserve(array->size());
+        for (const PdfObject& item : array->values()) {
+            if (const auto reference = item.AsReference()) {
+                references.push_back(PdfReference{reference->first, reference->second});
+            }
+        }
+        return references;
+    }
+    // Accept a single reference in place of an array (common for /Contents).
+    if (const auto single = value->AsReference()) {
+        references.push_back(PdfReference{single->first, single->second});
     }
     return references;
 }
 
-std::string PdfDocument::parseNameAfterKey(const std::string& dictionary, const std::string& key) {
-    const std::regex expression("/" + key + R"(\s*/([^\s<>{}\[\]()/%]+))");
-    std::smatch match;
-    if (!std::regex_search(dictionary, match, expression)) {
-        return {};
-    }
-    return match[1].str();
+std::string PdfDocument::parseNameAfterKey(const std::string& dictionary,
+                                           const std::string& key,
+                                           std::size_t maxDepth) {
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(dictionary, maxDepth);
+    const PdfDictionary* dict = asDictionary(parsed);
+    if (dict == nullptr) return {};
+    const auto name = dict->GetAsName(PdfName(key));
+    return name ? name->value() : std::string{};
 }
-
 
 std::string PdfDocument::parseStringAfterKey(const std::string& dictionary,
-                                             const std::string& key) {
-    const std::string marker = "/" + key;
-    std::size_t pos = dictionary.find(marker);
-    if (pos == std::string::npos) return {};
-    pos += marker.size();
-    while (pos < dictionary.size() && std::isspace(static_cast<unsigned char>(dictionary[pos]))) ++pos;
-    if (pos >= dictionary.size()) return {};
-
-    if (dictionary[pos] == '(') {
-        const std::size_t begin = ++pos;
-        int depth = 1;
-        bool escaped = false;
-        for (; pos < dictionary.size(); ++pos) {
-            const char ch = dictionary[pos];
-            if (escaped) { escaped = false; continue; }
-            if (ch == '\\') { escaped = true; continue; }
-            if (ch == '(') ++depth;
-            else if (ch == ')' && --depth == 0) {
-                return decodePdfLiteralString(std::string_view(dictionary).substr(begin, pos - begin));
-            }
-        }
-        return {};
-    }
-
-    if (dictionary[pos] == '<' && (pos + 1 >= dictionary.size() || dictionary[pos + 1] != '<')) {
-        const std::size_t end = dictionary.find('>', pos + 1);
-        if (end == std::string::npos) return {};
-        return decodePdfHexString(std::string_view(dictionary).substr(pos + 1, end - pos - 1));
-    }
-    return {};
+                                             const std::string& key,
+                                             std::size_t maxDepth) {
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(dictionary, maxDepth);
+    const PdfDictionary* dict = asDictionary(parsed);
+    if (dict == nullptr) return {};
+    const PdfObject* value = dict->Find(PdfName(key));
+    const std::string* text = value ? value->AsString() : nullptr;
+    return text ? *text : std::string{};
 }
 
-std::vector<double> PdfDocument::parseNumberArrayAfterKey(const std::string& dictionary,
-                                                           const std::string& key) {
-    const std::regex expression("/" + key + R"(\s*\[([^\]]*)\])");
-    std::smatch match;
-    if (!std::regex_search(dictionary, match, expression)) return {};
-
-    std::vector<double> values;
-    const std::string body = match[1].str();
-    const std::regex numberExpression(R"([+-]?(?:\d+(?:\.\d*)?|\.\d+))");
-    for (std::sregex_iterator it(body.begin(), body.end(), numberExpression), end; it != end; ++it) {
-        values.push_back(std::stod((*it).str()));
-    }
-    return values;
-}
-
-std::string PdfDocument::findInheritedPageValue(std::string pageObject,
-                                                 const std::string& key) const {
-    const std::regex valueExpression("/" + key + R"(\s*(\[[^\]]*\]|[+-]?\d+))");
+PdfObject PdfDocument::findInheritedPageValue(const std::string& pageObject,
+                                              const std::string& key,
+                                              std::size_t maxDepth) const {
     std::unordered_set<std::uint32_t> visited;
+    std::string current = pageObject;
     for (;;) {
-        std::smatch match;
-        if (std::regex_search(pageObject, match, valueExpression)) return match[1].str();
-
-        const std::regex parentExpression(R"(/Parent\s+(\d+)\s+(\d+)\s+R)");
-        if (!std::regex_search(pageObject, match, parentExpression)) return {};
-        const auto objectNumber = static_cast<std::uint32_t>(std::stoul(match[1].str()));
-        if (!visited.insert(objectNumber).second) {
+        const PdfObject parsed = Internal::PdfObjectParser::Parse(current, maxDepth);
+        const PdfDictionary* dict = asDictionary(parsed);
+        if (dict == nullptr) return {};
+        if (const PdfObject* value = dict->Find(PdfName(key))) {
+            return *value;
+        }
+        const PdfObject* parent = dict->Find(PdfName("Parent"));
+        const auto parentReference = parent ? parent->AsReference() : std::nullopt;
+        if (!parentReference.has_value()) return {};
+        if (!visited.insert(parentReference->first).second) {
             throw PdfException(PdfErrorCode::InvalidPageTree,
                                "Cycle detected while resolving inherited page attributes.");
         }
-        pageObject = readIndirectObject(objectNumber);
+        current = readIndirectObject(parentReference->first);
     }
 }
 
 std::size_t PdfDocument::parseIntegerAfterKey(const std::string& dictionary,
-                                              const std::string& key) {
-    const std::regex expression("/" + key + R"(\s+(\d+))");
-    std::smatch match;
-    if (!std::regex_search(dictionary, match, expression)) {
+                                              const std::string& key,
+                                              std::size_t maxDepth) {
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(dictionary, maxDepth);
+    const PdfDictionary* dict = asDictionary(parsed);
+    if (dict == nullptr) {
         throw PdfException(PdfErrorCode::MalformedObject,
                            "Integer /" + key + " was not found.");
     }
-    return static_cast<std::size_t>(std::stoull(match[1].str()));
+    const PdfObject* value = dict->Find(PdfName(key));
+    const auto integer = value ? value->AsInteger() : std::nullopt;
+    if (!integer.has_value()) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Integer /" + key + " was not found.");
+    }
+    return static_cast<std::size_t>(*integer);
 }
 
 PdfReference PdfDocument::findRootReference() const {
-    return parseReferenceAfterKey(trailerDictionary_, "Root");
+    return parseReferenceAfterKey(
+        trailerDictionary_, "Root", readerOptions_.limits.maxRecursionDepth);
 }
 
 PdfReference PdfDocument::GetCatalogReference() const {
@@ -1698,17 +1975,18 @@ PdfReference PdfDocument::GetCatalogReference() const {
 }
 
 std::optional<PdfReference> PdfDocument::GetTrailerReference(const PdfName& key) const {
-    const std::string escapedKey = key.value();
-    const std::regex expression("/" + escapedKey + R"(\s+(\d+)\s+(\d+)\s+R)");
-    std::smatch match;
-    if (!std::regex_search(trailerDictionary_, match, expression)) return std::nullopt;
-    return PdfReference{
-        static_cast<std::uint32_t>(std::stoul(match[1].str())),
-        static_cast<std::uint16_t>(std::stoul(match[2].str()))};
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(
+        trailerDictionary_, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* dict = asDictionary(parsed);
+    const PdfObject* value = dict ? dict->Find(key) : nullptr;
+    const auto reference = value ? value->AsReference() : std::nullopt;
+    if (!reference.has_value()) return std::nullopt;
+    return PdfReference{reference->first, reference->second};
 }
 
 PdfReference PdfDocument::findPagesReference(const std::string& catalogObject) const {
-    return parseReferenceAfterKey(catalogObject, "Pages");
+    return parseReferenceAfterKey(
+        catalogObject, "Pages", readerOptions_.limits.maxRecursionDepth);
 }
 
 std::size_t PdfDocument::countPagesFromNode(const PdfReference& reference,
@@ -1719,7 +1997,8 @@ std::size_t PdfDocument::countPagesFromNode(const PdfReference& reference,
     visiting[reference.objectNumber] = true;
 
     const std::string object = readIndirectObject(reference.objectNumber);
-    const std::string type = parseNameAfterKey(object, "Type");
+    const std::string type = parseNameAfterKey(
+        object, "Type", readerOptions_.limits.maxRecursionDepth);
     if (type == "Page") {
         visiting[reference.objectNumber] = false;
         return 1;
@@ -1729,9 +2008,11 @@ std::size_t PdfDocument::countPagesFromNode(const PdfReference& reference,
                            "Page tree object has unsupported /Type /" + type + ".");
     }
 
-    const auto kids = parseReferenceArrayAfterKey(object, "Kids");
+    const auto kids = parseReferenceArrayAfterKey(
+        object, "Kids", readerOptions_.limits.maxRecursionDepth);
     if (kids.empty()) {
-        const auto count = parseIntegerAfterKey(object, "Count");
+        const auto count = parseIntegerAfterKey(
+            object, "Count", readerOptions_.limits.maxRecursionDepth);
         visiting[reference.objectNumber] = false;
         return count;
     }
@@ -1747,20 +2028,32 @@ std::size_t PdfDocument::countPagesFromNode(const PdfReference& reference,
 
 PdfDocumentInfo PdfDocument::documentInfo() const {
     PdfDocumentInfo info;
-    const std::regex infoExpression(R"(/Info\s+(\d+)\s+(\d+)\s+R)");
-    std::smatch match;
-    if (!std::regex_search(trailerDictionary_, match, infoExpression)) return info;
+    const PdfObject trailerObject = Internal::PdfObjectParser::Parse(
+        trailerDictionary_, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* trailer = asDictionary(trailerObject);
+    if (trailer == nullptr) return info;
+    const PdfObject* infoObject = trailer->Find(PdfName("Info"));
+    const auto infoReference = infoObject ? infoObject->AsReference() : std::nullopt;
+    if (!infoReference.has_value()) return info;
 
-    const auto objectNumber = static_cast<std::uint32_t>(std::stoul(match[1].str()));
+    const auto objectNumber = infoReference->first;
     const std::string object = readIndirectObject(objectNumber);
-    info.title = parseStringAfterKey(object, "Title");
-    info.author = parseStringAfterKey(object, "Author");
-    info.subject = parseStringAfterKey(object, "Subject");
-    info.keywords = parseStringAfterKey(object, "Keywords");
-    info.creator = parseStringAfterKey(object, "Creator");
-    info.producer = parseStringAfterKey(object, "Producer");
-    info.creationDate = parseStringAfterKey(object, "CreationDate");
-    info.modificationDate = parseStringAfterKey(object, "ModDate");
+    info.title = parseStringAfterKey(
+        object, "Title", readerOptions_.limits.maxRecursionDepth);
+    info.author = parseStringAfterKey(
+        object, "Author", readerOptions_.limits.maxRecursionDepth);
+    info.subject = parseStringAfterKey(
+        object, "Subject", readerOptions_.limits.maxRecursionDepth);
+    info.keywords = parseStringAfterKey(
+        object, "Keywords", readerOptions_.limits.maxRecursionDepth);
+    info.creator = parseStringAfterKey(
+        object, "Creator", readerOptions_.limits.maxRecursionDepth);
+    info.producer = parseStringAfterKey(
+        object, "Producer", readerOptions_.limits.maxRecursionDepth);
+    info.creationDate = parseStringAfterKey(
+        object, "CreationDate", readerOptions_.limits.maxRecursionDepth);
+    info.modificationDate = parseStringAfterKey(
+        object, "ModDate", readerOptions_.limits.maxRecursionDepth);
     return info;
 }
 
@@ -1773,9 +2066,17 @@ PdfPageInfo PdfDocument::pageInfo(const std::size_t pageIndex) const {
     const PdfReference reference = pages[pageIndex];
     const std::string pageObject = readIndirectObject(reference.objectNumber);
     auto parseBox = [&](const std::string& key, const PdfRectangle& fallback) {
-        const std::string inherited = findInheritedPageValue(pageObject, key);
-        if (inherited.empty()) return fallback;
-        const auto values = parseNumberArrayAfterKey("/" + key + " " + inherited, key);
+        const PdfObject inherited = findInheritedPageValue(
+            pageObject, key, readerOptions_.limits.maxRecursionDepth);
+        if (inherited.IsNull()) return fallback;
+        const PdfArray* array = inherited.AsArray();
+        if (array == nullptr) return fallback;
+        std::vector<double> values;
+        values.reserve(array->size());
+        for (const PdfObject& item : array->values()) {
+            if (const auto integer = item.AsInteger()) values.push_back(static_cast<double>(*integer));
+            else if (const auto real = item.AsReal()) values.push_back(*real);
+        }
         if (values.size() < 4U) return fallback;
         return PdfRectangle{values[0], values[1], values[2], values[3]};
     };
@@ -1785,10 +2086,11 @@ PdfPageInfo PdfDocument::pageInfo(const std::size_t pageIndex) const {
     const PdfRectangle cropBox = parseBox("CropBox", mediaBox);
 
     int rotation = 0;
-    const std::string inheritedRotation = findInheritedPageValue(pageObject, "Rotate");
-    if (!inheritedRotation.empty()) {
-        try { rotation = std::stoi(inheritedRotation); } catch (...) { rotation = 0; }
-        rotation %= 360;
+    const PdfObject inheritedRotation = findInheritedPageValue(
+        pageObject, "Rotate", readerOptions_.limits.maxRecursionDepth);
+    const auto rotationValue = inheritedRotation.AsInteger();
+    if (rotationValue.has_value()) {
+        rotation = static_cast<int>(*rotationValue % 360);
         if (rotation < 0) rotation += 360;
     }
 
@@ -1808,7 +2110,8 @@ void PdfDocument::collectPageReferences(const PdfReference& reference,
     }
     visiting[reference.objectNumber] = true;
     const std::string object = readIndirectObject(reference.objectNumber);
-    const std::string type = parseNameAfterKey(object, "Type");
+    const std::string type = parseNameAfterKey(
+        object, "Type", readerOptions_.limits.maxRecursionDepth);
     if (type == "Page") {
         if (pages.size() >= readerOptions_.limits.maxPageCount) {
             throw PdfException(PdfErrorCode::InvalidPageTree,
@@ -1822,7 +2125,8 @@ void PdfDocument::collectPageReferences(const PdfReference& reference,
         throw PdfException(PdfErrorCode::InvalidPageTree,
                            "Page tree object has unsupported /Type /" + type + ".");
     }
-    for (const auto& kid : parseReferenceArrayAfterKey(object, "Kids")) {
+    for (const auto& kid : parseReferenceArrayAfterKey(
+             object, "Kids", readerOptions_.limits.maxRecursionDepth)) {
         collectPageReferences(kid, visiting, pages);
     }
     visiting[reference.objectNumber] = false;
@@ -1842,43 +2146,64 @@ const std::vector<PdfReference>& PdfDocument::pageReferences() const {
 }
 
 std::vector<PdfReference> PdfDocument::contentReferences(const std::string& pageObject) const {
-    auto references = parseReferenceArrayAfterKey(pageObject, "Contents");
-    if (!references.empty()) return references;
-
-    const std::regex expression(R"(/Contents\s+(\d+)\s+(\d+)\s+R)");
-    std::smatch match;
-    if (std::regex_search(pageObject, match, expression)) {
-        references.push_back(PdfReference{
-            static_cast<std::uint32_t>(std::stoul(match[1].str())),
-            static_cast<std::uint16_t>(std::stoul(match[2].str()))});
-    }
-    return references;
+    return parseReferenceArrayAfterKey(
+        pageObject, "Contents", readerOptions_.limits.maxRecursionDepth);
 }
 
 std::string PdfDocument::decodeContentStream(const std::string& streamObject) const {
-    const std::string encoded = extractStreamData(streamObject);
-    std::vector<PdfFilterSpec> filters;
-    const auto addFilter = [&](const char* full, const char* shortName) {
-        if (streamObject.find(std::string("/") + full) != std::string::npos ||
-            streamObject.find(std::string("/") + shortName) != std::string::npos) {
-            filters.push_back(PdfFilterSpec{full, {}});
-        }
-    };
-    addFilter("ASCIIHexDecode", "AHx");
-    addFilter("ASCII85Decode", "A85");
-    addFilter("FlateDecode", "Fl");
-    addFilter("RunLengthDecode", "RL");
+    const std::string_view encoded = extractStreamDataView(streamObject);
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(
+        streamObject, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* dictionary = asDictionary(parsed);
+    const auto filters = dictionary ? filterSpecsFromDictionary(*dictionary)
+                                    : std::vector<PdfFilterSpec>{};
     if (filters.empty()) {
-        if (streamObject.find("/Filter") != std::string::npos) {
+        if (dictionary != nullptr && dictionary->Contains(PdfName("Filter"))) {
             throw PdfException(PdfErrorCode::UnsupportedFeature,
                                "The content stream uses an unsupported filter.");
         }
-        return encoded;
+        return std::string(encoded);
     }
     const auto* begin = reinterpret_cast<const std::byte*>(encoded.data());
     const auto decoded = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize)
         .Decode(std::span<const std::byte>(begin, encoded.size()), filters);
     return std::string(reinterpret_cast<const char*>(decoded.data()), decoded.size());
+}
+
+std::string PdfDocument::decodeContentStreamReference(const PdfReference& reference) const {
+    const std::uint64_t key = (static_cast<std::uint64_t>(reference.objectNumber) << 16U) |
+                              reference.generation;
+    if (const auto cached = contentStreamCache_.find(key); cached != contentStreamCache_.end()) {
+        ++contentStreamCacheHits_;
+        const auto position = std::find(contentStreamRecency_.begin(), contentStreamRecency_.end(), key);
+        if (position != contentStreamRecency_.end()) {
+            contentStreamRecency_.splice(contentStreamRecency_.begin(), contentStreamRecency_, position);
+        }
+        return *cached->second;
+    }
+    ++contentStreamCacheMisses_;
+    const std::string decoded = decodeContentStream(readIndirectObject(reference.objectNumber));
+    const auto& limits = readerOptions_.limits;
+    if (limits.maxCachedContentStreams == 0U || limits.maxCachedContentStreamBytes == 0U ||
+        decoded.size() > limits.maxCachedContentStreamBytes) {
+        return decoded;
+    }
+    while (!contentStreamRecency_.empty() &&
+           (contentStreamCache_.size() >= limits.maxCachedContentStreams ||
+            cachedContentStreamBytes_ > limits.maxCachedContentStreamBytes - decoded.size())) {
+        const std::uint64_t victim = contentStreamRecency_.back();
+        contentStreamRecency_.pop_back();
+        const auto victimEntry = contentStreamCache_.find(victim);
+        if (victimEntry != contentStreamCache_.end()) {
+            cachedContentStreamBytes_ -= victimEntry->second->size();
+            contentStreamCache_.erase(victimEntry);
+        }
+    }
+    auto stored = std::make_shared<const std::string>(decoded);
+    contentStreamRecency_.push_front(key);
+    contentStreamCache_.insert_or_assign(key, stored);
+    cachedContentStreamBytes_ += stored->size();
+    return *stored;
 }
 
 std::string PdfDocument::extractTextOperators(
@@ -2120,13 +2445,9 @@ std::string PdfDocument::extractPageTextFromReference(
     const auto* resources = inheritedPageResources(*this, pageReference);
     std::unordered_set<std::uint64_t> activeForms;
     const StreamDecoder decoder = [this](const PdfReference& reference) {
-        return decodeContentStream(readIndirectObject(reference.objectNumber));
+        return decodeContentStreamReference(reference);
     };
-    std::string content;
-    for (const auto& contentRef : contentReferences(pageObject)) {
-        if (!content.empty()) content.push_back('\n');
-        content += decoder(contentRef);
-    }
+    const std::string content = joinDecodedStreams(contentReferences(pageObject), decoder);
     if (!content.empty()) {
         extractContentRecursively(
             *this, content, resources, request, decoder, activeForms, 0U, chunks);
@@ -2153,10 +2474,93 @@ std::size_t PdfDocument::GetObjectCacheCapacity() const noexcept {
     return readerOptions_.limits.maxCachedObjects;
 }
 
+std::size_t PdfDocument::GetCachedObjectStreamCount() const noexcept {
+    return objectStreamCache_.size();
+}
+
+std::size_t PdfDocument::GetCachedObjectStreamBytes() const noexcept {
+    return cachedObjectStreamBytes_;
+}
+
+std::size_t PdfDocument::GetObjectStreamCacheHits() const noexcept {
+    return objectStreamCacheHits_;
+}
+
+std::size_t PdfDocument::GetObjectStreamCacheMisses() const noexcept {
+    return objectStreamCacheMisses_;
+}
+
+std::shared_ptr<const PdfFontResource> PdfDocument::GetCachedFontResource(
+    const PdfReference reference) const {
+    const std::uint64_t key = (static_cast<std::uint64_t>(reference.objectNumber) << 16U) |
+                              reference.generation;
+    if (const auto cached = fontResourceCache_.find(key); cached != fontResourceCache_.end()) {
+        ++fontResourceCacheHits_;
+        const auto position = std::find(fontResourceRecency_.begin(), fontResourceRecency_.end(), key);
+        if (position != fontResourceRecency_.end()) {
+            fontResourceRecency_.splice(fontResourceRecency_.begin(), fontResourceRecency_, position);
+        }
+        return cached->second;
+    }
+    ++fontResourceCacheMisses_;
+    const auto* dictionary = GetObject(reference).AsDictionary();
+    if (dictionary == nullptr) return {};
+    const PdfFontResource::Resolver resolver = [this](const PdfReference& child) -> const PdfObject& {
+        return GetObject(child);
+    };
+    auto resource = std::make_shared<PdfFontResource>(PdfFontResource::Create(*dictionary, resolver));
+    const std::size_t capacity = readerOptions_.limits.maxCachedFontResources;
+    if (capacity == 0U) return resource;
+    while (fontResourceCache_.size() >= capacity && !fontResourceRecency_.empty()) {
+        const std::uint64_t victim = fontResourceRecency_.back();
+        fontResourceRecency_.pop_back();
+        fontResourceCache_.erase(victim);
+    }
+    fontResourceRecency_.push_front(key);
+    fontResourceCache_.insert_or_assign(key, std::move(resource));
+    return fontResourceCache_.at(key);
+}
+
+std::size_t PdfDocument::GetCachedFontResourceCount() const noexcept {
+    return fontResourceCache_.size();
+}
+
+std::size_t PdfDocument::GetFontResourceCacheHits() const noexcept {
+    return fontResourceCacheHits_;
+}
+
+std::size_t PdfDocument::GetFontResourceCacheMisses() const noexcept {
+    return fontResourceCacheMisses_;
+}
+
+std::size_t PdfDocument::GetCachedContentStreamCount() const noexcept {
+    return contentStreamCache_.size();
+}
+
+std::size_t PdfDocument::GetCachedContentStreamBytes() const noexcept {
+    return cachedContentStreamBytes_;
+}
+
+std::size_t PdfDocument::GetContentStreamCacheHits() const noexcept {
+    return contentStreamCacheHits_;
+}
+
+std::size_t PdfDocument::GetContentStreamCacheMisses() const noexcept {
+    return contentStreamCacheMisses_;
+}
+
 void PdfDocument::ClearObjectCache() const noexcept {
     if (objectResolver_) {
         objectResolver_->Clear();
     }
+    objectStreamCache_.clear();
+    objectStreamRecency_.clear();
+    cachedObjectStreamBytes_ = 0U;
+    fontResourceCache_.clear();
+    fontResourceRecency_.clear();
+    contentStreamCache_.clear();
+    contentStreamRecency_.clear();
+    cachedContentStreamBytes_ = 0U;
 }
 
 PdfPage PdfDocument::GetPage(const std::size_t pageIndex) const {
@@ -2165,11 +2569,18 @@ PdfPage PdfDocument::GetPage(const std::size_t pageIndex) const {
         throw PdfException(PdfErrorCode::InvalidPageTree, "Page index is out of range.");
     }
     const std::string pageObject = readIndirectObject(refs[pageIndex].objectNumber);
-    const std::string resources = findInheritedPageValue(pageObject, "Resources");
+    const PdfObject resources = findInheritedPageValue(
+        pageObject, "Resources", readerOptions_.limits.maxRecursionDepth);
+    std::string resourcesDictionary;
+    if (!resources.IsNull()) {
+        std::ostringstream output;
+        Internal::PdfObjectSerializer::WriteObject(output, resources);
+        resourcesDictionary = output.str();
+    }
     std::vector<std::string> streams;
     for (const auto& ref : contentReferences(pageObject)) {
         try {
-            streams.push_back(decodeContentStream(readIndirectObject(ref.objectNumber)));
+            streams.push_back(decodeContentStreamReference(ref));
         } catch (const PdfException&) {
             // A damaged optional content stream must not make the complete
             // page unrenderable. Keep the stream slot empty so valid streams
@@ -2177,7 +2588,7 @@ PdfPage PdfDocument::GetPage(const std::size_t pageIndex) const {
             streams.emplace_back();
         }
     }
-    return PdfPage(pageInfo(pageIndex), resources, std::move(streams));
+    return PdfPage(pageInfo(pageIndex), std::move(resourcesDictionary), std::move(streams));
 }
 
 PdfReference PdfDocument::GetPageReference(const std::size_t pageIndex) const {
@@ -2223,13 +2634,9 @@ std::vector<PdfTextChunk> PdfDocument::ExtractTextChunks(
     std::vector<PdfTextChunk> chunks;
     std::unordered_set<std::uint64_t> activeForms;
     const StreamDecoder decoder = [this](const PdfReference& reference) {
-        return decodeContentStream(readIndirectObject(reference.objectNumber));
+        return decodeContentStreamReference(reference);
     };
-    std::string content;
-    for (const auto& contentRef : contentReferences(pageObject)) {
-        if (!content.empty()) content.push_back('\n');
-        content += decoder(contentRef);
-    }
+    const std::string content = joinDecodedStreams(contentReferences(pageObject), decoder);
     if (!content.empty()) {
         extractContentRecursively(
             *this, content, resources, request, decoder, activeForms, 0U, chunks);
@@ -2248,15 +2655,11 @@ void PdfDocument::ForEachPageContentEvent(
 
     const std::string pageObject = readIndirectObject(pages[pageIndex].objectNumber);
     const auto* resources = inheritedPageResources(*this, pages[pageIndex]);
-    std::string content;
-    for (const auto& contentReference : contentReferences(pageObject)) {
-        if (!content.empty()) content.push_back('\n');
-        content += decodeContentStream(readIndirectObject(contentReference.objectNumber));
-    }
-    std::unordered_set<std::uint64_t> activeForms;
     const StreamDecoder decoder = [this](const PdfReference& reference) {
-        return decodeContentStream(readIndirectObject(reference.objectNumber));
+        return decodeContentStreamReference(reference);
     };
+    const std::string content = joinDecodedStreams(contentReferences(pageObject), decoder);
+    std::unordered_set<std::uint64_t> activeForms;
     processPageContentRecursively(*this, content, resources, {}, decoder,
                                   activeForms, 0U, handler);
 }
@@ -2280,14 +2683,10 @@ std::vector<PdfExtractedImage> PdfDocument::ExtractImages(
     std::vector<PdfExtractedImage> images;
     std::unordered_set<std::uint64_t> activeForms;
     const StreamDecoder decoder = [this](const PdfReference& reference) {
-        return decodeContentStream(readIndirectObject(reference.objectNumber));
+        return decodeContentStreamReference(reference);
     };
     const std::array<double, 6> identity{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
-    std::string content;
-    for (const auto& contentRef : contentReferences(pageObject)) {
-        if (!content.empty()) content.push_back('\n');
-        content += decoder(contentRef);
-    }
+    const std::string content = joinDecodedStreams(contentReferences(pageObject), decoder);
     if (!content.empty()) {
         extractImagesRecursively(*this, content, resources, identity,
             options, decoder, activeForms, 0U, images);

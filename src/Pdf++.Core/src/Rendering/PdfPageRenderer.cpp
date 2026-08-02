@@ -332,18 +332,26 @@ void DrawImage(PdfBitmap& bitmap, const PdfExtractedImage& image, const Coordina
 
 PdfBitmap Downsample(const PdfBitmap& source, const std::size_t samples, const PdfRgbaColor background) {
     if (samples <= 1U) return source;
-    const std::size_t width = source.GetWidth() / samples;
-    const std::size_t height = source.GetHeight() / samples;
+    // Use ceiling division so tiny pages never collapse to a zero-sized bitmap
+    // when supersampling is enabled. Clamp the sample footprint at the source
+    // edge because the final block can be smaller than the full sample square.
+    const std::size_t width = (source.GetWidth() + samples - 1U) / samples;
+    const std::size_t height = (source.GetHeight() + samples - 1U) / samples;
     PdfBitmap target(width, height, background);
     const auto average = [&](const std::size_t x, const std::size_t y) {
         std::uint64_t red{}, green{}, blue{}, alpha{};
+        std::uint64_t count{};
         for (std::size_t sy = 0; sy < samples; ++sy) {
             for (std::size_t sx = 0; sx < samples; ++sx) {
-                const auto pixel = source.GetPixel(x * samples + sx, y * samples + sy);
+                const std::size_t sourceX = x * samples + sx;
+                const std::size_t sourceY = y * samples + sy;
+                if (sourceX >= source.GetWidth() || sourceY >= source.GetHeight()) continue;
+                const auto pixel = source.GetPixel(sourceX, sourceY);
                 red += pixel.red; green += pixel.green; blue += pixel.blue; alpha += pixel.alpha;
+                ++count;
             }
         }
-        const auto count = static_cast<std::uint64_t>(samples * samples);
+        if (count == 0U) return background;
         return PdfRgbaColor{static_cast<std::uint8_t>(red / count), static_cast<std::uint8_t>(green / count),
                             static_cast<std::uint8_t>(blue / count), static_cast<std::uint8_t>(alpha / count)};
     };

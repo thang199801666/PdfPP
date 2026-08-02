@@ -10,9 +10,12 @@
 #include "Internal/Parsing/PdfObjectParser.hpp"
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <array>
 #include <span>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 #include <zlib.h>
 #include "TestRunner.hpp"
@@ -21,6 +24,63 @@ int RunReaderIntegrationTests();
 int RunWriterIntegrationTests();
 int RunApiCoverageTests();
 int RunFeatureUnitTests();
+int RunSecurityTests();
+
+namespace {
+
+struct LzwTestCode {
+    std::uint32_t code{};
+    int width{};
+};
+
+// Minimal PDF-style LZW encoder (early change on, codes packed LSB-first)
+// used to exercise the decoder against a known-good round trip.
+std::vector<LzwTestCode> EncodeLzw(const std::string& data) {
+    std::unordered_map<std::string, std::uint32_t> table;
+    for (std::uint32_t i = 0U; i < 256U; ++i) table[std::string(1, static_cast<char>(i))] = i;
+    std::uint32_t nextCode = 258U;
+    int width = 9;
+    std::vector<LzwTestCode> output;
+    const auto push = [&output, &width](std::uint32_t code) {
+        output.push_back(LzwTestCode{code, width});
+    };
+    push(256U);
+    std::string current;
+    for (const char ch : data) {
+        const std::string candidate = current + ch;
+        if (table.count(candidate) != 0U) {
+            current = candidate;
+            continue;
+        }
+        push(table[current]);
+        if (nextCode < 4096U) table[candidate] = nextCode++;
+        if (nextCode == ((1U << width) - 1U) && width < 12) ++width;
+        current = std::string(1, ch);
+    }
+    if (!current.empty()) push(table[current]);
+    push(257U);
+    return output;
+}
+
+std::vector<std::byte> PackLzwLsbFirst(const std::vector<LzwTestCode>& codes) {
+    std::vector<std::byte> bytes;
+    std::size_t bitPosition = 0;
+    for (const auto& item : codes) {
+        for (int bit = 0; bit < item.width; ++bit) {
+            if (bitPosition % 8U == 0U) bytes.push_back(std::byte{0});
+            const std::uint32_t value =
+                (item.code >> bit) & 1U;
+            const std::size_t byteIndex = bitPosition / 8U;
+            bytes[byteIndex] = static_cast<std::byte>(
+                std::to_integer<unsigned char>(bytes[byteIndex]) |
+                static_cast<unsigned char>(value << (bitPosition % 8U)));
+            ++bitPosition;
+        }
+    }
+    return bytes;
+}
+
+} // namespace
 
 int RunCoreTests() {
     using namespace CPPPdf;
@@ -43,6 +103,20 @@ int RunCoreTests() {
         std::byte{254}, std::byte{'Z'}, std::byte{128}};
     const auto rl = PdfFilterPipeline::DecodeRunLength(runLength);
     PDFPP_TEST_CHECK(std::string(reinterpret_cast<const char*>(rl.data()), rl.size()) == "ABCZZZ");
+
+    const std::string lzwSource =
+        "TOBEORNOTTOBEORTOBEORNOTTOBEORNOTTOBEORNOTTOBEORNOTTOBEORNOT"
+        "The quick brown fox jumps over the lazy dog. 0123456789 "
+        "0123456789 0123456789 0123456789 0123456789 0123456789";
+    const auto lzwCodes = EncodeLzw(lzwSource);
+    const auto lzwPacked = PackLzwLsbFirst(lzwCodes);
+    const auto lzw = PdfFilterPipeline::DecodeLzw(lzwPacked);
+    PDFPP_TEST_CHECK(std::string(reinterpret_cast<const char*>(lzw.data()), lzw.size()) == lzwSource);
+
+    const auto lzwViaPipeline = PdfFilterPipeline{}.Decode(
+        lzwPacked, {{"LZWDecode", "<< /EarlyChange 1 >>"}});
+    PDFPP_TEST_CHECK(std::string(reinterpret_cast<const char*>(lzwViaPipeline.data()),
+                                 lzwViaPipeline.size()) == lzwSource);
 
     const std::array<std::byte, 6> sourceBytes{
         std::byte{'P'}, std::byte{'d'}, std::byte{'f'},
@@ -257,5 +331,6 @@ int main() {
     runner.Run("Writer.PageEditingFormsIntegration", RunWriterIntegrationTests);
     runner.Run("PublicAPI.AllFeatureGroups", RunApiCoverageTests);
     runner.Run("Features.AllPublicFeatureUnits", RunFeatureUnitTests);
+    runner.Run("Security.PasswordEncryptionRoundTrips", RunSecurityTests);
     return runner.PrintSummary();
 }

@@ -117,6 +117,11 @@ std::vector<std::byte> PdfFilterPipeline::Decode(std::span<const std::byte> inpu
         else if(f.name=="ASCIIHexDecode"||f.name=="AHx") data=DecodeAsciiHex(data,maxDecodedSize_);
         else if(f.name=="ASCII85Decode"||f.name=="A85") data=DecodeAscii85(data,maxDecodedSize_);
         else if(f.name=="RunLengthDecode"||f.name=="RL") data=DecodeRunLength(data,maxDecodedSize_);
+        else if(f.name=="LZWDecode"||f.name=="LZW") {
+            const bool earlyChange = Parameter(f.decodeParameters, "EarlyChange", 1) != 0;
+            data=DecodeLzw(data, earlyChange, maxDecodedSize_);
+            data=ApplyPredictor(std::move(data), f.decodeParameters, maxDecodedSize_);
+        }
         else throw PdfException(PdfErrorCode::UnsupportedFeature,"Unsupported PDF filter: "+f.name);
         Check(data.size(),maxDecodedSize_);
     }
@@ -219,5 +224,98 @@ std::vector<std::byte> PdfFilterPipeline::DecodeRunLength(
         }
     }
     return out;
+}
+
+namespace {
+// LZW codes are packed into the byte stream with the least significant bit of
+// each code first (PDF "EarlyChange" variant, table growth starting at 511).
+class LzwBitReader final {
+public:
+    explicit LzwBitReader(std::span<const std::byte> data) : data_(data) {}
+
+    // Returns 0xFFFFFFFF when fewer than `width` bits remain (stream end).
+    std::uint32_t Read(int width) {
+        if (width < 0 || width > 12 || bitPosition_ + static_cast<std::size_t>(width) > data_.size() * 8U) {
+            return std::numeric_limits<std::uint32_t>::max();
+        }
+        std::uint32_t value = 0;
+        for (int i = 0; i < width; ++i) {
+            const std::size_t byteIndex = bitPosition_ >> 3;
+            const std::size_t bitIndex = bitPosition_ & 7U;
+            const std::uint32_t bit =
+                (std::to_integer<std::uint32_t>(data_[byteIndex]) >> bitIndex) & 1U;
+            value |= bit << i;
+            ++bitPosition_;
+        }
+        return value;
+    }
+
+private:
+    std::span<const std::byte> data_;
+    std::size_t bitPosition_{};
+};
+} // namespace
+
+std::vector<std::byte> PdfFilterPipeline::DecodeLzw(
+    std::span<const std::byte> input, bool earlyChange, std::size_t maxDecodedSize) {
+    constexpr std::uint32_t kClear = 256U;
+    constexpr std::uint32_t kEndOfData = 257U;
+    constexpr std::size_t kTableSize = 4096U;
+    constexpr int kMaxCodeWidth = 12;
+
+    std::vector<std::string> table(kTableSize);
+    for (std::uint32_t i = 0U; i < 256U; ++i) {
+        table[i] = std::string(1, static_cast<char>(i));
+    }
+
+    LzwBitReader reader(input);
+    std::vector<std::byte> output;
+    std::string previous;
+    std::uint32_t nextCode = 258U;
+    int codeWidth = 9;
+
+    for (;;) {
+        const std::uint32_t code = reader.Read(codeWidth);
+        if (code == std::numeric_limits<std::uint32_t>::max()) break;
+        if (code == kClear) {
+            nextCode = 258U;
+            codeWidth = 9;
+            previous.clear();
+            continue;
+        }
+        if (code == kEndOfData) break;
+
+        std::string entry;
+        if (code == nextCode) {
+            if (previous.empty() || nextCode >= kTableSize) {
+                throw PdfException(PdfErrorCode::MalformedObject, "Invalid LZW sequence.");
+            }
+            entry = previous + previous[0];
+            table[nextCode] = entry;
+            ++nextCode;
+        } else {
+            if (code > nextCode) {
+                throw PdfException(PdfErrorCode::MalformedObject, "Invalid LZW code.");
+            }
+            entry = table[code];
+            if (!previous.empty() && nextCode < kTableSize) {
+                table[nextCode] = previous + entry[0];
+                ++nextCode;
+            }
+        }
+
+        CheckAppend(output.size(), entry.size(), maxDecodedSize);
+        for (const char ch : entry) {
+            output.push_back(static_cast<std::byte>(static_cast<unsigned char>(ch)));
+        }
+        previous = std::move(entry);
+
+        if (codeWidth < kMaxCodeWidth) {
+            const std::uint32_t threshold =
+                earlyChange ? (1U << codeWidth) - 1U : (1U << codeWidth);
+            if (nextCode == threshold) ++codeWidth;
+        }
+    }
+    return output;
 }
 } // namespace CPPPdf

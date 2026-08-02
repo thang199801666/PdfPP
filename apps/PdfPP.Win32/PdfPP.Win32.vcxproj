@@ -51,16 +51,26 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\AppSettings.cpp" />
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\NativePdf.cpp" />
     <ClCompile Include="src\PageCache.cpp" />
     <ClCompile Include="src\ReaderApplication.cpp" />
+    <ClCompile Include="src\ReaderDocument.cpp" />
+    <ClCompile Include="src\ReaderRendering.cpp" />
+    <ClCompile Include="src\ReaderSettings.cpp" />
+    <ClCompile Include="src\ReaderTabs.cpp" />
+    <ClCompile Include="src\ReaderUtils.cpp" />
+    <ClCompile Include="src\ReaderView.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\PdfPP\Win32\AppCommands.hpp" />
+    <ClInclude Include="include\PdfPP\Win32\AppSettings.hpp" />
     <ClInclude Include="include\PdfPP\Win32\NativePdf.hpp" />
     <ClInclude Include="include\PdfPP\Win32\PageCache.hpp" />
     <ClInclude Include="include\PdfPP\Win32\ReaderApplication.hpp" />
+    <ClInclude Include="include\PdfPP\Win32\ReaderState.hpp" />
+    <None Include="$(SolutionDir)icons\PDF++.png" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\PdfPP.Native\PdfPP.Native.vcxproj">
@@ -72,6 +82,10 @@
   </ItemGroup>
   <Target Name="CopyNativeBridge" AfterTargets="Build">
     <Copy SourceFiles="$(OutDir)PdfPP.Native.dll" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyApplicationIcon" AfterTargets="Build">
+    <MakeDir Directories="$(OutDir)icons" />
+    <Copy SourceFiles="$(SolutionDir)icons\PDF++.png" DestinationFolder="$(OutDir)icons" SkipUnchangedFiles="true" />
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

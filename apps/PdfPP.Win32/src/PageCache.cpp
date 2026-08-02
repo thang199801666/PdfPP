@@ -51,4 +51,15 @@ std::optional<PageBitmap> PageCache::Get(const int page, const double zoom,
     return bitmap;
 }
 
+std::optional<PageBitmap> PageCache::Take(const int page, const double zoom,
+                                          const unsigned int dpi) {
+    const auto existing = std::find_if(entries_.begin(), entries_.end(), [&](const PageBitmap& bitmap) {
+        return Matches(bitmap, page, zoom, dpi);
+    });
+    if (existing == entries_.end()) return std::nullopt;
+    PageBitmap bitmap = std::move(*existing);
+    entries_.erase(existing);
+    return bitmap;
+}
+
 } // namespace PdfPP::Win32
