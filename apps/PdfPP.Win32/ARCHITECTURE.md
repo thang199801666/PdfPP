@@ -4,7 +4,13 @@ The Win32 reader is organized as a thin presentation application over reusable n
 
 ```text
 Main
-  -> ReaderApplication
+  -> ReaderApplication (entry point, message pump)
+       -> ReaderView      (window/canvas/tab procs, layout, painting, fullscreen)
+       -> ReaderDocument  (open/close, navigation, search, print, bookmarks)
+       -> ReaderRendering (geometry, render/cache, prefetch, scrolling, zoom)
+       -> ReaderTabs      (tab strip painting, tab lifecycle, close button)
+       -> ReaderSettings  (recent files, favorites, menus, fonts, about)
+       -> ReaderUtils     (generic helpers: DPI, UTF-8, drawing, clipboard)
        -> AppSettings
        -> PageCache
        -> NativePdfDocument
@@ -21,7 +27,31 @@ Owns only the Windows process entry point. It must not contain document, renderi
 
 ### ReaderApplication
 
-Owns window handles and coordinates commands, input, DPI changes, tabs, asynchronous loading, rendering and painting. It may depend on all application-level modules, but reusable modules must not depend on it.
+Owns the process entry, window creation and the message loop. It wires the modules together but contains no document/rendering logic itself.
+
+### ReaderView
+
+Owns the window procedures (`windowProc`, `canvasProc`, `tabBarProc`), ribbon/sidebar layout, canvas painting and fullscreen toggling. It only dispatches commands; it does not own document or render state.
+
+### ReaderDocument
+
+Owns document open/close, tab navigation semantics, text search, printing and the bookmark tree.
+
+### ReaderRendering
+
+Owns page geometry (absolute offsets used to size the scrollbar to the whole document), the render thread/cache, prefetch policy and all scrolling/zoom math.
+
+### ReaderTabs
+
+Owns tab strip painting (custom, Chrome/Photoshop style), hit-testing and the tab lifecycle (add, switch, close with confirmation).
+
+### ReaderSettings
+
+Owns recent files, favorites, menu construction, DPI-aware fonts, and about/properties dialogs.
+
+### ReaderUtils
+
+Holds dependency-free helpers (DPI scaling, UTF-8 conversion, overlay painting, gradient fill, clipboard) used across modules.
 
 ### AppSettings
 
@@ -39,21 +69,18 @@ Owns the bounded most-recently-used page bitmap collection. Cache identity inclu
 
 Contains reusable native control styling, DPI-aware fonts and theme primitives. It must remain independent from the reader application.
 
+## Shared state
+
+All reader modules share one set of application-global variables declared in
+`ReaderState.hpp` (C++17 `inline` variables). This mirrors the original
+monolithic file; the split is purely organizational. The `RenderResult` and
+`OpenResult` worker-thread results are transferred under mutexes and only
+consumed on the UI thread.
+
 ## Dependency rules
 
 1. Native resource ownership stays behind RAII types.
 2. Worker threads return owned values; they do not mutate HWND state.
 3. Only the UI thread sends messages or changes controls.
 4. DPI is part of render and cache identity.
-5. New features receive their own module before adding state to `ReaderApplication`.
-
-## Planned extraction seams
-
-As features grow, split `ReaderApplication` in this order:
-
-1. `RenderCoordinator`: cancellation, render queue and prefetch policy.
-2. `DocumentController`: open/close, page navigation and search state.
-3. `ReaderView`: HWND creation, layout, painting and input translation.
-4. `CommandRouter`: menus, accelerators and enable/checked state.
-
-This order keeps behavior stable while progressively removing the remaining window-level global state.
+5. New features receive their own module before adding state to `ReaderState`.
