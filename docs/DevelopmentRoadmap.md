@@ -73,6 +73,7 @@ secondary scope.
 
 - Build a broad PDF, font and image compatibility corpus.
 - Run differential rendering and extraction tests against MuPDF and iText outputs.
+- `PdfPP.Inspect` renders pages to PPM with a machine-readable summary, and `compare_render.py` compares dimensions and dark-pixel coverage against MuPDF (`mutool` or PyMuPDF) per page; `compare_engines.py` validates page/text counts against pypdf and Poppler. `compare_text.py` compares per-page extracted text with MuPDF by token overlap, and `PdfPP.GenCorpus` writes a deterministic self-owned corpus into `tests/corpus/generated/`.
 - Fuzz object parsing, streams, content, fonts and images.
 - Clang libFuzzer targets (`PdfPP.FuzzReader`, `FuzzContent`, `FuzzFilter`, `FuzzCffFont`, `FuzzTrueTypeFont`) exercise object parsing, stream filters, content processing, and embedded fonts under ASan/UBSan.
 - Add display-list, glyph and image caches.

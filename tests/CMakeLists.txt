@@ -1,5 +1,9 @@
 add_executable(PdfPP.UnitTests
     Unit/CoreTests.cpp
+    Unit/ObjectAndRenderingTests.cpp
+    Unit/CffAndFilterTests.cpp
+    Unit/ContentTextFontTests.cpp
+    Unit/PdfAValidationTests.cpp
     Unit/ReaderIntegrationTests.cpp
     Unit/WriterIntegrationTests.cpp
     Unit/ApiCoverageTests.cpp

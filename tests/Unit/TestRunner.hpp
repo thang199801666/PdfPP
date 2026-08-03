@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <functional>
 #include <iomanip>
@@ -33,6 +34,37 @@ inline void Check(bool condition, const char* expression, const char* file, int 
     }
 }
 
+template <typename Value>
+inline void CheckNear(const Value actual, const Value expected, const Value tolerance,
+                      const char* expression, const char* file, const int line) {
+    if (!(std::abs(actual - expected) <= tolerance)) {
+        std::ostringstream stream;
+        stream << "check near failed: " << expression << " (got " << actual
+               << ", expected " << expected << " within " << tolerance
+               << ") (" << file << ':' << line << ')';
+        throw TestFailure(stream.str(), file, line);
+    }
+}
+
+template <typename Callable>
+inline void ExpectThrows(const Callable& callable, const char* expression,
+                         const char* file, const int line) {
+    bool thrown = false;
+    try {
+        callable();
+    } catch (const std::exception&) {
+        thrown = true;
+    }
+    if (!thrown) {
+        std::ostringstream stream;
+        stream << "expected exception: " << expression
+               << " (" << file << ':' << line << ')';
+        throw TestFailure(stream.str(), file, line);
+    }
+}
+
+// Test case: a named function plus an optional group tag. Register through
+// TestRunner so failures report the exact test that broke.
 class TestRunner final {
 public:
     template <typename Callable>
@@ -97,3 +129,9 @@ private:
 
 #define PDFPP_TEST_CHECK(expression) \
     ::CPPPdfTest::Check(static_cast<bool>(expression), #expression, __FILE__, __LINE__)
+
+#define PDFPP_TEST_CHECK_NEAR(actual, expected, tolerance) \
+    ::CPPPdfTest::CheckNear((actual), (expected), (tolerance), #actual " == " #expected, __FILE__, __LINE__)
+
+#define PDFPP_TEST_EXPECT_THROWS(callable) \
+    ::CPPPdfTest::ExpectThrows((callable), #callable, __FILE__, __LINE__)

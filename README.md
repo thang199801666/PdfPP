@@ -288,6 +288,30 @@ writer.GetCanvas(page)
 Dashes participate in graphics-state save/restore and transparency-group scoping,
 completing the roadmap's line cap/join/miter behavior milestone.
 
+## Pdf++ 0.50 differential validation against MuPDF
+
+Version 0.50 adds cross-engine rendering validation. `PdfPP.Inspect` renders pages
+to PPM with a machine-readable summary, and `compare_render.py` compares dimensions
+and dark-pixel coverage with MuPDF:
+
+```text
+python tools/validation/compare_render.py report.pdf \
+  --pdfpp build/x64/Release/PdfPP.Inspect.exe --dpi 72 --page 2
+```
+
+Dimension mismatches fail the run; coverage differences beyond tolerance are
+warned, so text-shaping and font-rasterization differences between engines do not
+block the pipeline. MuPDF is reached through `mutool` (mupdf-tools) or PyMuPDF.
+
+Text extraction is validated the same way with `compare_text.py`, and a
+deterministic self-owned corpus can be regenerated with `PdfPP.GenCorpus`:
+
+```text
+PdfPP.GenCorpus.exe tests/corpus/generated
+python tools/validation/compare_text.py tests/corpus/generated/corpus-multipage.pdf \
+  --pdfpp build/x64/Release/PdfPP.Inspect.exe
+```
+
 ## Contributing and security
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security-sensitive defects through the private process described in [SECURITY.md](SECURITY.md).

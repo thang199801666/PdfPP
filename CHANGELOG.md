@@ -1,3 +1,34 @@
+## 0.52.0
+
+- Reorganized the unit-test suite by domain: the monolithic `RunCoreTests()`
+  and the large reader/writer/security integration functions were split into
+  small, named test cases so a failure pinpoints the exact component.
+- Extended `TestRunner.hpp` with `PDFPP_TEST_CHECK_NEAR` and
+  `PDFPP_TEST_EXPECT_THROWS` helpers; added a shared `TestHelpers.hpp` for
+  deterministic CFF and LZW fixtures.
+- Core-domain cases now live in `ObjectAndRenderingTests`, `CffAndFilterTests`,
+  `ContentTextFontTests`, and `PdfAValidationTests`; `CoreTests.cpp` is a thin
+  registry around `main()`.
+- Added coverage for `PdfTextSearchIndex`, search options, and `PdfDisplayList`
+  replay/clear.
+- All suites green: 23 top-level test cases across core, reader, writer, API,
+  feature, security, and validation groups.
+
+## 0.51.0
+
+- Added differential text-extraction validation against MuPDF.
+- `compare_text.py` compares per-page extracted text between Pdf++ and MuPDF by token overlap, reporting low-overlap pages without failing the run for complex layouts.
+- Added `PdfPP.GenCorpus`, a deterministic corpus generator covering text, vector paths, images, transparency, and multi-page documents; fixtures are written to `tests/corpus/generated/` and redistributable under the repository license.
+- All self-owned corpus fixtures now validate against MuPDF through the render and text scripts.
+
+## 0.50.0
+
+- Added differential rendering validation against MuPDF.
+- `PdfPP.Inspect` now renders every page to PPM with a machine-readable `render <page> <w> <h> <dark>` summary.
+- `compare_render.py` renders a selected page with both Pdf++ and MuPDF (via `mutool` or PyMuPDF) and compares dimensions and dark-pixel coverage; dimension mismatches are hard failures, coverage deltas beyond tolerance are reported as warnings.
+- Fixed UTF-8 subprocess decoding in the validation scripts on Windows.
+- Documented the test-corpus license policy for redistributable fixtures.
+
 ## 0.49.0
 
 - Added line dash pattern support to the CPU renderer.

@@ -19,6 +19,7 @@ Pdf++ keeps the public version fixed at `1.0.0` while development continues. A r
 - Clang libFuzzer targets (`PdfPP.FuzzReader`, `FuzzContent`, `FuzzFilter`, `FuzzCffFont`, `FuzzTrueTypeFont`) run under ASan/UBSan; object parsing, stream filters, content processing, and embedded fonts are covered.
 - External validation using qpdf and independent reader smoke tests.
 - Public test corpus with licenses suitable for redistribution.
+- `tests/corpus` documents a license policy; `PdfPP.Inspect` + `compare_render.py` validate rendering dimensions/coverage against MuPDF, `compare_text.py` validates per-page text by token overlap against MuPDF, and `compare_engines.py` validates page/text counts against pypdf and Poppler. `PdfPP.GenCorpus` regenerates a deterministic self-owned corpus on demand.
 - No known crash on untrusted input within configured limits.
 
 ## Performance gates

@@ -1,4 +1,5 @@
 #include <CPPPdf/CPPPdf.h>
+#include "TestRunner.hpp"
 
 #include <array>
 #include <cstddef>
@@ -11,6 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -257,7 +259,7 @@ std::vector<std::byte> makeSoftMaskImagePdf() {
 
 } // namespace
 
-int RunReaderIntegrationTests() {
+int TestMinimalPdfParsing() {
     const auto bytes = makeMinimalPdf();
     auto document = CPPPdf::PdfDocument::Open(std::span<const std::byte>(bytes));
 
@@ -281,7 +283,12 @@ int RunReaderIntegrationTests() {
         std::cerr << "Decoded content-stream cache did not reuse the page stream.\n";
         return 26;
     }
+    return 0;
+}
 
+int TestXrefRecovery() {
+const auto bytes = makeMinimalPdf();
+auto document = CPPPdf::PdfDocument::Open(std::span<const std::byte>(bytes));
     auto damagedBytes = bytes;
     std::string damagedPdf(reinterpret_cast<const char*>(damagedBytes.data()), damagedBytes.size());
     const std::size_t startxref = damagedPdf.rfind("startxref");
@@ -376,7 +383,12 @@ int RunReaderIntegrationTests() {
         std::cerr << "Strict xref parsing accepted a cyclic revision chain.\n";
         return 32;
     }
+    return 0;
+}
 
+int TestObjectCacheAndLimits() {
+const auto bytes = makeMinimalPdf();
+auto document = CPPPdf::PdfDocument::Open(std::span<const std::byte>(bytes));
     document.ClearObjectCache();
     (void)document.GetObject(CPPPdf::PdfReference{1U, 0U});
     (void)document.GetObject(CPPPdf::PdfReference{1U, 1U});
@@ -499,7 +511,80 @@ int RunReaderIntegrationTests() {
             return 20;
         }
     }
+    return 0;
+}
 
+int TestObjectStreamCache() {
+    const auto objectStreamBytes = makeObjectStreamPdf();
+    auto malformedXrefStreamBytes = objectStreamBytes;
+    std::string malformedXrefStream(reinterpret_cast<const char*>(malformedXrefStreamBytes.data()),
+                                    malformedXrefStreamBytes.size());
+    const std::size_t widthMarker = malformedXrefStream.find("/W [1 4 2]");
+    if (widthMarker != std::string::npos) {
+        malformedXrefStream[widthMarker + 4U] = '9';
+        for (std::size_t index = 0; index < malformedXrefStream.size(); ++index) {
+            malformedXrefStreamBytes[index] = static_cast<std::byte>(
+                static_cast<unsigned char>(malformedXrefStream[index]));
+        }
+    }
+    CPPPdf::PdfReaderOptions strictXrefStreamOptions;
+    strictXrefStreamOptions.strictParsing = true;
+    bool malformedXrefStreamRejected = false;
+    try {
+        (void)CPPPdf::PdfDocument::Open(
+            std::span<const std::byte>(malformedXrefStreamBytes), strictXrefStreamOptions);
+    } catch (const CPPPdf::PdfException& error) {
+        malformedXrefStreamRejected = error.code() == CPPPdf::PdfErrorCode::MalformedXref;
+    }
+    if (!malformedXrefStreamRejected) {
+        std::cerr << "Strict xref stream parsing accepted an invalid field width.\n";
+        return 30;
+    }
+
+    CPPPdf::PdfReaderOptions objectStreamOptions;
+    objectStreamOptions.limits.maxCachedObjects = 0U;
+    objectStreamOptions.limits.maxCachedObjectStreams = 1U;
+    auto objectStreamDocument = CPPPdf::PdfDocument::Open(
+        std::span<const std::byte>(objectStreamBytes), objectStreamOptions);
+    (void)objectStreamDocument.GetObject(CPPPdf::PdfReference{4U, 0U});
+    (void)objectStreamDocument.GetObject(CPPPdf::PdfReference{5U, 0U});
+    if (objectStreamDocument.GetObjectStreamCacheMisses() != 1U ||
+        objectStreamDocument.GetObjectStreamCacheHits() != 1U ||
+        objectStreamDocument.GetCachedObjectStreamCount() != 1U ||
+        objectStreamDocument.GetCachedObjectStreamBytes() == 0U) {
+        std::cerr << "Decoded object-stream cache did not record the expected hit.\n";
+        return 21;
+    }
+    (void)objectStreamDocument.GetObject(CPPPdf::PdfReference{8U, 0U});
+    (void)objectStreamDocument.GetObject(CPPPdf::PdfReference{4U, 0U});
+    if (objectStreamDocument.GetCachedObjectStreamCount() != 1U ||
+        objectStreamDocument.GetObjectStreamCacheMisses() != 3U) {
+        std::cerr << "Decoded object-stream LRU did not evict at its configured limit.\n";
+        return 22;
+    }
+    objectStreamDocument.ClearObjectCache();
+    if (objectStreamDocument.GetCachedObjectStreamCount() != 0U ||
+        objectStreamDocument.GetCachedObjectStreamBytes() != 0U) {
+        std::cerr << "Decoded object-stream cache did not clear.\n";
+        return 23;
+    }
+
+    CPPPdf::PdfReaderOptions tinyObjectStreamOptions;
+    tinyObjectStreamOptions.limits.maxCachedObjects = 0U;
+    tinyObjectStreamOptions.limits.maxCachedObjectStreamBytes = 1U;
+    auto tinyObjectStreamDocument = CPPPdf::PdfDocument::Open(
+        std::span<const std::byte>(objectStreamBytes), tinyObjectStreamOptions);
+    (void)tinyObjectStreamDocument.GetObject(CPPPdf::PdfReference{4U, 0U});
+    (void)tinyObjectStreamDocument.GetObject(CPPPdf::PdfReference{5U, 0U});
+    if (tinyObjectStreamDocument.GetCachedObjectStreamCount() != 0U ||
+        tinyObjectStreamDocument.GetObjectStreamCacheMisses() != 2U) {
+        std::cerr << "Decoded object-stream cache exceeded its byte budget.\n";
+        return 24;
+    }
+    return 0;
+}
+
+int TestFontExtraction() {
     const auto fontBytes = makeFontResourcePdf();
     auto fontDocument = CPPPdf::PdfDocument::Open(std::span<const std::byte>(fontBytes));
     const auto fontChunks = fontDocument.ExtractTextChunks(0U);
@@ -520,7 +605,10 @@ int RunReaderIntegrationTests() {
         std::cerr << "Document-level font resource cache did not reuse an indirect font.\n";
         return 25;
     }
+    return 0;
+}
 
+int TestFormXObjectExtraction() {
     const auto formBytes = makeFormXObjectPdf();
     auto formDocument = CPPPdf::PdfDocument::Open(std::span<const std::byte>(formBytes));
     const auto formChunks = formDocument.ExtractTextChunks(0U);
@@ -539,7 +627,10 @@ int RunReaderIntegrationTests() {
         std::cerr << "Form XObject ExtGState alpha was not scoped correctly.\n";
         return 26;
     }
+    return 0;
+}
 
+int TestInlineImageExtraction() {
     const auto inlineBytes = makeInlineImagePdf();
     auto inlineDocument = CPPPdf::PdfDocument::Open(std::span<const std::byte>(inlineBytes));
     const auto inlineImages = inlineDocument.ExtractImages(0U);
@@ -556,7 +647,10 @@ int RunReaderIntegrationTests() {
         std::cerr << "Inline image CTM was not applied.\n";
         return 11;
     }
+    return 0;
+}
 
+int TestSoftMaskImageExtraction() {
     const auto softMaskBytes = makeSoftMaskImagePdf();
     auto softMaskDocument = CPPPdf::PdfDocument::Open(std::span<const std::byte>(softMaskBytes));
     const auto maskedImages = softMaskDocument.ExtractImages(0U);
@@ -572,8 +666,11 @@ int RunReaderIntegrationTests() {
         std::cerr << "Soft-mask image graphics alpha state was not preserved.\n";
         return 27;
     }
+    return 0;
+}
 
-
+int TestAnnotationEditor() {
+const auto bytes = makeMinimalPdf();
     const auto annotationInput = std::filesystem::temp_directory_path() / "pdfpp_annotation_input.pdf";
     const auto annotationOutput = std::filesystem::temp_directory_path() / "pdfpp_annotation_output.pdf";
     {
@@ -607,8 +704,12 @@ int RunReaderIntegrationTests() {
     std::error_code cleanupError;
     std::filesystem::remove(annotationInput, cleanupError);
     std::filesystem::remove(annotationOutput, cleanupError);
+    return 0;
+}
 
-
+int TestPageEditor() {
+const auto bytes = makeMinimalPdf();
+    std::error_code cleanupError;
     const auto pageEditInput = std::filesystem::temp_directory_path() / "pdfpp_page_edit_input.pdf";
     const auto pageEditOutput = std::filesystem::temp_directory_path() / "pdfpp_page_edit_output.pdf";
     {
@@ -650,7 +751,10 @@ int RunReaderIntegrationTests() {
     }
     std::filesystem::remove(pageEditInput, cleanupError);
     std::filesystem::remove(pageEditOutput, cleanupError);
+    return 0;
+}
 
+int TestMalformedRejection() {
     constexpr std::string_view invalid = "%PDF-1.7\nnot-a-complete-pdf";
     std::array<std::byte, invalid.size()> invalidBytes{};
     for (std::size_t i = 0; i < invalid.size(); ++i) {
@@ -664,4 +768,21 @@ int RunReaderIntegrationTests() {
     } catch (const CPPPdf::PdfException&) {
         return 0;
     }
+    return 0;
+}
+
+int RunReaderIntegrationTests() {
+    CPPPdfTest::TestRunner runner;
+    runner.Run("Reader.MinimalPdfParsing", TestMinimalPdfParsing);
+    runner.Run("Reader.XrefRecovery", TestXrefRecovery);
+    runner.Run("Reader.ObjectCacheAndLimits", TestObjectCacheAndLimits);
+    runner.Run("Reader.ObjectStreamCache", TestObjectStreamCache);
+    runner.Run("Reader.FontExtraction", TestFontExtraction);
+    runner.Run("Reader.FormXObjectExtraction", TestFormXObjectExtraction);
+    runner.Run("Reader.InlineImageExtraction", TestInlineImageExtraction);
+    runner.Run("Reader.SoftMaskImageExtraction", TestSoftMaskImageExtraction);
+    runner.Run("Reader.AnnotationEditor", TestAnnotationEditor);
+    runner.Run("Reader.PageEditor", TestPageEditor);
+    runner.Run("Reader.MalformedRejection", TestMalformedRejection);
+    return runner.PrintSummary("Reader integration");
 }

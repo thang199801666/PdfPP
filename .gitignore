@@ -79,6 +79,9 @@ Thumbs.db
 __pycache__/
 *.pyc
 
+# Generated validation corpus (regenerate with PdfPP.GenCorpus)
+/tests/corpus/generated/
+
 # Archives and local scratch files
 *.zip
 *.7z

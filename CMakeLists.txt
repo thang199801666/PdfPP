@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.49.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.52.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -193,6 +193,9 @@ if(PDFPP_BUILD_VALIDATION_TOOLS)
     add_executable(PdfPP.WriteValidation tools/validation/PdfPPWriteValidation.cpp)
     target_link_libraries(PdfPP.WriteValidation PRIVATE CPPPdf::Core)
     target_compile_features(PdfPP.WriteValidation PRIVATE cxx_std_20)
+    add_executable(PdfPP.GenCorpus tools/validation/PdfPPGenCorpus.cpp)
+    target_link_libraries(PdfPP.GenCorpus PRIVATE CPPPdf::Core)
+    target_compile_features(PdfPP.GenCorpus PRIVATE cxx_std_20)
 endif()
 
 if(PDFPP_INSTALL)

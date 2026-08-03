@@ -34,7 +34,7 @@ def poppler_pages(path: Path) -> int:
     if not pdfinfo:
         raise RuntimeError("pdfinfo was not found")
     result = subprocess.run([pdfinfo, str(path)], check=True, text=True,
-                            capture_output=True)
+                            capture_output=True, encoding="utf-8", errors="replace")
     for line in result.stdout.splitlines():
         if line.startswith("Pages:"):
             return int(line.split(":", 1)[1].strip())
@@ -43,7 +43,8 @@ def poppler_pages(path: Path) -> int:
 
 def pdfpp_inspect(executable: Path, path: Path) -> dict[str, object]:
     result = subprocess.run([str(executable), str(path)], check=True,
-                            text=True, capture_output=True)
+                            text=True, capture_output=True,
+                            encoding="utf-8", errors="replace")
     values: dict[str, object] = {"page_text": {}}
     for line in result.stdout.splitlines():
         fields = line.split("\t", 2)

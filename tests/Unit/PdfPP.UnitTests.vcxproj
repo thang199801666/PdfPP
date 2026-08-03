@@ -45,9 +45,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="TestRunner.hpp" />
+    <ClInclude Include="TestHelpers.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CoreTests.cpp" />
+    <ClCompile Include="ObjectAndRenderingTests.cpp" />
+    <ClCompile Include="CffAndFilterTests.cpp" />
+    <ClCompile Include="ContentTextFontTests.cpp" />
+    <ClCompile Include="PdfAValidationTests.cpp" />
     <ClCompile Include="ReaderIntegrationTests.cpp" />
     <ClCompile Include="WriterIntegrationTests.cpp" />
     <ClCompile Include="ApiCoverageTests.cpp" />

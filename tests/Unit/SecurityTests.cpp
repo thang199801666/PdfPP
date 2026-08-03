@@ -248,12 +248,18 @@ void verifySignatureWorkflow() {
 
 } // namespace
 
-int RunSecurityTests() {
+void TestCryptoPrimitivesAndAlgorithms() {
     verifyCryptoPrimitives();
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Aes128, "aes128");
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Rc4_128, "rc4-128");
     verifySignatureWorkflow();
+    verifyCryptoPrimitives();
+    verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Aes128, "aes128");
+    verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Rc4_128, "rc4-128");
+    verifySignatureWorkflow();
+}
 
+void TestPasswordManagerLifecycle() {
     const auto original = securityTemp("pdfpp-security-source.pdf");
     const auto encrypted = securityTemp("pdfpp-security-rewritten.pdf");
     const auto changed = securityTemp("pdfpp-security-changed.pdf");
@@ -286,7 +292,9 @@ int RunSecurityTests() {
     PdfDocument unlocked = PdfDocument::Open(clear);
     PDFPP_TEST_CHECK(!unlocked.IsEncrypted());
     PDFPP_TEST_CHECK(unlocked.extractPageText(0).find("password-manager-content") != std::string::npos);
+}
 
+void TestEncryptedPageEditing() {
     const auto editable = securityTemp("pdfpp-security-editable.pdf");
     const auto pageEdited = securityTemp("pdfpp-security-page-edited.pdf");
     const auto annotated = securityTemp("pdfpp-security-annotated.pdf");
@@ -332,7 +340,12 @@ int RunSecurityTests() {
         annotatedDocument.GetPageReference(0U)).AsDictionary();
     PDFPP_TEST_CHECK(annotatedPage != nullptr);
     PDFPP_TEST_CHECK(annotatedPage->Find(PdfName("Annots")) != nullptr);
+}
 
+void TestEncryptedForms() {
+    const auto formSource = securityTemp("pdfpp-security-form-source.pdf");
+    const auto formEncrypted = securityTemp("pdfpp-security-form-encrypted.pdf");
+    const auto formUpdated = securityTemp("pdfpp-security-form-updated.pdf");
     writeMinimalForm(formSource);
     PdfEncryptionOptions formEncryption;
     formEncryption.userPassword = "form-user";
@@ -347,16 +360,13 @@ int RunSecurityTests() {
     const auto formFields = PdfAcroForm::GetFields(formUpdated, formReader);
     PDFPP_TEST_CHECK(formFields.size() == 1U);
     PDFPP_TEST_CHECK(formFields[0].value == "Updated encrypted form");
+}
 
-    std::filesystem::remove(original);
-    std::filesystem::remove(encrypted);
-    std::filesystem::remove(changed);
-    std::filesystem::remove(clear);
-    std::filesystem::remove(editable);
-    std::filesystem::remove(pageEdited);
-    std::filesystem::remove(annotated);
-    std::filesystem::remove(formSource);
-    std::filesystem::remove(formEncrypted);
-    std::filesystem::remove(formUpdated);
-    return 0;
+int RunSecurityTests() {
+    CPPPdfTest::TestRunner runner;
+    runner.Run("Security.CryptoPrimitivesAndAlgorithms", TestCryptoPrimitivesAndAlgorithms);
+    runner.Run("Security.PasswordManagerLifecycle", TestPasswordManagerLifecycle);
+    runner.Run("Security.EncryptedPageEditing", TestEncryptedPageEditing);
+    runner.Run("Security.EncryptedForms", TestEncryptedForms);
+    return runner.PrintSummary("Security");
 }

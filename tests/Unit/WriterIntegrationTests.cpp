@@ -141,7 +141,8 @@ void WriteAcroFormPdf(
 
 } // namespace
 
-int RunWriterIntegrationTests() {
+void TestUnicodeTrueTypeWriter() {
+    using namespace CPPPdf;
     using namespace CPPPdf;
     const auto path = std::filesystem::temp_directory_path() / "pdfpp_writer_phase10_test.pdf";
 
@@ -190,7 +191,10 @@ int RunWriterIntegrationTests() {
         std::filesystem::remove(unicodePath);
         std::filesystem::remove(fullFontPath);
     }
+}
 
+void TestXrefStreamAndClassicOutput() {
+    using namespace CPPPdf;
     {
         PdfWriter streamWriter;
         const auto streamPage = streamWriter.AddPage({0, 0, 400, 500});
@@ -227,7 +231,10 @@ int RunWriterIntegrationTests() {
         std::filesystem::remove(xrefStreamPath);
         std::filesystem::remove(classicPath);
     }
+}
 
+void TestObjectStreamRoundTrip() {
+    using namespace CPPPdf;
     {
         // Object streams must round-trip every feature through the reader.
         PdfWriter objectStreamWriter;
@@ -274,7 +281,10 @@ int RunWriterIntegrationTests() {
         PDFPP_TEST_CHECK(compressedObjectReadable);
         std::filesystem::remove(objectStreamPath);
     }
+}
 
+void TestIncrementalObjectStream() {
+    using namespace CPPPdf;
     {
         // An incremental revision can pack its small objects into an object
         // stream and reference them from a new xref stream that chains through
@@ -331,7 +341,10 @@ int RunWriterIntegrationTests() {
         std::filesystem::remove(incrementalInput);
         std::filesystem::remove(incrementalOutput);
     }
+}
 
+void TestIncrementalEncryptedObjectStream() {
+    using namespace CPPPdf;
     {
         // An encrypted document accepts an object-stream incremental revision;
         // the object stream itself is encrypted with the stream object number.
@@ -377,7 +390,10 @@ int RunWriterIntegrationTests() {
         std::filesystem::remove(encryptedInput);
         std::filesystem::remove(encryptedOutput);
     }
+}
 
+void TestResaveCollapsesIncremental() {
+    using namespace CPPPdf;
     {
         // Resave rewrites a document through the writer pipeline: incremental
         // revisions collapse into one clean file, orphan objects are dropped,
@@ -462,7 +478,10 @@ int RunWriterIntegrationTests() {
         std::filesystem::remove(resaveOutput);
         std::filesystem::remove(resaveOutputObjStm);
     }
+}
 
+void TestResaveDeduplicatesStreams() {
+    using namespace CPPPdf;
     {
         // Resave with deduplicateObjects merges byte-identical stream objects:
         // two pages with identical content share a single content stream.
@@ -520,7 +539,10 @@ int RunWriterIntegrationTests() {
         std::filesystem::remove(dedupPlain);
         std::filesystem::remove(dedupOutput);
     }
+}
 
+void TestResaveEncryptedPreservesPasswords() {
+    using namespace CPPPdf;
     {
         // Resaving an encrypted document preserves the same passwords.
         const auto encryptedInput =
@@ -550,7 +572,11 @@ int RunWriterIntegrationTests() {
         std::filesystem::remove(encryptedInput);
         std::filesystem::remove(encryptedOutput);
     }
+}
 
+void TestCanvasCatalogAndPageOrganizer() {
+    using namespace CPPPdf;
+    const auto path = std::filesystem::temp_directory_path() / "pdfpp_writer_phase10_test.pdf";
     PdfWriter writer;
     const auto first = writer.AddPage({0, 0, 612, 792});
     writer.GetCanvas(first)
@@ -998,5 +1024,19 @@ int RunWriterIntegrationTests() {
     std::filesystem::remove(watermarkedPath);
     std::filesystem::remove(stampedPath);
     std::filesystem::remove(path);
-    return 0;
+
+}
+
+int RunWriterIntegrationTests() {
+    CPPPdfTest::TestRunner runner;
+    runner.Run("Writer.UnicodeTrueType", TestUnicodeTrueTypeWriter);
+    runner.Run("Writer.XrefStreamAndClassic", TestXrefStreamAndClassicOutput);
+    runner.Run("Writer.ObjectStreamRoundTrip", TestObjectStreamRoundTrip);
+    runner.Run("Writer.IncrementalObjectStream", TestIncrementalObjectStream);
+    runner.Run("Writer.IncrementalEncryptedObjectStream", TestIncrementalEncryptedObjectStream);
+    runner.Run("Writer.ResaveCollapsesIncremental", TestResaveCollapsesIncremental);
+    runner.Run("Writer.ResaveDeduplicatesStreams", TestResaveDeduplicatesStreams);
+    runner.Run("Writer.ResaveEncryptedPreservesPasswords", TestResaveEncryptedPreservesPasswords);
+    runner.Run("Writer.CanvasCatalogAndPageOrganizer", TestCanvasCatalogAndPageOrganizer);
+    return runner.PrintSummary("Writer integration");
 }
