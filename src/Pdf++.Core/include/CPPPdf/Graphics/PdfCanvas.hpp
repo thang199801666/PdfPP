@@ -75,10 +75,17 @@ public:
     PdfCanvas& BeginText();
     PdfCanvas& SetFontAndSize(std::string base14Font, double size);
     PdfCanvas& SetTrueTypeFontAndSize(const PdfTrueTypeFont& font, double size);
+    [[nodiscard]] double GetCurrentFontSize() const noexcept;
     PdfCanvas& SetTextMatrix(double a, double b, double c, double d, double e, double f);
     PdfCanvas& MoveText(double x, double y);
     PdfCanvas& ShowText(std::string text);
     PdfCanvas& ShowTextUtf8(std::string utf8Text);
+    // Shows UTF-8 text using the active font and, when a code point is missing,
+    // falls back to the provided alternative fonts in order. Text is split into
+    // runs so each run uses a font that covers it. Applied kerning follows the
+    // current font's `kern` table.
+    PdfCanvas& ShowTextUtf8WithFallback(std::string utf8Text,
+                                        std::span<const PdfTrueTypeFont> fallbackFonts);
     PdfCanvas& DrawTextUtf8(const PdfTrueTypeFont& font, std::string utf8Text, const PdfTextLayoutOptions& options);
     [[nodiscard]] static PdfTextLayoutResult MeasureTextLayout(
         const PdfTrueTypeFont& font, std::string_view utf8Text,

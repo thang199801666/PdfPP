@@ -5,3 +5,4 @@
 #include <CPPPdf/Document/PdfPageEditor.hpp>
 #include <CPPPdf/Document/PdfPageOrganizer.hpp>
 #include <CPPPdf/Document/PdfPageImporter.hpp>
+#include <CPPPdf/Document/PdfDocumentLayout.hpp>

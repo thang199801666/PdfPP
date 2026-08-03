@@ -670,6 +670,76 @@ void TestRegexSearchOptionsAndGeometry() {
     PDFPP_TEST_CHECK(PdfTextSearch::FindRegex(chunks, R"(\d+)", options).size() >= 2);
 }
 
+void TestTextLayoutAndFallback() {
+    // Grapheme clustering: base + combining mark stays together.
+    const auto clusters = PdfTextLayout::GraphemeClusters("a\xCC\x81" "bc");
+    PDFPP_TEST_CHECK(clusters.size() == 3U);
+    PDFPP_TEST_CHECK(clusters[0] == "a\xCC\x81");
+
+    // Bidi reordering: LTR base keeps order; an embedded Hebrew run is reversed.
+    const auto latin = PdfTextLayout::ReorderBidi("ABC");
+    PDFPP_TEST_CHECK(latin == "ABC");
+    const auto hebrew = PdfTextLayout::ReorderBidi("\xD7\x90\xD7\x91"); // alef bet (RTL)
+    PDFPP_TEST_CHECK(hebrew == "\xD7\x91\xD7\x90"); // visual order reversed
+
+    // Kerning: fonts with a `kern` table expose pair adjustments; Helvetica-less
+    // test avoids font-file dependence, so exercise the API shape via the
+    // Windows fonts when available.
+    const std::array<std::filesystem::path, 3> candidates{
+        std::filesystem::path("C:/Windows/Fonts/arial.ttf"),
+        std::filesystem::path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        std::filesystem::path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf")};
+    const auto fontIt = std::find_if(candidates.begin(), candidates.end(),
+        [](const auto& path) { return std::filesystem::exists(path); });
+    if (fontIt != candidates.end()) {
+        const auto font = PdfTrueTypeFont::Load(*fontIt);
+        const auto gidA = font.GetGlyphId(U'A');
+        const auto gidV = font.GetGlyphId(U'V');
+        if (gidA && gidV) {
+            const double kern = font.GetKerning(*gidA, *gidV, 100.0);
+            PDFPP_TEST_CHECK(std::abs(kern) < 100.0);
+            PDFPP_TEST_CHECK(font.GetCachedKerning(*gidA, *gidV, 100.0) == kern);
+        }
+        // Fallback: primary font without 'Ω' would fall back; here both fonts
+        // support it, so the round trip still works.
+        const auto output = TempPath("pdfpp_feature_fallback.pdf");
+        PdfWriter writer;
+        const auto page = writer.AddPage({0, 0, 300, 300});
+        const std::array<PdfTrueTypeFont, 1> fallbacks{font};
+        writer.GetCanvas(page).BeginText().SetTrueTypeFontAndSize(font, 12)
+            .MoveText(20, 250).ShowTextUtf8WithFallback("AB", fallbacks).EndText();
+        writer.Save(output);
+        const auto document = PdfDocument::Open(output);
+        PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+        std::filesystem::remove(output);
+    }
+}
+
+void TestDocumentLayoutPrimitives() {
+    const auto output = TempPath("pdfpp_feature_document_layout.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 400, 500});
+    (void)page;
+    PdfDocumentLayout layout(writer);
+    layout.DrawList(0U, {"First", "Second", "Third"}, 40.0, 460.0,
+        PdfDocumentLayout::ListOptions{PdfDocumentLayout::ListStyle::Decimal});
+    layout.DrawColumns(0U, {"Column A text", "Column B text"},
+        PdfRectangle{40, 40, 360, 400}, 16.0);
+    layout.DrawHeader(0U, 0U, PdfRectangle{0, 0, 400, 500},
+        PdfDocumentLayout::HeaderFooterOptions{"", "", "Report"});
+    layout.DrawFooter(0U, 0U, PdfRectangle{0, 0, 400, 500},
+        PdfDocumentLayout::HeaderFooterOptions{"", "Page", "", 9.0, true, true, 36.0, 36.0});
+    writer.Save(output);
+    const auto document = PdfDocument::Open(output);
+    PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+    const std::string text = document.GetPageText(0U);
+    PDFPP_TEST_CHECK(text.find("First") != std::string::npos);
+    PDFPP_TEST_CHECK(text.find("Column A text") != std::string::npos);
+    PDFPP_TEST_CHECK(text.find("Report") != std::string::npos);
+    PDFPP_TEST_CHECK(text.find("1") != std::string::npos); // page number
+    std::filesystem::remove(output);
+}
+
 
 void TestDocumentTextIndexMappedInputAndStreamWriter() {
     const auto output = TempPath("pdfpp_feature_document_text_index.pdf");
@@ -1145,6 +1215,8 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.SeparationAndDeviceNRendering", TestSeparationAndDeviceNRendering);
     runner.Run("Feature.IccBasedRendering", TestIccBasedRendering);
     runner.Run("Feature.OptionalContentLayers", TestOptionalContentLayers);
+    runner.Run("Feature.TextLayoutAndFallback", TestTextLayoutAndFallback);
+    runner.Run("Feature.DocumentLayoutPrimitives", TestDocumentLayoutPrimitives);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

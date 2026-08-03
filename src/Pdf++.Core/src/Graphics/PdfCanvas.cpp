@@ -117,14 +117,19 @@ PdfCanvas& PdfCanvas::Stroke(){Append("S\n");return *this;} PdfCanvas& PdfCanvas
 PdfCanvas& PdfCanvas::FillEvenOdd(){Append("f*\n");return *this;} PdfCanvas& PdfCanvas::FillStroke(){Append("B\n");return *this;} PdfCanvas& PdfCanvas::FillStrokeEvenOdd(){Append("B*\n");return *this;}
 PdfCanvas& PdfCanvas::Clip(){Append("W\n");return *this;} PdfCanvas& PdfCanvas::ClipEvenOdd(){Append("W*\n");return *this;} PdfCanvas& PdfCanvas::EndPath(){Append("n\n");return *this;}
 PdfCanvas& PdfCanvas::BeginText(){Append("BT\n");return *this;}
-PdfCanvas& PdfCanvas::SetFontAndSize(std::string font,double size){ if(!font.empty()&&font.front()=='/')font.erase(font.begin()); auto& page=state_->pages[pageIndex_]; page.fontName=std::move(font); page.activeEmbeddedFontIndex.reset(); Append("/F1 "+number(size)+" Tf\n");return *this;}
+PdfCanvas& PdfCanvas::SetFontAndSize(std::string font,double size){ if(!font.empty()&&font.front()=='/')font.erase(font.begin()); auto& page=state_->pages[pageIndex_]; page.fontName=std::move(font); page.currentFontSize=size; page.activeEmbeddedFontIndex.reset(); Append("/F1 "+number(size)+" Tf\n");return *this;}
 PdfCanvas& PdfCanvas::SetTrueTypeFontAndSize(const PdfTrueTypeFont& font,double size){
     if(size<=0||!std::isfinite(size)) throw std::invalid_argument("Font size must be positive and finite.");
     std::size_t index=state_->embeddedFonts.size();
     for(std::size_t i=0;i<state_->embeddedFonts.size();++i){ if(state_->embeddedFonts[i].font.GetBytes()==font.GetBytes()){ index=i; break; } }
     if(index==state_->embeddedFonts.size()) state_->embeddedFonts.push_back({font,"FT"+std::to_string(index+1U),{}});
-    auto& page=state_->pages[pageIndex_]; page.activeEmbeddedFontIndex=index; if(std::find(page.embeddedFontIndices.begin(),page.embeddedFontIndices.end(),index)==page.embeddedFontIndices.end()) page.embeddedFontIndices.push_back(index);
+    auto& page=state_->pages[pageIndex_]; page.activeEmbeddedFontIndex=index; page.currentFontSize=size; if(std::find(page.embeddedFontIndices.begin(),page.embeddedFontIndices.end(),index)==page.embeddedFontIndices.end()) page.embeddedFontIndices.push_back(index);
     Append("/"+state_->embeddedFonts[index].resourceName+" "+number(size)+" Tf\n"); return *this;
+}
+
+double PdfCanvas::GetCurrentFontSize() const noexcept {
+    if (!state_ || pageIndex_ >= state_->pages.size()) return 0.0;
+    return state_->pages[pageIndex_].currentFontSize;
 }
 PdfCanvas& PdfCanvas::SetTextMatrix(double a,double b,double c,double d,double e,double f){Append(number(a)+" "+number(b)+" "+number(c)+" "+number(d)+" "+number(e)+" "+number(f)+" Tm\n");return *this;}
 PdfCanvas& PdfCanvas::MoveText(double x,double y){Append(number(x)+" "+number(y)+" Td\n");return *this;}
@@ -134,6 +139,61 @@ PdfCanvas& PdfCanvas::ShowTextUtf8(std::string text){
     auto& embedded=state_->embeddedFonts.at(*page.activeEmbeddedFontIndex); std::string hex;
     for(const auto cp:decodeUtf8(text)){ const auto gid=embedded.font.GetGlyphId(cp); if(!gid) throw std::invalid_argument("The selected TrueType font does not contain a requested Unicode code point."); hex+=hex4(*gid); if(std::find(embedded.usedMappings.begin(),embedded.usedMappings.end(),std::pair{cp,*gid})==embedded.usedMappings.end()) embedded.usedMappings.emplace_back(cp,*gid); }
     Append("<"+hex+"> Tj\n"); return *this;
+}
+
+PdfCanvas& PdfCanvas::ShowTextUtf8WithFallback(
+    std::string text,
+    std::span<const PdfTrueTypeFont> fallbackFonts) {
+    auto& page = state_->pages[pageIndex_];
+    if (!page.activeEmbeddedFontIndex) throw std::logic_error("ShowTextUtf8WithFallback requires SetTrueTypeFontAndSize first.");
+    const auto primaryIndex = *page.activeEmbeddedFontIndex;
+    const auto& primary = state_->embeddedFonts.at(primaryIndex).font;
+    double fontSize = GetCurrentFontSize();
+    const PdfTrueTypeFont* current = &primary;
+    std::vector<std::uint32_t> run;
+    const auto flushRun = [&]() {
+        if (run.empty()) return;
+        SetTrueTypeFontAndSize(*current, fontSize);
+        auto& active = state_->embeddedFonts.at(*page.activeEmbeddedFontIndex);
+        std::string hex;
+        std::uint16_t previousGlyph = 0xFFFFU;
+        for (const auto cp : run) {
+            const auto gid = current->GetGlyphId(cp);
+            if (!gid) continue;
+            double adjustment = 0.0;
+            if (previousGlyph != 0xFFFFU) {
+                adjustment = current->GetCachedKerning(previousGlyph, *gid, fontSize);
+            }
+            if (adjustment != 0.0 && !hex.empty()) {
+                Append("[" + hex + " " + std::to_string(-adjustment) + "] TJ\n");
+                hex.clear();
+            }
+            hex += hex4(*gid);
+            if (std::find(active.usedMappings.begin(), active.usedMappings.end(),
+                          std::pair{cp, *gid}) == active.usedMappings.end()) {
+                active.usedMappings.emplace_back(cp, *gid);
+            }
+            previousGlyph = *gid;
+        }
+        if (!hex.empty()) Append("<" + hex + "> Tj\n");
+        run.clear();
+    };
+    for (const auto cp : decodeUtf8(text)) {
+        const PdfTrueTypeFont* chosen = &primary;
+        if (!primary.Supports(cp)) {
+            chosen = nullptr;
+            for (const auto& candidate : fallbackFonts) {
+                if (candidate.Supports(cp)) { chosen = &candidate; break; }
+            }
+        }
+        if (chosen != current) {
+            flushRun();
+            current = chosen;
+        }
+        run.push_back(cp);
+    }
+    flushRun();
+    return *this;
 }
 PdfCanvas& PdfCanvas::EndText(){Append("ET\n");return *this;}
 

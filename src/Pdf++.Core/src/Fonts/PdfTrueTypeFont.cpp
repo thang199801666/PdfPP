@@ -131,6 +131,36 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
     const auto& hhea=require("hhea");f.metrics_.ascent=ReadS16(bytes,hhea.offset+4);f.metrics_.descent=ReadS16(bytes,hhea.offset+6);f.metrics_.lineGap=ReadS16(bytes,hhea.offset+8);const auto longCount=Read16(bytes,hhea.offset+34);
     const auto& hmtx=require("hmtx"); if(!longCount||longCount>f.metrics_.glyphCount)throw std::runtime_error("Invalid TrueType horizontal metrics count.");
     f.advanceWidths_.resize(f.metrics_.glyphCount);std::uint16_t last=0;for(std::uint16_t i=0;i<longCount;++i){last=Read16(bytes,hmtx.offset+std::size_t(i)*4);f.advanceWidths_[i]=last;}for(std::size_t i=longCount;i<f.advanceWidths_.size();++i)f.advanceWidths_[i]=last;
+    if(const auto kern=tables.find("kern");kern!=tables.end()&&kern->second.length>=4U){
+        // Apple kern table: version (uint16), nTables (uint16), then subtables.
+        const std::size_t tableBase=kern->second.offset;
+        const std::uint16_t version=Read16(bytes,tableBase);
+        const std::uint16_t nTables=Read16(bytes,tableBase+2);
+        if(version==0U){
+            std::size_t cursor=tableBase+4;
+            for(std::uint16_t t=0;t<nTables&&cursor+6<=kern->second.offset+kern->second.length;++t){
+                const std::uint16_t subVersion=Read16(bytes,cursor);
+                const std::uint16_t length=Read16(bytes,cursor+2);
+                const std::uint16_t coverage=Read16(bytes,cursor+4);
+                // Format 0, horizontal, not override flags: (format&0xFF)==0, coverage&0x1.
+                const bool horizontal=(coverage&0x1U)!=0U;
+                const std::uint8_t format=static_cast<std::uint8_t>(coverage>>8U);
+                if(subVersion==0U&&format==0U&&horizontal&&length>=14U){
+                    const std::uint16_t nPairs=Read16(bytes,cursor+6);
+                    const std::size_t pairsOffset=cursor+14;
+                    for(std::uint16_t p=0;p<nPairs;++p){
+                        const std::size_t at=pairsOffset+std::size_t(p)*6U;
+                        if(at+6>kern->second.offset+kern->second.length)break;
+                        const std::uint16_t left=Read16(bytes,at);
+                        const std::uint16_t right=Read16(bytes,at+2);
+                        const std::int16_t value=ReadS16(bytes,at+4);
+                        if(value!=0)f.kerning_.emplace((std::uint64_t(left)<<16U)|right,value);
+                    }
+                }
+                cursor+=length;
+            }
+        }
+    }
     f.bytes_=std::move(bytes);return f;
 }
 const std::string& PdfTrueTypeFont::GetSourceName()const noexcept{return sourceName_;} const std::vector<std::uint8_t>& PdfTrueTypeFont::GetBytes()const noexcept{return bytes_;}
@@ -144,9 +174,38 @@ bool PdfTrueTypeFont::HasTable(const std::string_view tag) const noexcept {
 }
 double PdfTrueTypeFont::GetAdvanceWidth(std::uint16_t gid,double size)const{if(size<=0||!std::isfinite(size))throw std::invalid_argument("Font size must be positive and finite.");return double(GetAdvanceWidth(gid))*size/metrics_.unitsPerEm;}
 double PdfTrueTypeFont::GetCachedAdvanceWidth(std::uint16_t gid,double size)const{const auto key=(std::bit_cast<std::uint64_t>(size)*0x9E3779B97F4A7C15ULL)^gid;const auto found=advanceCache_.find(key);if(found!=advanceCache_.end()){++advanceCacheHits_;advanceLru_.splice(advanceLru_.end(),advanceLru_,found->second);return found->second->second;}++advanceCacheMisses_;if(advanceCache_.size()>=kGlyphCacheLimit){advanceCache_.erase(advanceLru_.front().first);advanceLru_.pop_front();}const auto value=GetAdvanceWidth(gid,size);advanceLru_.emplace_back(key,value);advanceCache_.emplace(key,std::prev(advanceLru_.end()));return value;}
-void PdfTrueTypeFont::ClearGlyphCaches() const noexcept { outlineCache_.clear(); outlineLru_.clear(); advanceCache_.clear(); advanceLru_.clear(); }
+void PdfTrueTypeFont::ClearGlyphCaches() const noexcept { outlineCache_.clear(); outlineLru_.clear(); advanceCache_.clear(); advanceLru_.clear(); kerningCache_.clear(); kerningLru_.clear(); }
 double PdfTrueTypeFont::MeasureTextUtf8(std::string_view text,double size)const{if(size<=0||!std::isfinite(size))throw std::invalid_argument("Font size must be positive and finite.");double w=0;for(auto cp:DecodeUtf8(text)){auto gid=GetGlyphId(cp);if(!gid)throw std::invalid_argument("The TrueType font does not contain a requested Unicode code point.");w+=GetCachedAdvanceWidth(*gid,size);}return w;}
 double PdfTrueTypeFont::GetLineHeight(double size,double spacing)const{if(size<=0||!std::isfinite(size)||spacing<=0||!std::isfinite(spacing))throw std::invalid_argument("Font size and line spacing must be positive and finite.");return double(metrics_.ascent-metrics_.descent+metrics_.lineGap)*size/metrics_.unitsPerEm*spacing;}
+
+double PdfTrueTypeFont::GetKerning(const std::uint16_t left, const std::uint16_t right,
+                                   const double size) const {
+    if (size <= 0.0 || !std::isfinite(size)) throw std::invalid_argument("Font size must be positive and finite.");
+    const auto it = kerning_.find((std::uint64_t(left) << 16U) | right);
+    if (it == kerning_.end()) return 0.0;
+    return double(it->second) * size / metrics_.unitsPerEm;
+}
+
+double PdfTrueTypeFont::GetCachedKerning(const std::uint16_t left, const std::uint16_t right,
+                                         const double size) const {
+    const std::uint64_t pair = (std::uint64_t(left) << 16U) | right;
+    const std::uint64_t key = (std::bit_cast<std::uint64_t>(size) * 0x9E3779B97F4A7C15ULL) ^ pair;
+    const auto found = kerningCache_.find(key);
+    if (found != kerningCache_.end()) {
+        ++kerningCacheHits_;
+        kerningLru_.splice(kerningLru_.end(), kerningLru_, found->second);
+        return found->second->second;
+    }
+    ++kerningCacheMisses_;
+    if (kerningCache_.size() >= kGlyphCacheLimit) {
+        kerningCache_.erase(kerningLru_.front().first);
+        kerningLru_.pop_front();
+    }
+    const double value = GetKerning(left, right, size);
+    kerningLru_.emplace_back(key, value);
+    kerningCache_.emplace(key, std::prev(kerningLru_.end()));
+    return value;
+}
 
 PdfTrueTypeGlyphOutline PdfTrueTypeFont::ReadGlyphOutline(
     const std::uint16_t glyphId, std::unordered_set<std::uint16_t>& active) const {

@@ -49,8 +49,11 @@ secondary scope.
 - Add Type1, CFF, CIDFont and OpenType support.
 - Embedded CFF fonts (Type1C, CIDFontType0C, OpenType with CFF outlines) are parsed through charset/CharStrings/Private DICTs, and a bounded Type 2 charstring interpreter produces glyph outlines that the CPU renderer rasterizes with cubic flattening. Identity-encoded CID fonts map character codes to glyphs directly.
 - Improve font fallback, kerning, vertical writing and subsetting.
+- `kern` table parsing with cached kerning pairs, and `PdfCanvas::ShowTextUtf8WithFallback` for glyph-coverage fallback across fonts.
 - Add Unicode grapheme handling, bidirectional text and complex shaping.
+- `PdfTextLayout` provides UAX #29 grapheme clustering and simplified UAX #9 bidi reordering.
 - Add paragraph, table, list, column and page-flow layout primitives.
+- `PdfDocumentLayout` flows paragraphs with automatic page breaks, draws bullet/numbered lists, multi-column text, and page headers/footers with page numbers.
 - Add headers, footers, page breaks and image placement.
 - Keep text extraction geometry and rendering metrics consistent.
 

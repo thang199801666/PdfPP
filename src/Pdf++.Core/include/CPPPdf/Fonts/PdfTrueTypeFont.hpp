@@ -76,6 +76,14 @@ public:
     [[nodiscard]] double GetCachedAdvanceWidth(std::uint16_t glyphId, double fontSize) const;
     [[nodiscard]] double MeasureTextUtf8(std::string_view text, double fontSize) const;
     [[nodiscard]] double GetLineHeight(double fontSize, double lineSpacing = 1.0) const;
+    // Horizontal kerning between two glyphs (from the `kern` table), in font
+    // units scaled to `fontSize`. Returns 0 when no adjustment is defined.
+    [[nodiscard]] double GetKerning(std::uint16_t leftGlyph, std::uint16_t rightGlyph,
+                                    double fontSize) const;
+    [[nodiscard]] double GetCachedKerning(std::uint16_t leftGlyph, std::uint16_t rightGlyph,
+                                          double fontSize) const;
+    [[nodiscard]] std::size_t GetKerningPairCount() const noexcept { return kerning_.size(); }
+    [[nodiscard]] bool HasKerning() const noexcept { return !kerning_.empty(); }
     [[nodiscard]] PdfTrueTypeGlyphOutline GetGlyphOutline(std::uint16_t glyphId) const;
     [[nodiscard]] const PdfTrueTypeGlyphOutline& GetGlyphOutlineCached(std::uint16_t glyphId) const;
     [[nodiscard]] std::size_t GetCachedOutlineCount() const noexcept { return outlineCache_.size(); }
@@ -93,6 +101,12 @@ private:
     std::unordered_map<std::uint32_t, std::uint16_t> unicodeToGlyph_;
     PdfTrueTypeMetrics metrics_{};
     std::vector<std::uint16_t> advanceWidths_;
+    std::unordered_map<std::uint64_t, std::int16_t> kerning_;
+    using KerningCacheEntry = std::pair<const std::uint64_t, double>;
+    mutable std::list<KerningCacheEntry> kerningLru_;
+    mutable std::unordered_map<std::uint64_t, std::list<KerningCacheEntry>::iterator> kerningCache_;
+    mutable std::size_t kerningCacheHits_{};
+    mutable std::size_t kerningCacheMisses_{};
     using OutlineCacheEntry = std::pair<const std::uint16_t, PdfTrueTypeGlyphOutline>;
     mutable std::list<OutlineCacheEntry> outlineLru_;
     mutable std::unordered_map<std::uint16_t, std::list<OutlineCacheEntry>::iterator> outlineCache_;

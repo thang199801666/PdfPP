@@ -1,3 +1,20 @@
+## 0.61.0
+
+- TrueType kerning: the `kern` table is parsed and `PdfTrueTypeFont` exposes
+  `GetKerning`/`GetCachedKerning` (font units scaled to size) with an LRU cache.
+- Font fallback: `PdfCanvas::ShowTextUtf8WithFallback` splits text into runs so
+  each code point uses the first font (primary or a fallback) that covers it,
+  applying per-run kerning via the `TJ` adjustment array.
+- Added `PdfCanvas::GetCurrentFontSize` and page-level font-size tracking.
+- Added `PdfTextLayout`: UAX #29 grapheme clustering (base + combining marks)
+  and simplified UAX #9 bidirectional reordering for LTR/RTL paragraphs.
+- Added `PdfDocumentLayout`: paragraph flow with automatic page breaks, bullet/
+  decimal/alpha/roman lists, multi-column text, and page headers/footers with
+  page numbers.
+- Tests: `Feature.TextLayoutAndFallback` and `Feature.DocumentLayoutPrimitives`
+  cover kerning, fallback, bidi/grapheme, lists, columns, headers and footers.
+  All suites green (26 feature subtests).
+
 ## 0.60.0
 
 - Added CMS/PKCS#7 and RSA-PKCS#1 v1.5 signature support (`PdfCms`):

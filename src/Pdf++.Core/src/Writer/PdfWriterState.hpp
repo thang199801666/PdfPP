@@ -77,6 +77,7 @@ struct PdfWriterPage {
     PdfRectangle mediaBox{0,0,595,842};
     std::string content;
     std::string fontName{"Helvetica"};
+    double currentFontSize{0.0};
     std::vector<std::size_t> imageIndices;
     std::vector<std::size_t> extGStateIndices;
     std::vector<std::size_t> embeddedFontIndices;

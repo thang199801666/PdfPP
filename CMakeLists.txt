@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.60.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.61.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -62,14 +62,16 @@ src/Pdf++.Core/include/CPPPdf/Security/PdfCms.hpp
     src/Pdf++.Core/include/CPPPdf/Rendering/PdfShading.hpp
     src/Pdf++.Core/include/CPPPdf/Rendering/PdfTransparencyGroup.h
     src/Pdf++.Core/include/CPPPdf/Rendering/PdfPageRenderer.hpp
-    src/Pdf++.Core/include/CPPPdf/Text/PdfTextExtractor.hpp
-    src/Pdf++.Core/include/CPPPdf/Text/PdfTextSearch.hpp
+src/Pdf++.Core/include/CPPPdf/Text/PdfTextExtractor.hpp
+src/Pdf++.Core/include/CPPPdf/Text/PdfTextSearch.hpp
+src/Pdf++.Core/include/CPPPdf/Text/PdfTextLayout.hpp
     src/Pdf++.Core/include/CPPPdf/Text/PdfTextDocumentIndex.hpp
     src/Pdf++.Core/include/CPPPdf/Annotations/PdfKeywordHighlighter.hpp
     src/Pdf++.Core/include/CPPPdf/Annotations/PdfAnnotationEditor.hpp
 src/Pdf++.Core/include/CPPPdf/Annotations/PdfXfdf.hpp
     src/Pdf++.Core/include/CPPPdf/Document/PdfPageOrganizer.hpp
     src/Pdf++.Core/include/CPPPdf/Document/PdfPageImporter.hpp
+src/Pdf++.Core/include/CPPPdf/Document/PdfDocumentLayout.hpp
     src/Pdf++.Core/include/CPPPdf/Forms/PdfAcroForm.hpp
     src/Pdf++.Core/include/CPPPdf/Validation/PdfConformance.hpp)
 
@@ -79,6 +81,7 @@ set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Document/PdfPageEditor.cpp
     src/Pdf++.Core/src/Document/PdfPageOrganizer.cpp
     src/Pdf++.Core/src/Document/PdfPageImporter.cpp
+src/Pdf++.Core/src/Document/PdfDocumentLayout.cpp
     src/Pdf++.Core/src/Internal/Writer/PdfObjectSerializer.cpp
     src/Pdf++.Core/src/Internal/Writer/PdfObjectSerializer.hpp
     src/Pdf++.Core/src/Internal/Writer/PdfIncrementalWriter.hpp
@@ -107,8 +110,9 @@ src/Pdf++.Core/src/Security/PdfCms.cpp
     src/Pdf++.Core/src/Rendering/PdfBitmap.cpp
     src/Pdf++.Core/src/Rendering/PdfShading.cpp
     src/Pdf++.Core/src/Rendering/PdfPageRenderer.cpp
-    src/Pdf++.Core/src/Text/PdfTextExtractor.cpp
-    src/Pdf++.Core/src/Text/PdfTextSearch.cpp
+src/Pdf++.Core/src/Text/PdfTextExtractor.cpp
+src/Pdf++.Core/src/Text/PdfTextSearch.cpp
+src/Pdf++.Core/src/Text/PdfTextLayout.cpp
     src/Pdf++.Core/src/Text/PdfTextDocumentIndex.cpp
     src/Pdf++.Core/src/Annotations/PdfKeywordHighlighter.cpp
     src/Pdf++.Core/src/Annotations/PdfAnnotationEditor.cpp
