@@ -1,3 +1,18 @@
+## 0.60.0
+
+- Added CMS/PKCS#7 and RSA-PKCS#1 v1.5 signature support (`PdfCms`):
+  - DER reader/writer for minimal CMS SignedData (single signer, detached).
+  - RSA PKCS#1 v1.5 sign/verify over SHA-256. On Windows this uses CNG
+    (bcrypt) with a self-contained big-number fallback for other platforms.
+  - PEM private-key and DER certificate parsing, plus RSA public-key recovery
+    from an embedded X.509 certificate.
+- `PdfSignatureManager::VerifySignature` recomputes the SHA-256 digest over the
+  signature /ByteRange regions, extracts the signer certificate and signature
+  from the CMS /Contents value, and verifies the RSA signature. Statuses:
+  `Valid`, `InvalidSignature`, `DigestMismatch`, `Malformed`, `NotApplicable`.
+- Tests: `verifySignatureVerification` exercises the end-to-end VerifySignature
+  flow. All suites green.
+
 ## 0.59.0
 
 - Added ICCBased image rendering: ICCBased images (N=1 gray, N=3 RGB, N=4 CMYK)

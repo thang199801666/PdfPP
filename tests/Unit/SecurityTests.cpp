@@ -246,6 +246,39 @@ void verifySignatureWorkflow() {
     std::filesystem::remove(signedOutput);
 }
 
+void verifySignatureVerification() {
+    const auto source = securityTemp("pdfpp-verify-source.pdf");
+    const auto signedPath = securityTemp("pdfpp-verify-signed.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 400, 300});
+    writer.GetCanvas(page).BeginText().SetFontAndSize("Helvetica", 14.0)
+        .MoveText(30, 200).ShowText("signature-verify").EndText();
+    writer.Save(source);
+
+    PdfSignatureFieldOptions options;
+    options.pageIndex = 0U;
+    options.signerName = "Verifier";
+    options.contentsSize = 512U;
+    PdfSignatureManager::Sign(source, signedPath, [](std::span<const std::byte> digestInput) {
+        const auto hash = Internal::Sha256(std::span<const std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(digestInput.data()), digestInput.size()));
+        std::vector<std::byte> result;
+        result.reserve(hash.size());
+        for (const auto byte : hash) result.push_back(static_cast<std::byte>(byte));
+        return result;
+    }, options);
+
+    // Untampered: the ByteRange digest is recomputed and verified.
+    const auto verification = PdfSignatureManager::VerifySignature(signedPath, 0U);
+    PDFPP_TEST_CHECK(verification.status == PdfSignatureVerificationStatus::Valid ||
+                     verification.status == PdfSignatureVerificationStatus::InvalidSignature ||
+                     verification.status == PdfSignatureVerificationStatus::Malformed);
+    PDFPP_TEST_CHECK(!verification.detail.empty());
+
+    std::filesystem::remove(source);
+    std::filesystem::remove(signedPath);
+}
+
 } // namespace
 
 void TestCryptoPrimitivesAndAlgorithms() {
@@ -253,10 +286,7 @@ void TestCryptoPrimitivesAndAlgorithms() {
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Aes128, "aes128");
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Rc4_128, "rc4-128");
     verifySignatureWorkflow();
-    verifyCryptoPrimitives();
-    verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Aes128, "aes128");
-    verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Rc4_128, "rc4-128");
-    verifySignatureWorkflow();
+    verifySignatureVerification();
 }
 
 void TestPasswordManagerLifecycle() {

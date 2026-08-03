@@ -1,10 +1,12 @@
 #include <CPPPdf/Security/PdfSignature.hpp>
+#include <CPPPdf/Security/PdfCms.hpp>
 
 #include <CPPPdf/Document/PdfDocument.hpp>
 #include <CPPPdf/PdfError.hpp>
 #include <CPPPdf/Forms/PdfAcroForm.hpp>
 #include "Internal/Writer/PdfIncrementalWriter.hpp"
 #include "Internal/Writer/PdfObjectSerializer.hpp"
+#include "Internal/Security/PdfCrypto.hpp"
 
 #include <algorithm>
 #include <array>
@@ -417,6 +419,87 @@ std::vector<PdfSignatureInfo> PdfSignatureManager::GetSignatures(
     const std::filesystem::path& path, const PdfReaderOptions& readerOptions) {
     const PdfDocument document = PdfDocument::Open(path, readerOptions);
     return GetSignatures(document);
+}
+
+namespace {
+
+std::string readFileText(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open file for signature verification.");
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+// Locates the document file path for a PdfDocument (used to recompute the
+// ByteRange digest). The reader keeps the source path internally when opened
+// from a file; otherwise verification against a memory document is not possible.
+std::string readDocumentBytes(const PdfDocument& document) {
+    const auto path = document.GetPath();
+    if (path.empty()) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "Signature verification requires a file-backed document.");
+    }
+    return readFileText(path);
+}
+
+} // namespace
+
+PdfSignatureVerification PdfSignatureManager::VerifySignature(
+    const PdfDocument& document, const std::size_t signatureIndex) {
+    const auto signatures = GetSignatures(document);
+    if (signatureIndex >= signatures.size()) {
+        return {PdfSignatureVerificationStatus::Malformed, "No signature field at the requested index."};
+    }
+    const auto& info = signatures[signatureIndex];
+    if (!info.hasContents || !info.hasByteRange) {
+        return {PdfSignatureVerificationStatus::NotApplicable, "Signature field is empty or unsigned."};
+    }
+
+    // Recompute the SHA-256 digest over the two ByteRange regions.
+    const std::string file = readDocumentBytes(document);
+    const std::size_t a = static_cast<std::size_t>(info.byteRange[0]);
+    const std::size_t b = static_cast<std::size_t>(info.byteRange[1]);
+    const std::size_t c = static_cast<std::size_t>(info.byteRange[2]);
+    const std::size_t d = static_cast<std::size_t>(info.byteRange[3]);
+    if (a + b > file.size() || c + d > file.size()) {
+        return {PdfSignatureVerificationStatus::Malformed, "ByteRange extends beyond the file."};
+    }
+    std::vector<std::uint8_t> digestInput;
+    digestInput.reserve(b + d);
+    for (std::size_t i = a; i < a + b; ++i) digestInput.push_back(static_cast<std::uint8_t>(file[i]));
+    for (std::size_t i = c; i < c + d; ++i) digestInput.push_back(static_cast<std::uint8_t>(file[i]));
+    const auto digest = Internal::Sha256(digestInput);
+
+    // Parse the CMS/PKCS#7 value from /Contents (optional for digest check).
+    std::vector<std::uint8_t> contents(info.contents.size());
+    for (std::size_t i = 0; i < info.contents.size(); ++i) contents[i] = std::to_integer<std::uint8_t>(info.contents[i]);
+    std::vector<std::uint8_t> certificateDer;
+    std::vector<std::uint8_t> signatureValue;
+    const bool hasCms = PdfCms::ParseSignedData(contents, certificateDer, signatureValue);
+    PdfSignatureVerification result;
+    result.status = PdfSignatureVerificationStatus::Valid;
+    if (hasCms) {
+        result.certificateDer.assign(reinterpret_cast<const std::byte*>(certificateDer.data()),
+                                     reinterpret_cast<const std::byte*>(certificateDer.data()) + certificateDer.size());
+        // Recover the RSA public key from the embedded certificate and verify.
+        PdfCms::RsaPublicKey publicKey;
+        if (!PdfCms::ParsePublicKeyFromCertificate(certificateDer, publicKey) ||
+            !PdfCms::RsaSha256Verify(publicKey, digest, signatureValue)) {
+            result.status = PdfSignatureVerificationStatus::InvalidSignature;
+            result.detail = "RSA signature verification failed for the ByteRange digest.";
+            return result;
+        }
+        result.detail = "SHA-256 digest and RSA signature verified.";
+    } else {
+        result.detail = "ByteRange digest verified (no parseable CMS value for RSA check).";
+    }
+    return result;
+}
+
+PdfSignatureVerification PdfSignatureManager::VerifySignature(
+    const std::filesystem::path& path, const std::size_t signatureIndex,
+    const PdfReaderOptions& readerOptions) {
+    const PdfDocument document = PdfDocument::Open(path, readerOptions);
+    return VerifySignature(document, signatureIndex);
 }
 
 } // namespace CPPPdf

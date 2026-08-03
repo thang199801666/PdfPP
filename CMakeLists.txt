@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.59.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.60.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -51,8 +51,9 @@ set(PDFPP_PUBLIC_HEADERS
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfCff.hpp
     src/Pdf++.Core/include/CPPPdf/Content/PdfContentProcessor.hpp
     src/Pdf++.Core/include/CPPPdf/Writer/PdfWriter.hpp
-    src/Pdf++.Core/include/CPPPdf/Security/PdfSecurity.hpp
-    src/Pdf++.Core/include/CPPPdf/Security/PdfSignature.hpp
+src/Pdf++.Core/include/CPPPdf/Security/PdfSecurity.hpp
+src/Pdf++.Core/include/CPPPdf/Security/PdfSignature.hpp
+src/Pdf++.Core/include/CPPPdf/Security/PdfCms.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfCanvas.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfImage.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfFunction.hpp
@@ -98,6 +99,7 @@ set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Security/PdfStandardSecurity.cpp
     src/Pdf++.Core/src/Security/PdfPasswordManager.cpp
     src/Pdf++.Core/src/Security/PdfSignature.cpp
+src/Pdf++.Core/src/Security/PdfCms.cpp
     src/Pdf++.Core/src/Internal/Security/PdfStandardSecurity.hpp
     src/Pdf++.Core/src/Graphics/PdfCanvas.cpp
     src/Pdf++.Core/src/Graphics/PdfImage.cpp
@@ -132,6 +134,9 @@ target_include_directories(PdfPP.Core
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Pdf++.Core/src
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib)
 target_link_libraries(PdfPP.Core PRIVATE zlibstatic)
+if(WIN32)
+    target_link_libraries(PdfPP.Core PRIVATE bcrypt)
+endif()
 
 option(PDFPP_BUILD_NATIVE_BRIDGE "Build the C ABI bridge for desktop UI clients" OFF)
 if(PDFPP_BUILD_NATIVE_BRIDGE)

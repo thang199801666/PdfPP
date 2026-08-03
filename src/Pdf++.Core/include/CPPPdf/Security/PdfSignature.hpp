@@ -69,6 +69,21 @@ struct PdfSignatureInfo final {
     PdfReference fieldReference{};
 };
 
+enum class PdfSignatureVerificationStatus {
+    NotApplicable, // no signature value / not a supported format
+    Valid,         // digest and RSA signature verified
+    DigestMismatch, // ByteRange digest does not reproduce the signed digest
+    InvalidSignature, // RSA signature verification failed
+    Malformed // structure could not be parsed
+};
+
+struct PdfSignatureVerification final {
+    PdfSignatureVerificationStatus status{PdfSignatureVerificationStatus::NotApplicable};
+    std::string detail;
+    // When the CMS value parses, the extracted signer certificate DER.
+    std::vector<std::byte> certificateDer;
+};
+
 // Dependency-free digital-signature foundation. Pdf++ does not embed a crypto
 // backend: PrepareForSigning exposes the exact bytes that must be digested and
 // signed by an external tool (e.g. CMS/PKCS#7), and ApplySignature writes the
@@ -110,6 +125,19 @@ public:
         const PdfDocument& document);
     [[nodiscard]] static std::vector<PdfSignatureInfo> GetSignatures(
         const std::filesystem::path& path,
+        const PdfReaderOptions& readerOptions = {});
+
+    // Verifies a signature field in place: recomputes the SHA-256 digest over
+    // the /ByteRange regions and validates the PKCS#7/RSA signature value.
+    // The signer's public key is recovered from the embedded certificate, so a
+    // self-signed certificate (or any cert whose key can be read) is verifiable
+    // without an external trust store.
+    [[nodiscard]] static PdfSignatureVerification VerifySignature(
+        const PdfDocument& document,
+        std::size_t signatureIndex = 0U);
+    [[nodiscard]] static PdfSignatureVerification VerifySignature(
+        const std::filesystem::path& path,
+        std::size_t signatureIndex = 0U,
         const PdfReaderOptions& readerOptions = {});
 };
 
