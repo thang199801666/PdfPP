@@ -154,6 +154,7 @@ const char* subtypeName(PdfAnnotationType type) {
     case PdfAnnotationType::Square: return "Square";
     case PdfAnnotationType::Circle: return "Circle";
     case PdfAnnotationType::Stamp: return "Stamp";
+    case PdfAnnotationType::Popup: return "Popup";
     }
     return "Text";
 }
@@ -216,7 +217,9 @@ void writeVertices(std::ostream& output, const PdfAnnotation& annotation) {
     output << "]\n";
 }
 
-void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation) {
+void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation,
+                     const std::optional<PdfReference>& replyTarget = std::nullopt,
+                     const std::optional<PdfReference>& popupReference = std::nullopt) {
     const PdfRectangle& r = annotation.rectangle;
     output << "<< /Type /Annot /Subtype /" << subtypeName(annotation.type) << "\n"
            << "/Rect [" << r.left << ' ' << r.bottom << ' ' << r.right << ' ' << r.top << "]\n";
@@ -236,6 +239,14 @@ void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation) {
     }
     if (annotation.borderWidth > 0.0) {
         output << "/Border [0 0 " << annotation.borderWidth << "]\n";
+    }
+    if (replyTarget) {
+        output << "/IRT " << replyTarget->objectNumber << ' ' << replyTarget->generation << " R\n";
+        output << "/RT /" << (annotation.replyType == PdfAnnotationReplyType::Group ? "Group" : "R") << "\n";
+    }
+    if (popupReference) {
+        output << "/Popup " << popupReference->objectNumber << ' ' << popupReference->generation << " R\n"
+               << "/Subj (Note)\n";
     }
     const bool hasLineEnds = annotation.lineStart != PdfLineEndStyle::None ||
                              annotation.lineEnd != PdfLineEndStyle::None;
@@ -300,12 +311,50 @@ PdfAnnotationEditResult PdfAnnotationEditor::AddAnnotations(
 
     for (const auto& [pageIndex, pageAnnotations] : byPage) {
         auto& references = annotationReferences[pageIndex];
-        for (const PdfAnnotation* annotation : pageAnnotations) {
+        // Pre-compute references for annotations and their popups so replies
+        // can target earlier annotations on the same page.
+        std::vector<bool> hasPopup(pageAnnotations.size(), false);
+        for (std::size_t i = 0U; i < pageAnnotations.size(); ++i) {
             const std::uint32_t objectNumber = newObjectNumber++;
             references.push_back(PdfReference{objectNumber, 0U});
+            if (pageAnnotations[i]->hasPopup) {
+                hasPopup[i] = true;
+                const std::uint32_t popupNumber = newObjectNumber++;
+                references.push_back(PdfReference{popupNumber, 0U});
+            }
+        }
+        std::size_t refIndex = 0U;
+        for (std::size_t i = 0U; i < pageAnnotations.size(); ++i) {
+            const PdfAnnotation* annotation = pageAnnotations[i];
+            std::optional<PdfReference> replyTarget;
+            if (annotation->inReplyTo != 0U && annotation->inReplyTo - 1U < i) {
+                // Reply targets the i-th earlier annotation; compute its slot.
+                std::size_t targetRef = 0U;
+                for (std::size_t k = 0U; k < annotation->inReplyTo - 1U; ++k) {
+                    targetRef += hasPopup[k] ? 2U : 1U;
+                }
+                replyTarget = references[targetRef];
+            }
+            std::optional<PdfReference> popupReference;
+            if (hasPopup[i]) {
+                popupReference = references[refIndex + 1U];
+            }
             std::ostringstream body;
-            writeAnnotation(body, *annotation);
-            writer.WriteRawObject(PdfReference{objectNumber, 0U}, body.str());
+            writeAnnotation(body, *annotation, replyTarget, popupReference);
+            writer.WriteRawObject(references[refIndex], body.str());
+
+            // Emit the linked Popup annotation object when requested.
+            if (hasPopup[i]) {
+                const PdfReference popupReferenceObject = *popupReference;
+                std::ostringstream popupBody;
+                popupBody << "<< /Type /Annot /Subtype /Popup /Rect ["
+                          << annotation->rectangle.left << ' ' << annotation->rectangle.bottom << ' '
+                          << annotation->rectangle.right << ' ' << annotation->rectangle.top
+                          << "] /Parent " << references[refIndex].objectNumber << " 0 R\n"
+                          << "/Open " << (annotation->open ? "true" : "false") << " >>";
+                writer.WriteRawObject(popupReferenceObject, popupBody.str());
+            }
+            refIndex += hasPopup[i] ? 2U : 1U;
         }
     }
 
@@ -660,6 +709,141 @@ PdfAnnotationAppearanceResult PdfAnnotationEditor::GenerateAppearances(
     }
     result.modifiedPageCount = 1U;
     writer.Finish(nextObjectNumber);
+    return result;
+}
+
+PdfAnnotationFlattenResult PdfAnnotationEditor::FlattenAnnotations(
+    const std::filesystem::path& inputPath,
+    const std::filesystem::path& outputPath,
+    const std::size_t pageIndex,
+    const std::vector<std::string>& typeFilter,
+    const PdfReaderOptions& readerOptions) {
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (pageIndex >= document.GetPageCount()) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Annotation page index is out of range.");
+    }
+    if (document.IsEncrypted() && !document.IsOwnerPasswordAuthenticated() &&
+        (static_cast<std::uint32_t>(document.GetPermissionBits()) & 256U) == 0U) {
+        throw PdfException(PdfErrorCode::PermissionDenied,
+                           "The user password does not permit annotation flattening.");
+    }
+
+    const PdfReference pageReference = document.GetPageReference(pageIndex);
+    const PdfDictionary pageDictionary = copyPageDictionary(document, pageReference);
+    const PdfArray annots = collectPageAnnotationObjects(document, pageDictionary);
+
+    const auto matchesFilter = [&typeFilter](const std::string& subtype) {
+        if (typeFilter.empty()) return true;
+        for (const auto& filter : typeFilter) {
+            std::string normalized = filter;
+            if (!normalized.empty() && normalized.front() == '/') normalized.erase(0U, 1U);
+            if (subtype == normalized) return true;
+        }
+        return false;
+    };
+
+    // Extract the subtype, rect, and appearance commands for each annotation.
+    struct FlattenCandidate {
+        const PdfObject* annotationValue;
+        std::string subtype;
+        std::string commands;
+        bool hasAppearance;
+    };
+    std::vector<FlattenCandidate> candidates;
+    std::size_t flattened = 0U;
+    for (const auto& value : annots.values()) {
+        const auto reference = value.AsReference();
+        const PdfObject& resolved = reference
+            ? document.GetObject(PdfReference{reference->first, reference->second}) : value;
+        const PdfDictionary* dictionary = resolved.AsDictionary();
+        if (!dictionary) continue;
+        const PdfObject* subtypeObject = dictionary->Find(PdfName("Subtype"));
+        const PdfName* subtypeName = subtypeObject ? subtypeObject->AsName() : nullptr;
+        if (!subtypeName) continue;
+        const std::string subtype = subtypeName->value();
+        if (!matchesFilter(subtype)) continue;
+
+        // Prefer the generated /AP /N appearance; fall back to native drawing.
+        std::string commands;
+        bool hasAppearance = false;
+        if (const PdfObject* apObject = dictionary->Find(PdfName("AP"))) {
+            if (const PdfDictionary* ap = apObject->AsDictionary()) {
+                const PdfObject* normal = ap->Find(PdfName("N"));
+                if (const auto normalReference = normal ? normal->AsReference() : std::nullopt) {
+                    const PdfObject& appearanceObject = document.GetObject(
+                        PdfReference{normalReference->first, normalReference->second});
+                    if (const PdfStream* appearanceStream = appearanceObject.AsStream()) {
+                        commands.assign(reinterpret_cast<const char*>(appearanceStream->bytes().data()),
+                                        appearanceStream->bytes().size());
+                        hasAppearance = true;
+                    }
+                } else if (const PdfStream* direct = normal ? normal->AsStream() : nullptr) {
+                    commands.assign(reinterpret_cast<const char*>(direct->bytes().data()),
+                                    direct->bytes().size());
+                    hasAppearance = true;
+                }
+            }
+        }
+        if (!hasAppearance) commands = annotationAppearanceCommands(*dictionary);
+        if (commands.empty()) continue;
+        candidates.push_back({&value, subtype, std::move(commands), hasAppearance});
+        ++flattened;
+    }
+
+    PdfAnnotationFlattenResult result{outputPath, flattened, 0U, 0U};
+    if (candidates.empty()) {
+        const std::string original = readFile(inputPath);
+        std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
+        output.write(original.data(), static_cast<std::streamsize>(original.size()));
+        return result;
+    }
+    result.modifiedPageCount = 1U;
+
+    // Remove the flattened annotations from /Annots.
+    std::vector<PdfObject> remaining;
+    std::size_t flattenIndex = 0U;
+    for (const auto& value : annots.values()) {
+        if (flattenIndex < candidates.size() && candidates[flattenIndex].annotationValue == &value) {
+            ++flattenIndex;
+            ++result.removedCount;
+            continue;
+        }
+        remaining.push_back(value);
+    }
+
+    // Build the flattened content stream with the appearance commands.
+    std::ostringstream stream;
+    stream << "q\n";
+    for (const auto& candidate : candidates) {
+        // The appearance already contains its own balanced q/Q in most cases;
+        // wrap once to keep the graphics state isolated.
+        stream << candidate.commands << '\n';
+    }
+    stream << "Q\n";
+
+    Internal::PdfIncrementalWriter writer(inputPath, outputPath, document);
+    const std::uint32_t nextObjectNumber = Internal::PdfIncrementalWriter::NextObjectNumber(document);
+    const PdfReference contentReference{nextObjectNumber, 0U};
+    writer.WriteRawObject(contentReference, "<< /Length " + std::to_string(stream.str().size()) +
+                                            " >>\nstream\n" + stream.str() + "endstream");
+
+    PdfDictionary updatedPage = pageDictionary;
+    PdfArray contents;
+    if (const PdfObject* oldContents = pageDictionary.Find(PdfName("Contents"))) {
+        if (const PdfArray* array = oldContents->AsArray()) {
+            for (const auto& item : array->values()) contents.push_back(item);
+        } else {
+            contents.push_back(*oldContents);
+        }
+    }
+    contents.push_back(PdfObject::IndirectReference(contentReference.objectNumber, 0U));
+    updatedPage.Put(PdfName("Contents"), PdfObject(std::move(contents)));
+
+    PdfArray kept;
+    for (const auto& item : remaining) kept.push_back(item);
+    updatedPage.Put(PdfName("Annots"), PdfObject(std::move(kept)));
+    writer.WriteDictionary(pageReference, updatedPage);
+    writer.Finish(nextObjectNumber + 1U);
     return result;
 }
 

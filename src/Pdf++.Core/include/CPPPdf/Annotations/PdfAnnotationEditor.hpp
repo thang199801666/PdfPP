@@ -21,7 +21,8 @@ enum class PdfAnnotationType {
     Polyline,
     Square,
     Circle,
-    Stamp
+    Stamp,
+    Popup
 };
 
 enum class PdfLineEndStyle {
@@ -35,6 +36,14 @@ enum class PdfLineEndStyle {
     ROpenArrow,
     RClosedArrow,
     Slash
+};
+
+// Reply relationship between annotations (PDF 32000-1 §12.5.6.6).
+enum class PdfAnnotationReplyType {
+    None,
+    R, // The annotation is a reply to /IRT.
+    Group, // The annotation groups replies to /IRT.
+    Reply // Default; the annotation replies to the previous thread.
 };
 
 struct PdfAnnotationColor final {
@@ -67,6 +76,13 @@ struct PdfAnnotation final {
     int textAlignment{0};
     // Stamp name (e.g. /Approved, /Draft, /Confidential).
     std::string stampName;
+    // Reply thread: set inReplyTo to the 1-based annotation index on the same
+    // page to make this annotation a reply to that annotation.
+    std::size_t inReplyTo{0U};
+    PdfAnnotationReplyType replyType{PdfAnnotationReplyType::None};
+    // When true, a linked /Popup annotation is added automatically (TextNote,
+    // FreeText, and reply annotations).
+    bool hasPopup{false};
 };
 
 struct PdfAnnotationEditResult final {
@@ -87,6 +103,13 @@ struct PdfAnnotationAppearanceResult final {
     std::size_t modifiedPageCount{};
 };
 
+struct PdfAnnotationFlattenResult final {
+    std::filesystem::path outputPath;
+    std::size_t flattenedCount{};
+    std::size_t removedCount{};
+    std::size_t modifiedPageCount{};
+};
+
 class PdfAnnotationEditor final {
 public:
     [[nodiscard]] static PdfAnnotationEditResult AddAnnotations(
@@ -104,6 +127,18 @@ public:
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
         std::size_t pageIndex,
+        const PdfReaderOptions& readerOptions = {});
+
+    // Flattens annotations into the page content stream and removes them from
+    // /Annots. Every annotation that has a generated /AP /N appearance (or that
+    // can be drawn natively) is burned into the page, so it renders identically
+    // in viewers without interactive annotation support. `typeFilter` limits
+    // flattening to the listed subtypes (e.g. "/Square"); empty flattens all.
+    [[nodiscard]] static PdfAnnotationFlattenResult FlattenAnnotations(
+        const std::filesystem::path& inputPath,
+        const std::filesystem::path& outputPath,
+        std::size_t pageIndex,
+        const std::vector<std::string>& typeFilter = {},
         const PdfReaderOptions& readerOptions = {});
 
     // Removes annotations from a page. `typeFilter` (when non-empty) limits

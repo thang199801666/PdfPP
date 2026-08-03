@@ -545,6 +545,84 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     }
     PDFPP_TEST_CHECK(apCount == 7U);
 
+    // FlattenAnnotations: burn annotations into the page and remove them from
+    // /Annots, then verify the rendered text is preserved.
+    const auto flattened = TempPath("pdfpp_api_flattened_annotations.pdf");
+    const auto flattenResult = PdfAnnotationEditor::FlattenAnnotations(advanced, flattened, 0U);
+    PDFPP_TEST_CHECK(flattenResult.flattenedCount == 7U);
+    PDFPP_TEST_CHECK(flattenResult.removedCount == 7U);
+    PDFPP_TEST_CHECK(flattenResult.modifiedPageCount == 1U);
+    auto flattenedDocument = PdfDocument::Open(flattened);
+    const PdfDictionary* flattenedPage = flattenedDocument.GetObject(
+        flattenedDocument.GetPageReference(0U)).AsDictionary();
+    const PdfArray* flattenedAnnots = flattenedPage->GetAsArray(PdfName("Annots"));
+    PDFPP_TEST_CHECK(flattenedAnnots == nullptr || flattenedAnnots->empty());
+    PDFPP_TEST_CHECK(flattenedDocument.GetPageText(0U).find("API page one") != std::string::npos);
+
+    // Flatten with a subtype filter keeps the other annotations.
+    const auto partialFlattened = TempPath("pdfpp_api_partial_flattened.pdf");
+    const auto partialResult = PdfAnnotationEditor::FlattenAnnotations(
+        advanced, partialFlattened, 0U, {"/Square", "/Circle"});
+    PDFPP_TEST_CHECK(partialResult.flattenedCount == 2U);
+    PDFPP_TEST_CHECK(partialResult.removedCount == 2U);
+    auto partialDocument = PdfDocument::Open(partialFlattened);
+    const PdfDictionary* partialPage = partialDocument.GetObject(
+        partialDocument.GetPageReference(0U)).AsDictionary();
+    const PdfArray* partialAnnots = partialPage->GetAsArray(PdfName("Annots"));
+    PDFPP_TEST_CHECK(partialAnnots != nullptr && partialAnnots->size() == 5U);
+
+    // Replies and popups: a TextNote with a popup, and a reply targeting it.
+    const auto threaded = TempPath("pdfpp_api_threaded.pdf");
+    std::vector<PdfAnnotation> thread;
+    {
+        PdfAnnotation note;
+        note.pageIndex = 0;
+        note.type = PdfAnnotationType::TextNote;
+        note.rectangle = {20, 300, 60, 330};
+        note.contents = "Original comment";
+        note.hasPopup = true;
+        note.open = true;
+        thread.push_back(note);
+    }
+    {
+        PdfAnnotation reply;
+        reply.pageIndex = 0;
+        reply.type = PdfAnnotationType::TextNote;
+        reply.rectangle = {70, 300, 110, 330};
+        reply.contents = "Reply comment";
+        reply.inReplyTo = 1U;
+        reply.replyType = PdfAnnotationReplyType::R;
+        thread.push_back(reply);
+    }
+    const auto threadResult = PdfAnnotationEditor::AddAnnotations(base, threaded, thread);
+    PDFPP_TEST_CHECK(threadResult.annotationCount == 2U);
+    auto threadedDocument = PdfDocument::Open(threaded);
+    const PdfDictionary* threadedPage = threadedDocument.GetObject(
+        threadedDocument.GetPageReference(0U)).AsDictionary();
+    const PdfArray* threadedAnnots = threadedPage->GetAsArray(PdfName("Annots"));
+    PDFPP_TEST_CHECK(threadedAnnots != nullptr && threadedAnnots->size() == 3U);
+    bool foundIrt = false;
+    bool foundPopup = false;
+    bool foundPopupParent = false;
+    for (const auto& value : threadedAnnots->values()) {
+        const auto ref = value.AsReference();
+        if (!ref) continue;
+        const PdfDictionary* annotation = threadedDocument.GetObject(
+            PdfReference{ref->first, ref->second}).AsDictionary();
+        if (!annotation) continue;
+        const PdfObject* subtype = annotation->Find(PdfName("Subtype"));
+        const auto subtypeName = subtype ? subtype->AsName() : nullptr;
+        if (subtypeName && subtypeName->value() == "Text") {
+            if (annotation->Find(PdfName("IRT"))) foundIrt = true;
+            if (annotation->Find(PdfName("Popup"))) foundPopup = true;
+        } else if (subtypeName && subtypeName->value() == "Popup") {
+            if (annotation->Find(PdfName("Parent"))) foundPopupParent = true;
+        }
+    }
+    PDFPP_TEST_CHECK(foundIrt);
+    PDFPP_TEST_CHECK(foundPopup);
+    PDFPP_TEST_CHECK(foundPopupParent);
+
     std::filesystem::remove(advanced);
     std::filesystem::remove(removed);
     std::filesystem::remove(removedAll);
@@ -552,6 +630,9 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     std::filesystem::remove(xfdfPath);
     std::filesystem::remove(reimported);
     std::filesystem::remove(appeared);
+    std::filesystem::remove(flattened);
+    std::filesystem::remove(partialFlattened);
+    std::filesystem::remove(threaded);
 }
 
 } // namespace
@@ -773,7 +854,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 53U);
+    static_assert(CPPPdf::VersionMinor == 54U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -783,7 +864,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.53.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.54.0");
 }
 
 int RunApiCoverageTests() {

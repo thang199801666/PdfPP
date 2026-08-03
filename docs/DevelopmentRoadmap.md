@@ -57,6 +57,7 @@ secondary scope.
 - Add FreeText, Stamp, Ink, Polygon and Polyline annotations.
 - `PdfAnnotationEditor` supports FreeText, Ink, Polygon, Polyline, Square, Circle and Stamp types (ink paths, vertices, interior color, line-end styles, rotation, stamp names), plus `RemoveAnnotations`, `UpdateAnnotationContents`, and `GenerateAppearances` which writes `/AP /N` Form XObject appearances.
 - Add annotation appearances, replies, popups and flattening.
+- `PdfAnnotationEditor` flattens annotations into the page content stream (full or filtered), links replies via `/IRT`/`/RT`, emits `/Popup` annotations with `/Parent` back-references, and generates `/AP /N` appearance streams.
 - Complete outlines, destinations, actions, page labels and optional content.
 - Improve attachments, portfolios and embedded-file relationships.
 

@@ -1,3 +1,16 @@
+## 0.54.0
+
+- `PdfAnnotationEditor::FlattenAnnotations` burns annotations into the page
+  content stream (using their generated `/AP /N` appearance or a native
+  drawing fallback) and removes them from `/Annots`, with an optional subtype
+  filter for partial flattening.
+- Annotation replies: `PdfAnnotation.inReplyTo` and `PdfAnnotation.replyType`
+  write the `/IRT` and `/RT` keys so annotations form reply threads.
+- Linked `/Popup` annotations are emitted automatically when
+  `PdfAnnotation.hasPopup` is set (with `/Parent` back-reference).
+- Tests: flattening (full + filtered), reply threads, and popup linkage are
+  covered by `API.AdvancedAnnotationsAndXfdf`. All suites green.
+
 ## 0.53.0
 
 - Added FreeText, Ink, Polygon, Polyline, Square, Circle and Stamp annotation
