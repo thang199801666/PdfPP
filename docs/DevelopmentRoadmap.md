@@ -35,11 +35,13 @@ secondary scope.
 - Added bounded Type 4 calculator function support with a restricted arithmetic operator set and stack/token limits.
 - Added embedded Type1/CFF/OpenType program subtype detection and explicit conformance diagnostics for unsupported native rasterization.
 - Add DeviceGray, DeviceRGB, DeviceCMYK and ICCBased color spaces.
+- DeviceGray/RGB/CMYK and ICCBased images all render; ICCBased uses an identity transform on the profile's component count (N=1/3/4).
 - Add Indexed, Separation and DeviceN color spaces.
 - Separation and DeviceN images render through a tint-transform function into Gray/RGB/CMYK alternate spaces; array-encoded color spaces are detected correctly (not misread as Indexed).
 - Implement tiling patterns, shadings and output intents.
 - Tiling patterns are parsed (`/Pattern cs` + `scn/SCN`) and rendered: the tile content stream is replayed for every tile intersecting the filled region, honoring `/BBox`, `/XStep`, `/YStep`, and `/Matrix`.
 - Improve image masks, interpolation, downsampling and caching.
+- The renderer caches decoded images per object number within a render pass and supersamples via `Downsample` when `antiAliasSamples > 1`.
 - Add rendering comparison tests against independent reference renderers.
 
 ## Phase 3: Fonts, Text and Layout

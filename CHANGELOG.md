@@ -1,3 +1,14 @@
+## 0.59.0
+
+- Added ICCBased image rendering: ICCBased images (N=1 gray, N=3 RGB, N=4 CMYK)
+  now render through an identity transform on the profile component count, so
+  they stay visible and color-reasonable instead of rendering blank.
+- Added a per-pass decoded-image cache in the renderer: repeated references to
+  the same image XObject (or inline images) decode the stream once per render
+  instead of once per drawing operation.
+- Tests: `Feature.IccBasedRendering` verifies a 2x1 ICCBased RGB image renders
+  red/blue. All suites green (24 feature subtests).
+
 ## 0.58.0
 
 - Fixed color-space detection for array-encoded image color spaces: `[ /Separation

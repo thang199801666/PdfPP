@@ -511,6 +511,55 @@ void TestSeparationAndDeviceNRendering() {
     std::filesystem::remove(output);
 }
 
+void TestIccBasedRendering() {
+    // ICCBased image with an N=3 (RGB) profile: identity rendering keeps the
+    // decoded samples, so a red/blue 2x1 image stays red/blue.
+    std::ostringstream pdf;
+    pdf << "%PDF-1.4\n";
+    std::array<std::size_t, 7> offsets{};
+    const auto object = [&](const std::size_t number, const std::string& body) {
+        offsets[number] = static_cast<std::size_t>(pdf.tellp());
+        pdf << number << " 0 obj\n" << body << "\nendobj\n";
+    };
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+              "/Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>");
+    const std::string imageBytes = "\xFF\x10\x10\x10\x10\xFF";
+    object(4, "<< /Type /XObject /Subtype /Image /Width 2 /Height 1 "
+              "/ColorSpace [ /ICCBased 6 0 R ] "
+              "/BitsPerComponent 8 /Length " + std::to_string(imageBytes.size()) + " >>\nstream\n"
+              + imageBytes + "\nendstream");
+    const std::string content = "q 0 0 100 100 cm /Im1 Do Q";
+    object(5, "<< /Length " + std::to_string(content.size()) + " >>\nstream\n"
+              + content + "endstream");
+    const std::string profile = "ICC profile placeholder";
+    object(6, "<< /N 3 /Length " + std::to_string(profile.size()) + " >>\nstream\n"
+              + profile + "\nendstream");
+    const std::size_t xrefOffset = static_cast<std::size_t>(pdf.tellp());
+    pdf << "xref\n0 7\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i <= 6U; ++i) {
+        pdf << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    pdf << "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    const auto output = TempPath("pdfpp_feature_iccbased.pdf");
+    {
+        std::ofstream file(output, std::ios::binary);
+        file << pdf.str();
+    }
+    const auto document = PdfDocument::Open(output);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 100U);
+    PDFPP_TEST_CHECK(bitmap.GetHeight() == 100U);
+    const auto redPixel = bitmap.GetPixel(10U, 25U);
+    PDFPP_TEST_CHECK(redPixel.red > 200U && redPixel.green < 60U);
+    const auto bluePixel = bitmap.GetPixel(90U, 25U);
+    PDFPP_TEST_CHECK(bluePixel.blue > 200U && bluePixel.red < 60U);
+    std::filesystem::remove(output);
+}
+
 void TestOptionalContentLayers() {
     const auto output = TempPath("pdfpp_feature_layers.pdf");
     PdfWriter writer;
@@ -1094,6 +1143,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.ShadingRenderingAndSoftMask", TestShadingRenderingAndSoftMask);
     runner.Run("Feature.TilingPatternRendering", TestTilingPatternRendering);
     runner.Run("Feature.SeparationAndDeviceNRendering", TestSeparationAndDeviceNRendering);
+    runner.Run("Feature.IccBasedRendering", TestIccBasedRendering);
     runner.Run("Feature.OptionalContentLayers", TestOptionalContentLayers);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);

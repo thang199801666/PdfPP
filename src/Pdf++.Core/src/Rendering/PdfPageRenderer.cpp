@@ -819,6 +819,37 @@ PdfRgbaColor ImagePixel(const PdfExtractedImage& image, const std::size_t x, con
         };
         color = {channel((1.0 - c) * (1.0 - k)), channel((1.0 - m) * (1.0 - k)),
                  channel((1.0 - yv) * (1.0 - k)), 255U};
+    } else if (image.info.colorSpace == PdfImageColorSpace::ICCBased) {
+        // ICCBased images render through an identity transform on the profile's
+        // component count: 1 = gray, 3 = RGB, 4 = CMYK. Full ICC profile
+        // transforms are not yet implemented; the identity fallback keeps the
+        // image visible and color-reasonable for common profiles.
+        const auto components = image.info.colorSpaceComponents;
+        if (components == 1U) {
+            if (pixelIndex >= image.decodedBytes.size()) return {};
+            const auto value = std::to_integer<std::uint8_t>(image.decodedBytes[pixelIndex]);
+            color = {value, value, value, 255U};
+        } else if (components == 3U) {
+            const auto offset = pixelIndex * 3U;
+            if (offset + 2U >= image.decodedBytes.size()) return {};
+            color = {std::to_integer<std::uint8_t>(image.decodedBytes[offset]),
+                     std::to_integer<std::uint8_t>(image.decodedBytes[offset + 1U]),
+                     std::to_integer<std::uint8_t>(image.decodedBytes[offset + 2U]), 255U};
+        } else if (components == 4U) {
+            const auto offset = pixelIndex * 4U;
+            if (offset + 3U >= image.decodedBytes.size()) return {};
+            const double c = std::to_integer<std::uint8_t>(image.decodedBytes[offset]) / 255.0;
+            const double m = std::to_integer<std::uint8_t>(image.decodedBytes[offset + 1U]) / 255.0;
+            const double yv = std::to_integer<std::uint8_t>(image.decodedBytes[offset + 2U]) / 255.0;
+            const double k = std::to_integer<std::uint8_t>(image.decodedBytes[offset + 3U]) / 255.0;
+            const auto channel = [](const double value) {
+                return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
+            };
+            color = {channel((1.0 - c) * (1.0 - k)), channel((1.0 - m) * (1.0 - k)),
+                     channel((1.0 - yv) * (1.0 - k)), 255U};
+        } else {
+            return {};
+        }
     } else if ((image.info.colorSpace == PdfImageColorSpace::Separation ||
                 image.info.colorSpace == PdfImageColorSpace::DeviceN) &&
                image.info.hasSeparationAlternate) {
@@ -1213,6 +1244,7 @@ PdfBitmap PdfPageRenderer::Render(
         double dashPhase = 0.0;
         std::string fillPatternName;
         std::string strokePatternName;
+        std::unordered_map<std::uint32_t, PdfExtractedImage> imageCache;
         ClipRegion clip;
         clip.mask.assign(CheckedPixelCount(width, height), 1U);
         clip.maxX = width - 1U;
@@ -1353,8 +1385,23 @@ PdfBitmap PdfPageRenderer::Render(
             if ((event.type == PdfContentEventType::InvokeXObject ||
                  event.type == PdfContentEventType::RenderInlineImage) && options.renderImages) {
                 try {
-                    if (const auto image = displayList.ResolveImage(event)) {
-                        DrawImage(*target, *image, mapper, options.interpolateImages, image->info.fillAlpha);
+                    // Cache decoded images per object number so repeated uses
+                    // (or inline images referenced by multiple forms) do not
+                    // decode the stream more than once per render pass.
+                    const std::uint32_t cacheKey = event.resourceObjectNumber != 0U
+                        ? event.resourceObjectNumber
+                        : static_cast<std::uint32_t>(imageCache.size() + 1U);
+                    PdfExtractedImage* resolved = nullptr;
+                    const auto cached = imageCache.find(cacheKey);
+                    if (cached != imageCache.end()) {
+                        resolved = &cached->second;
+                    } else {
+                        if (const auto image = displayList.ResolveImage(event)) {
+                            resolved = &imageCache.emplace(cacheKey, *image).first->second;
+                        }
+                    }
+                    if (resolved != nullptr) {
+                        DrawImage(*target, *resolved, mapper, options.interpolateImages, resolved->info.fillAlpha);
                     }
                 } catch (const PdfException&) {
                     // Continue with the next content event when one malformed
