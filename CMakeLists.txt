@@ -48,12 +48,17 @@ set(PDFPP_PUBLIC_HEADERS
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfFont.hpp
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfFontResource.hpp
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfTrueTypeFont.hpp
+    src/Pdf++.Core/include/CPPPdf/Fonts/PdfCff.hpp
     src/Pdf++.Core/include/CPPPdf/Content/PdfContentProcessor.hpp
     src/Pdf++.Core/include/CPPPdf/Writer/PdfWriter.hpp
     src/Pdf++.Core/include/CPPPdf/Security/PdfSecurity.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfCanvas.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfImage.hpp
+    src/Pdf++.Core/include/CPPPdf/Graphics/PdfFunction.hpp
     src/Pdf++.Core/include/CPPPdf/Rendering/PdfBitmap.hpp
+    src/Pdf++.Core/include/CPPPdf/Rendering/PdfDisplayList.hpp
+    src/Pdf++.Core/include/CPPPdf/Rendering/PdfShading.hpp
+    src/Pdf++.Core/include/CPPPdf/Rendering/PdfTransparencyGroup.h
     src/Pdf++.Core/include/CPPPdf/Rendering/PdfPageRenderer.hpp
     src/Pdf++.Core/include/CPPPdf/Text/PdfTextExtractor.hpp
     src/Pdf++.Core/include/CPPPdf/Text/PdfTextSearch.hpp
@@ -62,7 +67,8 @@ set(PDFPP_PUBLIC_HEADERS
     src/Pdf++.Core/include/CPPPdf/Annotations/PdfAnnotationEditor.hpp
     src/Pdf++.Core/include/CPPPdf/Document/PdfPageOrganizer.hpp
     src/Pdf++.Core/include/CPPPdf/Document/PdfPageImporter.hpp
-    src/Pdf++.Core/include/CPPPdf/Forms/PdfAcroForm.hpp)
+    src/Pdf++.Core/include/CPPPdf/Forms/PdfAcroForm.hpp
+    src/Pdf++.Core/include/CPPPdf/Validation/PdfConformance.hpp)
 
 set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Document/PdfDocument.cpp
@@ -83,6 +89,7 @@ set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Fonts/PdfFont.cpp
     src/Pdf++.Core/src/Fonts/PdfFontResource.cpp
     src/Pdf++.Core/src/Fonts/PdfTrueTypeFont.cpp
+    src/Pdf++.Core/src/Fonts/PdfCff.cpp
     src/Pdf++.Core/src/Content/PdfContentProcessor.cpp
     src/Pdf++.Core/src/Writer/PdfWriter.cpp
     src/Pdf++.Core/src/Writer/PdfWriterState.hpp
@@ -91,14 +98,17 @@ set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Internal/Security/PdfStandardSecurity.hpp
     src/Pdf++.Core/src/Graphics/PdfCanvas.cpp
     src/Pdf++.Core/src/Graphics/PdfImage.cpp
+    src/Pdf++.Core/src/Graphics/PdfFunction.cpp
     src/Pdf++.Core/src/Rendering/PdfBitmap.cpp
+    src/Pdf++.Core/src/Rendering/PdfShading.cpp
     src/Pdf++.Core/src/Rendering/PdfPageRenderer.cpp
     src/Pdf++.Core/src/Text/PdfTextExtractor.cpp
     src/Pdf++.Core/src/Text/PdfTextSearch.cpp
     src/Pdf++.Core/src/Text/PdfTextDocumentIndex.cpp
     src/Pdf++.Core/src/Annotations/PdfKeywordHighlighter.cpp
     src/Pdf++.Core/src/Annotations/PdfAnnotationEditor.cpp
-    src/Pdf++.Core/src/Forms/PdfAcroForm.cpp)
+    src/Pdf++.Core/src/Forms/PdfAcroForm.cpp
+    src/Pdf++.Core/src/Validation/PdfConformance.cpp)
 
 add_library(PdfPP.Core STATIC ${PDFPP_PUBLIC_HEADERS} ${PDFPP_CORE_SOURCES})
 add_library(CPPPdf::Core ALIAS PdfPP.Core)

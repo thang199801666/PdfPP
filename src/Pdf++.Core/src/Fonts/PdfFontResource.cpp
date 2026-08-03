@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <stdexcept>
+#include <exception>
 
 namespace CPPPdf {
 namespace {
@@ -170,6 +171,46 @@ PdfFontResource PdfFontResource::Create(const PdfDictionary& dictionary, const R
         result.toUnicode_ = PdfToUnicodeCMap::Parse(source);
     }
 
+    const PdfObject* descriptorObject = ResolveObject(dictionary.Find(PdfName("FontDescriptor")), resolver);
+    if (descriptorObject && descriptorObject->AsDictionary()) {
+        const auto* descriptor = descriptorObject->AsDictionary();
+        const PdfObject* fontFileObject = ResolveObject(descriptor->Find(PdfName("FontFile2")), resolver);
+        if (fontFileObject && fontFileObject->AsStream()) {
+            const auto& stream = *fontFileObject->AsStream();
+            std::vector<std::byte> bytes(stream.bytes().begin(), stream.bytes().end());
+            const PdfObject* filterObject = ResolveObject(stream.dictionary().Find(PdfName("Filter")), resolver);
+            std::vector<PdfFilterSpec> filters;
+            if (filterObject) {
+                if (const auto* name = filterObject->AsName()) filters.push_back({name->value(), {}});
+                else if (const auto* array = filterObject->AsArray()) {
+                    for (const auto& item : array->values())
+                        if (const auto* name = item.AsName()) filters.push_back({name->value(), {}});
+                }
+            }
+            try {
+                if (!filters.empty()) bytes = PdfFilterPipeline().Decode(bytes, filters);
+                std::vector<std::uint8_t> fontBytes;
+                fontBytes.reserve(bytes.size());
+                for (const auto byte : bytes) fontBytes.push_back(std::to_integer<std::uint8_t>(byte));
+                result.embeddedTrueType_ = std::make_shared<const PdfTrueTypeFont>(
+                    PdfTrueTypeFont::Parse(std::move(fontBytes), result.descriptor_.baseFont));
+            } catch (const std::exception&) {
+                // Keep malformed embedded fonts from making an otherwise readable
+                // PDF unusable; the caller can use metrics/Unicode fallback.
+            }
+        }
+        const PdfObject* cffObject = ResolveObject(descriptor->Find(PdfName("FontFile3")), resolver);
+        if (cffObject && cffObject->AsStream()) {
+            const auto subtype = cffObject->AsStream()->dictionary().GetAsName(PdfName("Subtype"));
+            result.embeddedProgramSubtype_ = subtype ? subtype->value() : std::string{};
+            result.embeddedCff_ = result.embeddedProgramSubtype_ == "Type1C" ||
+                result.embeddedProgramSubtype_ == "CIDFontType0C" ||
+                result.embeddedProgramSubtype_ == "OpenType";
+        }
+        const PdfObject* type1Object = ResolveObject(descriptor->Find(PdfName("FontFile")), resolver);
+        result.embeddedType1_ = type1Object != nullptr && type1Object->AsStream() != nullptr;
+    }
+
     if (!result.composite_) {
         const auto firstCharObject = ResolveObject(dictionary.Find(PdfName("FirstChar")), resolver);
         const std::uint32_t first = firstCharObject && firstCharObject->AsInteger()
@@ -228,9 +269,49 @@ std::uint32_t PdfFontResource::GetGlyphWidth(std::uint32_t characterCode) const 
     return it == widths_.end() ? defaultWidth_ : it->second;
 }
 
+std::optional<std::uint16_t> PdfFontResource::GetEmbeddedGlyphId(
+    const std::uint32_t characterCode) const noexcept {
+    if (!embeddedTrueType_) return std::nullopt;
+    if (identityEncoding_ && composite_) return embeddedTrueType_->GetGlyphId(characterCode);
+    const auto unicode = simpleUnicode_.find(characterCode);
+    if (unicode == simpleUnicode_.end()) return std::nullopt;
+    const auto& text = unicode->second;
+    if (text.empty()) return std::nullopt;
+    const auto first = static_cast<unsigned char>(text[0]);
+    std::uint32_t codePoint = first;
+    std::size_t length = 1U;
+    if ((first & 0xE0U) == 0xC0U) { codePoint = first & 0x1FU; length = 2U; }
+    else if ((first & 0xF0U) == 0xE0U) { codePoint = first & 0x0FU; length = 3U; }
+    else if ((first & 0xF8U) == 0xF0U) { codePoint = first & 0x07U; length = 4U; }
+    if (length > text.size()) return std::nullopt;
+    for (std::size_t i = 1U; i < length; ++i) {
+        const auto byte = static_cast<unsigned char>(text[i]);
+        if ((byte & 0xC0U) != 0x80U) return std::nullopt;
+        codePoint = (codePoint << 6U) | (byte & 0x3FU);
+    }
+    return embeddedTrueType_->GetGlyphId(codePoint);
+}
+
 std::size_t PdfFontResource::GetGlyphCount(const std::string_view encodedBytes) const noexcept {
     if (composite_) return (encodedBytes.size() + 1U) / 2U;
     return encodedBytes.size();
+}
+
+std::vector<std::uint32_t> PdfFontResource::GetCharacterCodes(
+    const std::string_view encodedBytes) const {
+    std::vector<std::uint32_t> result;
+    result.reserve(GetGlyphCount(encodedBytes));
+    if (composite_) {
+        for (std::size_t i = 0; i < encodedBytes.size();) {
+            std::uint32_t code = static_cast<unsigned char>(encodedBytes[i++]);
+            if (i < encodedBytes.size()) code = (code << 8U) |
+                static_cast<unsigned char>(encodedBytes[i++]);
+            result.push_back(code);
+        }
+    } else {
+        for (const unsigned char code : encodedBytes) result.push_back(code);
+    }
+    return result;
 }
 
 double PdfFontResource::MeasureEncodedText(const std::string_view encodedBytes) const noexcept {

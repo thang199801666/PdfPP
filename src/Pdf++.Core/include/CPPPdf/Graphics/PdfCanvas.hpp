@@ -1,6 +1,7 @@
 #pragma once
 #include <CPPPdf/Core/PdfTypes.hpp>
 #include <CPPPdf/Graphics/PdfImage.hpp>
+#include <CPPPdf/Rendering/PdfBitmap.hpp>
 #include <CPPPdf/Fonts/PdfTrueTypeFont.hpp>
 #include <memory>
 #include <span>
@@ -32,6 +33,12 @@ struct PdfTextLayoutOptions final {
     bool wrap{true};
 };
 
+struct PdfTextLayoutResult final {
+    std::size_t lineCount{};
+    double width{};
+    double height{};
+};
+
 class PdfCanvas final {
 public:
     PdfCanvas() = default;
@@ -42,6 +49,7 @@ public:
     PdfCanvas& SetStrokeOpacity(double opacity);
     PdfCanvas& SetFillOpacity(double opacity);
     PdfCanvas& SetOpacity(double opacity);
+    PdfCanvas& SetBlendMode(PdfBlendMode mode);
     PdfCanvas& SetLineWidth(double width);
     PdfCanvas& SetLineCap(PdfLineCap cap);
     PdfCanvas& SetLineJoin(PdfLineJoin join);
@@ -72,6 +80,9 @@ public:
     PdfCanvas& ShowText(std::string text);
     PdfCanvas& ShowTextUtf8(std::string utf8Text);
     PdfCanvas& DrawTextUtf8(const PdfTrueTypeFont& font, std::string utf8Text, const PdfTextLayoutOptions& options);
+    [[nodiscard]] static PdfTextLayoutResult MeasureTextLayout(
+        const PdfTrueTypeFont& font, std::string_view utf8Text,
+        const PdfTextLayoutOptions& options);
     PdfCanvas& EndText();
     PdfCanvas& DrawImage(const PdfImage& image, const PdfRectangle& rectangle);
 private:

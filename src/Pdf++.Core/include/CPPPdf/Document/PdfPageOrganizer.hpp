@@ -28,6 +28,10 @@ public:
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
         const std::vector<std::size_t>& pageIndices);
+    [[nodiscard]] static PdfPageOrganizationResult ExtractRange(
+        const std::filesystem::path& inputPath,
+        const std::filesystem::path& outputPath,
+        std::size_t firstPage, std::size_t pageCount);
 
     [[nodiscard]] static std::vector<PdfPageOrganizationResult> SplitEvery(
         const std::filesystem::path& inputPath,

@@ -121,38 +121,4 @@ void copySelectedText() {
     CloseClipboard();
 }
 
-// Rounded top corners like Chrome/Photoshop tab strips.
-void fillRoundedTop(HDC dc, const RECT& rect, const COLORREF color, const int radius) {
-    const HBRUSH brush = CreateSolidBrush(color);
-    const HPEN pen = CreatePen(PS_SOLID, 1, color);
-    const auto oldBrush = SelectObject(dc, brush);
-    const auto oldPen = SelectObject(dc, pen);
-    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom + 1, radius * 2, radius * 2);
-    SelectObject(dc, oldPen);
-    SelectObject(dc, oldBrush);
-    DeleteObject(pen);
-    DeleteObject(brush);
-}
-
-// Draws a smooth vertical gradient between two colors across a rectangle.
-void fillVerticalGradient(HDC dc, const RECT& rect,
-                          const COLORREF top, const COLORREF bottom) {
-    const int height = std::max(1L, rect.bottom - rect.top);
-    for (int y = 0; y < height; ++y) {
-        const double t = static_cast<double>(y) / (height - 1);
-        const int r = static_cast<int>(std::lround(GetRValue(top) +
-            (GetRValue(bottom) - GetRValue(top)) * t));
-        const int g = static_cast<int>(std::lround(GetGValue(top) +
-            (GetGValue(bottom) - GetGValue(top)) * t));
-        const int b = static_cast<int>(std::lround(GetBValue(top) +
-            (GetBValue(bottom) - GetBValue(top)) * t));
-        const HPEN pen = CreatePen(PS_SOLID, 1, RGB(r, g, b));
-        const auto oldPen = SelectObject(dc, pen);
-        MoveToEx(dc, rect.left, rect.top + y, nullptr);
-        LineTo(dc, rect.right, rect.top + y);
-        SelectObject(dc, oldPen);
-        DeleteObject(pen);
-    }
-}
-
 } // namespace PdfPP::Win32

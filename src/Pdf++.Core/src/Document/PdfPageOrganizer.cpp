@@ -273,6 +273,16 @@ PdfPageOrganizationResult PdfPageOrganizer::ExtractPages(
     return applySelection(inputPath, outputPath, pageIndices, true);
 }
 
+PdfPageOrganizationResult PdfPageOrganizer::ExtractRange(
+    const std::filesystem::path& inputPath, const std::filesystem::path& outputPath,
+    const std::size_t firstPage, const std::size_t pageCount) {
+    if (pageCount == 0U) throw std::invalid_argument("Page range must not be empty.");
+    std::vector<std::size_t> pages;
+    pages.reserve(pageCount);
+    for (std::size_t index = 0; index < pageCount; ++index) pages.push_back(firstPage + index);
+    return ExtractPages(inputPath, outputPath, pages);
+}
+
 std::vector<PdfPageOrganizationResult> PdfPageOrganizer::SplitEvery(
     const std::filesystem::path& inputPath,
     const std::filesystem::path& outputDirectory,

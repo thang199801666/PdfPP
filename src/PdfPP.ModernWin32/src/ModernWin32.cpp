@@ -44,9 +44,7 @@ void paintActionButton(HWND window, HDC dc, ActionButtonState& state) {
     const HPEN pen = CreatePen(PS_SOLID, 1, borderColor);
     const auto oldBrush = SelectObject(dc, brush);
     const auto oldPen = SelectObject(dc, pen);
-    const int scaledCorner = MulDiv(6, static_cast<int>(GetDpiForWindow(window)), 96);
-    const int corner = scaledCorner > 0 ? scaledCorner : 1;
-    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, corner, corner);
+    Rectangle(dc, rect.left, rect.top, rect.right, rect.bottom);
     SelectObject(dc, oldPen);
     SelectObject(dc, oldBrush);
     DeleteObject(pen);

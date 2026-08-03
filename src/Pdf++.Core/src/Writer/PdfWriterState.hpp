@@ -8,6 +8,7 @@
 #include <optional>
 #include <utility>
 #include <cstddef>
+#include <CPPPdf/Rendering/PdfBitmap.hpp>
 
 namespace CPPPdf::Internal {
 struct PdfWriterImage {
@@ -17,6 +18,7 @@ struct PdfWriterImage {
 struct PdfWriterExtGState {
     double strokeOpacity{1.0};
     double fillOpacity{1.0};
+    PdfBlendMode blendMode{PdfBlendMode::SourceOver};
     std::string resourceName;
 };
 struct PdfWriterEmbeddedFont {

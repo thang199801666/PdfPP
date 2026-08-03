@@ -137,7 +137,9 @@ struct OpenResult final {
 inline OpenResult openResult;
 
 // --- Caches / settings ---------------------------------------------------------
-inline PageCache pageCache{ 4 };
+// Keep enough neighboring pages for a normal viewport; continuous painting
+// reads these entries without moving ownership out of the cache.
+inline PageCache pageCache{ 12 };
 inline std::optional<PageBitmap> continuousNextPage;
 inline AppSettings settings;
 inline HMENU recentMenu{};
@@ -186,6 +188,9 @@ struct ZoomAnchor final {
     double pageY{};
 };
 inline ZoomAnchor zoomAnchor;
+inline bool zoomRenderPending{};
+inline ULONGLONG zoomRequestTick{};
+inline constexpr UINT kZoomDebounceMs = 80;
 
 enum class VerticalPageArrival { Top, Bottom };
 
@@ -227,6 +232,7 @@ void updateCommandState();
 void prefetchNextPage();
 void prefetchFurtherPage();
 int pageLeft(const RECT& client, int width);
+int pageAtScrollOffset(int offset);
 bool navigatePage(int targetPage, VerticalPageArrival arrival);
 void goToPage(int targetPage);
 void setCanvasScroll(int bar, int position);
@@ -275,6 +281,7 @@ void closeDocument();
 void saveSettingsOnExit();
 void setZoom(const double value);
 void setZoomAtPoint(const double value, POINT point);
+void requestZoomRender();
 void printCurrentPage();
 std::wstring tabLabelFor(const TabState& tab);
 void findText();
@@ -287,8 +294,6 @@ HMENU createMainMenu();
 void refreshApplicationFonts(UINT dpi);
 void captureCanvasCenterAnchor();
 void applyDpiChange(HWND window, UINT dpi);
-void fillRoundedTop(HDC dc, const RECT& rect, COLORREF color, int radius);
-void fillVerticalGradient(HDC dc, const RECT& rect, COLORREF top, COLORREF bottom);
 int tabStripWidth(const int clientWidth, const int count);
 RECT tabItemRectFor(const int index, const int count, const int clientWidth);
 RECT tabCloseRectFor(const RECT& item);

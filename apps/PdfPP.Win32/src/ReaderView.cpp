@@ -64,32 +64,32 @@ void updateLayout(const int width, const int height) {
     // Open | Print || Find | Prev Page Next || Zoom out % Zoom in Fit || Select Hand
     // The search field absorbs available width so the toolbar never
     // overflows on narrow windows.
-    const int dOpen = scaleDip(54) + scaleDip(4);
-    const int dPrint = scaleDip(52) + scaleDip(12);
+    const int dOpen = scaleDip(50) + scaleDip(2);
+    const int dPrint = scaleDip(48) + scaleDip(8);
     const int dFindLabel = scaleDip(34);
-    const int dFindButton = scaleDip(46) + scaleDip(12);
-    const int dPageNav = scaleDip(32) + scaleDip(2) + scaleDip(42) + scaleDip(44) +
-        scaleDip(2) + scaleDip(46) + scaleDip(2) + scaleDip(32) + scaleDip(12);
-    const int dZoom = scaleDip(34) + scaleDip(2) + scaleDip(46) + scaleDip(2) +
-        scaleDip(34) + scaleDip(2) + scaleDip(50) + scaleDip(12);
-    const int dSelect = scaleDip(56) + scaleDip(4) + scaleDip(50) + scaleDip(8);
-    const int fixedBeforeSearch = scaleDip(12) + dOpen + dPrint;
-    const int fixedAfterSearch = dFindLabel + dFindButton + dPageNav + dZoom + dSelect + scaleDip(50);
-    const int availableForSearch = std::max(scaleDip(60),
+    const int dFindButton = scaleDip(42) + scaleDip(8);
+    const int dPageNav = scaleDip(30) + scaleDip(1) + scaleDip(38) + scaleDip(40) +
+        scaleDip(1) + scaleDip(42) + scaleDip(1) + scaleDip(30) + scaleDip(8);
+    const int dZoom = scaleDip(30) + scaleDip(1) + scaleDip(42) + scaleDip(1) +
+        scaleDip(30) + scaleDip(1) + scaleDip(46) + scaleDip(8);
+    const int dSelect = scaleDip(50) + scaleDip(2) + scaleDip(44) + scaleDip(4);
+    const int fixedBeforeSearch = scaleDip(8) + dOpen + dPrint;
+    const int fixedAfterSearch = dFindLabel + dFindButton + dPageNav + dZoom + dSelect + scaleDip(34);
+    const int availableForSearch = std::max(scaleDip(48),
         width - fixedBeforeSearch - fixedAfterSearch);
-    const int searchWidth = std::min(scaleDip(220), availableForSearch);
+    const int searchWidth = std::min(scaleDip(190), availableForSearch);
 
-    int left = scaleDip(12);
-    MoveWindow(openButton, left, controlY, scaleDip(54), controlHeight, TRUE);
+    int left = scaleDip(8);
+    MoveWindow(openButton, left, controlY, scaleDip(50), controlHeight, TRUE);
     left += dOpen;
-    MoveWindow(printButton, left, controlY, scaleDip(52), controlHeight, TRUE);
+    MoveWindow(printButton, left, controlY, scaleDip(48), controlHeight, TRUE);
     left += dPrint;
     MoveWindow(findLabel, left, controlY + scaleDip(4), scaleDip(34), scaleDip(18), TRUE);
     left += dFindLabel;
-    MoveWindow(searchEdit, left, controlY + scaleDip(1), searchWidth, scaleDip(23), TRUE);
-    left += searchWidth + scaleDip(4);
-    MoveWindow(findButton, left, controlY, scaleDip(46), controlHeight, TRUE);
-    left += scaleDip(46) + scaleDip(12);
+    MoveWindow(searchEdit, left, controlY + scaleDip(1), searchWidth, scaleDip(22), TRUE);
+    left += searchWidth + scaleDip(3);
+    MoveWindow(findButton, left, controlY, scaleDip(42), controlHeight, TRUE);
+    left += scaleDip(42) + scaleDip(8);
     ribbonSep1 = left - scaleDip(6);
     MoveWindow(previousButton, left, controlY, scaleDip(32), controlHeight, TRUE);
     left += scaleDip(32) + scaleDip(2);
@@ -157,83 +157,77 @@ LRESULT CALLBACK canvasProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         const HBRUSH background = CreateSolidBrush(PdfPP::ModernWin32::Theme::canvas);
         FillRect(mem, &paint.rcPaint, background);
         DeleteObject(background);
-        if (pixelWidth > 0 && !pixels.empty()) {
-            BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-            info.bmiHeader.biWidth = pixelWidth; info.bmiHeader.biHeight = -pixelHeight;
-            info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
-            const int left = pageLeft(client, pixelWidth) - scrollX;
-            // Absolute page placement: the page top is its offset in the
-            // document minus the absolute scroll position.
-            const int top = pageIndex >= 0 && pageIndex < static_cast<int>(pagePixelOffsets.size())
-                ? pagePixelOffsets[static_cast<std::size_t>(pageIndex)] - scrollY
-                : scaleDip(12) - scrollY;
-            RECT pageRect{ left, top, left + pixelWidth, top + pixelHeight };
-            RECT shadowRect{ pageRect.left + 5, pageRect.top + 5,
-                            pageRect.right + 5, pageRect.bottom + 5 };
-            const HBRUSH shadow = CreateSolidBrush(RGB(193, 198, 205));
-            FillRect(mem, &shadowRect, shadow);
-            DeleteObject(shadow);
-            RECT clipped{};
-            if (IntersectRect(&clipped, &paint.rcPaint, &pageRect)) {
-                const int sourceX = clipped.left - left;
-                const int sourceY = clipped.top - top;
-                const int copyWidth = clipped.right - clipped.left;
-                const int copyHeight = clipped.bottom - clipped.top;
-                StretchDIBits(mem, clipped.left, clipped.top, copyWidth, copyHeight,
-                    sourceX, sourceY, copyWidth, copyHeight,
-                    pixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
-            }
-            const RECT selectionRect{
-                std::min(selectionStart.x, selectionEnd.x),
-                std::min(selectionStart.y, selectionEnd.y),
-                std::max(selectionStart.x, selectionEnd.x),
-                std::max(selectionStart.y, selectionEnd.y) };
-            for (const std::size_t index : searchHighlights) {
-                if (index < textChunks.size()) {
-                    fillOverlay(mem, chunkClientRect(textChunks[index], client, top),
-                        96, RGB(255, 220, 40));
+        if (pageLayoutMode == PageLayoutMode::ContinuousNavigation && document) {
+            // Continuous mode is a document viewport, not a two-page carousel.
+            // Draw every cached page whose absolute document rectangle touches
+            // the viewport. This keeps all visible pages fixed in one coordinate
+            // system while scrollY moves the complete document together.
+            const int firstPage = pageAtScrollOffset(scrollY);
+            const int lastPage = pageAtScrollOffset(scrollY + client.bottom);
+            for (int page = firstPage; page <= lastPage && page < pageCount; ++page) {
+                auto bitmap = pageCache.Get(page, zoom, currentDpi);
+                if (!bitmap || !bitmap->IsValid()) {
+                    if (page == pageIndex && pixelWidth > 0 && !pixels.empty()) {
+                        PageBitmap current;
+                        current.page = pageIndex;
+                        current.zoom = zoom;
+                        current.dpi = currentDpi;
+                        current.width = pixelWidth;
+                        current.height = pixelHeight;
+                        current.stride = pixelStride;
+                        current.pixels = pixels;
+                        bitmap = std::move(current);
+                    }
                 }
-            }
-            for (const std::size_t index : selectedChunks) {
-                if (index < textChunks.size()) {
-                    fillOverlay(mem, chunkClientRect(textChunks[index], client, top),
-                        112, RGB(45, 120, 235));
+                if (!bitmap || !bitmap->IsValid()) continue;
+
+                const int top = pagePixelOffsets[static_cast<std::size_t>(page)] - scrollY;
+                const int left = pageLeft(client, bitmap->width) - scrollX;
+                const RECT pageRect{ left, top, left + bitmap->width, top + bitmap->height };
+                const RECT shadowRect{ pageRect.left + 5, pageRect.top + 5,
+                    pageRect.right + 5, pageRect.bottom + 5 };
+                const HBRUSH shadow = CreateSolidBrush(RGB(193, 198, 205));
+                FillRect(mem, &shadowRect, shadow);
+                DeleteObject(shadow);
+
+                BITMAPINFO info{};
+                info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                info.bmiHeader.biWidth = bitmap->width;
+                info.bmiHeader.biHeight = -bitmap->height;
+                info.bmiHeader.biPlanes = 1;
+                info.bmiHeader.biBitCount = 32;
+                info.bmiHeader.biCompression = BI_RGB;
+                RECT clipped{};
+                if (IntersectRect(&clipped, &paint.rcPaint, &pageRect)) {
+                    StretchDIBits(mem, clipped.left, clipped.top,
+                        clipped.right - clipped.left, clipped.bottom - clipped.top,
+                        clipped.left - left, clipped.top - top,
+                        clipped.right - clipped.left, clipped.bottom - clipped.top,
+                        bitmap->pixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
                 }
-            }
-            if (selectingText && selectionStart.x != selectionEnd.x &&
-                selectionStart.y != selectionEnd.y) {
-                fillOverlay(mem, selectionRect, 64, RGB(45, 120, 235));
-            }
-            if (pageLayoutMode == PageLayoutMode::ContinuousNavigation && continuousNextPage) {
-                const auto& next = *continuousNextPage;
-                BITMAPINFO nextInfo{};
-                nextInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                nextInfo.bmiHeader.biWidth = next.width;
-                nextInfo.bmiHeader.biHeight = -next.height;
-                nextInfo.bmiHeader.biPlanes = 1;
-                nextInfo.bmiHeader.biBitCount = 32;
-                nextInfo.bmiHeader.biCompression = BI_RGB;
-                const int gap = scaleDip(24);
-                const int nextLeft = pageLeft(client, next.width) - scrollX;
-                // Place the next page exactly below the current page's real
-                // bottom edge so the two pages never overlap.
-                const int nextTop = top + pixelHeight + gap;
-                RECT nextRect{ nextLeft, nextTop, nextLeft + next.width, nextTop + next.height };
-                RECT nextShadow{ nextRect.left + 5, nextRect.top + 5,
-                                nextRect.right + 5, nextRect.bottom + 5 };
-                const HBRUSH nextShadowBrush = CreateSolidBrush(RGB(193, 198, 205));
-                FillRect(mem, &nextShadow, nextShadowBrush);
-                DeleteObject(nextShadowBrush);
-                RECT nextClipped{};
-                if (IntersectRect(&nextClipped, &paint.rcPaint, &nextRect)) {
-                    const int sourceX = nextClipped.left - nextLeft;
-                    const int sourceY = nextClipped.top - nextTop;
-                    const int copyWidth = nextClipped.right - nextClipped.left;
-                    const int copyHeight = nextClipped.bottom - nextClipped.top;
-                    StretchDIBits(mem, nextClipped.left, nextClipped.top,
-                        copyWidth, copyHeight, sourceX, sourceY,
-                        copyWidth, copyHeight, next.pixels.data(), &nextInfo,
-                        DIB_RGB_COLORS, SRCCOPY);
+
+                if (page == pageIndex) {
+                    const RECT selectionRect{
+                        std::min(selectionStart.x, selectionEnd.x),
+                        std::min(selectionStart.y, selectionEnd.y),
+                        std::max(selectionStart.x, selectionEnd.x),
+                        std::max(selectionStart.y, selectionEnd.y) };
+                    for (const std::size_t index : searchHighlights) {
+                        if (index < textChunks.size()) {
+                            fillOverlay(mem, chunkClientRect(textChunks[index], client, top),
+                                96, RGB(255, 220, 40));
+                        }
+                    }
+                    for (const std::size_t index : selectedChunks) {
+                        if (index < textChunks.size()) {
+                            fillOverlay(mem, chunkClientRect(textChunks[index], client, top),
+                                112, RGB(45, 120, 235));
+                        }
+                    }
+                    if (selectingText && selectionStart.x != selectionEnd.x &&
+                        selectionStart.y != selectionEnd.y) {
+                        fillOverlay(mem, selectionRect, 64, RGB(45, 120, 235));
+                    }
                 }
             }
         }
@@ -266,15 +260,39 @@ LRESULT CALLBACK canvasProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             SetFocus(searchEdit); SendMessageW(searchEdit, EM_SETSEL, 0, -1); return 0;
         }
         if (control && wParam == 'C') { copySelectedText(); return 0; }
+        RECT client{};
+        GetClientRect(window, &client);
+        const int viewportHeight = std::max(1L, client.bottom);
+        const int line = scaleDip(24);
         switch (wParam) {
-        case VK_PRIOR: goToPage(pageIndex - 1); return 0;
-        case VK_NEXT: goToPage(pageIndex + 1); return 0;
+        case VK_PRIOR:
+            if (pageLayoutMode == PageLayoutMode::ContinuousNavigation)
+                scrollContinuousBy(-viewportHeight);
+            else
+                goToPage(pageIndex - 1);
+            return 0;
+        case VK_NEXT:
+            if (pageLayoutMode == PageLayoutMode::ContinuousNavigation)
+                scrollContinuousBy(viewportHeight);
+            else
+                goToPage(pageIndex + 1);
+            return 0;
         case VK_HOME: goToPage(0); return 0;
         case VK_END: goToPage(pageCount - 1); return 0;
-        case VK_UP: setCanvasScroll(SB_VERT, scrollY - scaleDip(48)); return 0;
-        case VK_DOWN: setCanvasScroll(SB_VERT, scrollY + scaleDip(48)); return 0;
-        case VK_LEFT: setCanvasScroll(SB_HORZ, scrollX - scaleDip(48)); return 0;
-        case VK_RIGHT: setCanvasScroll(SB_HORZ, scrollX + scaleDip(48)); return 0;
+        case VK_UP:
+            if (pageLayoutMode == PageLayoutMode::ContinuousNavigation)
+                scrollContinuousBy(-line);
+            else
+                setCanvasScroll(SB_VERT, scrollY - line);
+            return 0;
+        case VK_DOWN:
+            if (pageLayoutMode == PageLayoutMode::ContinuousNavigation)
+                scrollContinuousBy(line);
+            else
+                setCanvasScroll(SB_VERT, scrollY + line);
+            return 0;
+        case VK_LEFT: setCanvasScroll(SB_HORZ, scrollX - line); return 0;
+        case VK_RIGHT: setCanvasScroll(SB_HORZ, scrollX + line); return 0;
         case VK_F3: findText(); return 0;
         }
     }
@@ -335,8 +353,8 @@ LRESULT CALLBACK canvasProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         SCROLLINFO info{ sizeof(info), SIF_ALL }; GetScrollInfo(window, bar, &info);
         int next = old;
         switch (LOWORD(wParam)) {
-        case SB_LINEUP: next -= scaleDip(32); break;
-        case SB_LINEDOWN: next += scaleDip(32); break;
+        case SB_LINEUP: next -= scaleDip(24); break;
+        case SB_LINEDOWN: next += scaleDip(24); break;
         case SB_PAGEUP: next -= static_cast<int>(info.nPage); break;
         case SB_PAGEDOWN: next += static_cast<int>(info.nPage); break;
         case SB_THUMBTRACK:
@@ -467,6 +485,16 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         return 0;
     }
+    if (message == WM_TIMER && wParam == ZOOM_TIMER) {
+        const ULONGLONG elapsed = GetTickCount64() - zoomRequestTick;
+        if (elapsed < kZoomDebounceMs) return 0;
+        zoomRenderPending = false;
+        KillTimer(window, ZOOM_TIMER);
+        pageCache.Clear();
+        updatePageGeometry();
+        renderPage();
+        return 0;
+    }
     if (message == WM_TIMER && wParam == RENDER_TIMER) {
         if (renderReady.load(std::memory_order_acquire)) {
             KillTimer(window, RENDER_TIMER);
@@ -487,6 +515,11 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         const bool current = result.document == document && result.bitmap.page == pageIndex &&
             result.bitmap.dpi == currentDpi &&
             std::abs(result.bitmap.zoom - zoom) < 1.0e-9;
+        if (!current && result.document == document && zoomRenderPending) {
+            // The user changed zoom while the previous bitmap was rendering.
+            // Never install the stale geometry; schedule only the newest zoom.
+            SetTimer(window, ZOOM_TIMER, kZoomDebounceMs, nullptr);
+        }
         if (result.prefetch) {
             const bool success = result.error.empty();
             if (success) rememberNativePage(result);
@@ -500,7 +533,11 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             else if (result.document == document && !hasCachedPage(pageIndex, zoom)) renderPage();
         }
         else if (!current) {
-            renderPage();
+            if (zoomRenderPending) {
+                SetTimer(window, ZOOM_TIMER, kZoomDebounceMs, nullptr);
+            } else {
+                renderPage();
+            }
         }
         else if (!result.error.empty()) {
             setStatus(L"Render failed: " + utf8ToWide(result.error.c_str()));
@@ -524,9 +561,9 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         const int contentTop = ribbonHeight + tabBarHeight;
         RECT ribbon{ 0, 0, client.right, ribbonHeight };
         // Soft two-stop gradient gives the toolbar a slightly raised look.
-        fillVerticalGradient(dc, ribbon,
-            PdfPP::ModernWin32::Theme::toolbar,
-            RGB(236, 238, 242));
+        const HBRUSH ribbonBrush = CreateSolidBrush(PdfPP::ModernWin32::Theme::toolbar);
+        FillRect(dc, &ribbon, ribbonBrush);
+        DeleteObject(ribbonBrush);
         const int sidebarWidth = sidebarVisible ? scaleDip(PdfPP::ModernWin32::Layout::sidebarWidth) : 0;
         RECT sidebar{ 0, contentTop,
                      sidebarWidth,
@@ -541,8 +578,7 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         DeleteObject(statusBrush);
 
         SetBkMode(dc, TRANSPARENT);
-        HPEN separator = CreatePen(PS_SOLID, 1, RGB(220, 223, 228));
-        HPEN highlight = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+        HPEN separator = CreatePen(PS_SOLID, 1, PdfPP::ModernWin32::Theme::border);
         const auto oldPen = SelectObject(dc, separator);
         const int sepTop = scaleDip(7);
         const int sepBottom = scaleDip(35);
@@ -551,17 +587,11 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             if (x <= 0) continue;
             MoveToEx(dc, x, sepTop, nullptr);
             LineTo(dc, x, sepBottom);
-            SelectObject(dc, highlight);
-            MoveToEx(dc, x + 1, sepTop, nullptr);
-            LineTo(dc, x + 1, sepBottom);
             SelectObject(dc, separator);
         }
         SelectObject(dc, separator);
         MoveToEx(dc, 0, ribbonHeight - 1, nullptr);
         LineTo(dc, client.right, ribbonHeight - 1);
-        SelectObject(dc, highlight);
-        MoveToEx(dc, 0, ribbonHeight - 2, nullptr);
-        LineTo(dc, client.right, ribbonHeight - 2);
         if (sidebarVisible) {
             SelectObject(dc, separator);
             MoveToEx(dc, sidebarWidth, contentTop, nullptr);
@@ -569,7 +599,6 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         SelectObject(dc, oldPen);
         DeleteObject(separator);
-        DeleteObject(highlight);
         EndPaint(window, &paint);
         return 0;
     }

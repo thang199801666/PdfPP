@@ -565,6 +565,18 @@ void TestUnicodeTrueTypeWriting() {
     const auto page = writer.AddPage();
     const auto font = PdfTrueTypeFont::Load(*fontPath);
     PDFPP_TEST_CHECK(!font.GetBytes().empty());
+    PDFPP_TEST_CHECK(font.HasTable("head"));
+    PDFPP_TEST_CHECK(font.HasTable("cmap"));
+    (void)font.GetCachedAdvanceWidth(65U, 16.0);
+    (void)font.GetCachedAdvanceWidth(65U, 16.0);
+    PDFPP_TEST_CHECK(font.GetAdvanceCacheMisses() >= 1U);
+    PDFPP_TEST_CHECK(font.GetAdvanceCacheHits() >= 1U);
+    (void)font.GetGlyphOutlineCached(65U);
+    (void)font.GetGlyphOutlineCached(65U);
+    PDFPP_TEST_CHECK(font.GetOutlineCacheMisses() >= 1U);
+    PDFPP_TEST_CHECK(font.GetOutlineCacheHits() >= 1U);
+    font.ClearGlyphCaches();
+    PDFPP_TEST_CHECK(font.GetCachedOutlineCount() == 0U);
     writer.GetCanvas(page)
         .BeginText()
         .SetTrueTypeFontAndSize(font, 16)

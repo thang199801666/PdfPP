@@ -72,6 +72,9 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
     chunks.reserve(std::min<std::size_t>(content.size() / 16U + 1U, 65536U));
     std::unordered_map<std::string, const PdfFontResource*> fontCache;
     fontCache.reserve(16U);
+    double fillAlpha = 1.0;
+    double strokeAlpha = 1.0;
+    std::vector<std::array<double, 2>> alphaStack;
     double currentX{};
     double currentY{};
     double textLineX{};
@@ -80,6 +83,24 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
 
     PdfContentProcessor processor;
     processor.SetHandler([&](const PdfContentEvent& event) {
+        if (event.type == PdfContentEventType::SaveState) {
+            alphaStack.push_back({strokeAlpha, fillAlpha});
+            return;
+        }
+        if (event.type == PdfContentEventType::RestoreState) {
+            if (!alphaStack.empty()) {
+                strokeAlpha = alphaStack.back()[0];
+                fillAlpha = alphaStack.back()[1];
+                alphaStack.pop_back();
+            }
+            return;
+        }
+        if (event.operation == "gs" && request.extGStateResolver && !event.text.empty()) {
+            const auto alpha = request.extGStateResolver(request.resourceObjectNumber, event.text);
+            strokeAlpha = alpha[0];
+            fillAlpha = alpha[1];
+            return;
+        }
         if (event.type == PdfContentEventType::SetTextMatrix) {
             textLineX = event.textState.textMatrix[4];
             textLineY = event.textState.textMatrix[5];
@@ -140,7 +161,7 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
             if (found != fontCache.end()) {
                 font = found->second;
             } else {
-                font = request.fontResolver(event.textState.fontResource);
+                font = request.fontResolver(request.resourceObjectNumber, event.textState.fontResource);
                 fontCache.emplace(event.textState.fontResource, font);
             }
         }
@@ -194,6 +215,16 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
 
         PdfTextChunk chunk;
         chunk.utf8Text = std::move(decodedText);
+        chunk.encodedText = event.text;
+        chunk.contentOperation = event.operation;
+        if (font) {
+            chunk.characterCodes = font->GetCharacterCodes(event.text);
+            chunk.glyphIds.reserve(chunk.characterCodes.size());
+            for (const auto code : chunk.characterCodes) {
+                const auto glyph = font->GetEmbeddedGlyphId(code);
+                chunk.glyphIds.push_back(glyph.value_or(std::numeric_limits<std::uint16_t>::max()));
+            }
+        }
         chunk.start = start;
         chunk.end = end;
         chunk.boundingBox = BoundsFromPoints(boxPoints);
@@ -201,7 +232,10 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
         chunk.fontFamily = font ? font->GetDescriptor().baseFont : std::string{};
         chunk.fontSize = effectiveFontSize;
         chunk.renderingMode = event.textState.renderingMode;
+        chunk.fillAlpha = fillAlpha;
+        chunk.strokeAlpha = strokeAlpha;
         chunk.sourceObjectNumber = request.sourceObjectNumber;
+        chunk.resourceObjectNumber = request.resourceObjectNumber;
         chunk.glyphCount = static_cast<std::uint32_t>(glyphCountValue);
         chunk.usedEmbeddedFontMetrics = font != nullptr;
 

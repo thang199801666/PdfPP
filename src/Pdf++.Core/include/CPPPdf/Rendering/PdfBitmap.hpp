@@ -8,6 +8,17 @@
 
 namespace CPPPdf {
 
+enum class PdfBlendMode {
+    SourceOver,
+    Multiply,
+    Screen,
+    Darken,
+    Lighten,
+    Overlay,
+    Difference,
+    Exclusion
+};
+
 struct PdfRgbaColor final {
     std::uint8_t red{0};
     std::uint8_t green{0};
@@ -33,6 +44,14 @@ public:
     void Clear(PdfRgbaColor color);
     void SetPixel(std::int32_t x, std::int32_t y, PdfRgbaColor color);
     void BlendPixel(std::int32_t x, std::int32_t y, PdfRgbaColor color);
+    void BlendPixel(std::int32_t x, std::int32_t y, PdfRgbaColor color, PdfBlendMode mode);
+    // Faster variant for rasterizers that already clipped coordinates.
+    void BlendPixelInBounds(std::size_t x, std::size_t y, PdfRgbaColor color) noexcept;
+    void BlendBitmap(const PdfBitmap& source, std::int32_t destinationX,
+                     std::int32_t destinationY, std::uint8_t opacity = 255U);
+    void BlendBitmap(const PdfBitmap& source, std::int32_t destinationX,
+                     std::int32_t destinationY, PdfBlendMode mode,
+                     std::uint8_t opacity = 255U);
     void SavePpm(const std::filesystem::path& path) const;
 
 private:

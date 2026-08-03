@@ -94,7 +94,7 @@ void rememberNativePage(RenderResult& result) {
         }
     }
     if (isNextPage) {
-        continuousNextPage = pageCache.Take(pageIndex + 1, zoom, currentDpi);
+        continuousNextPage = pageCache.Get(pageIndex + 1, zoom, currentDpi);
         updateCanvasScrollbars();
         InvalidateRect(canvas, nullptr, FALSE);
     }
@@ -107,6 +107,11 @@ void finishPageLayout() {
     if (pendingScrollY >= 0) {
         scrollY = pendingScrollY;
         pendingScrollY = -1;
+    }
+    if (pageLayoutMode == PageLayoutMode::ContinuousNavigation &&
+        documentPixelHeight > 0) {
+        scrollY = std::clamp(scrollY, 0,
+            std::max(0, documentPixelHeight - viewportHeight));
     }
     else if (zoomAnchor.valid) {
         const int left = pageLeft(client, pixelWidth);
@@ -143,6 +148,12 @@ bool applyCachedPage(const int requestedPage, const double requestedZoom) {
     pixelStride = page->stride;
     syncRenderedPageHeight(requestedPage);
     refreshTextGeometry();
+    // A cached page is adopted while the user is already at an absolute
+    // document offset. Do not treat it like a fresh page navigation.
+    if (pendingScrollY >= 0) {
+        scrollY = pendingScrollY;
+        pendingScrollY = -1;
+    }
     finishPageLayout();
     if (pageLayoutMode == PageLayoutMode::ContinuousNavigation) prefetchNextPage();
     setStatus(L"Ready (cached)");
@@ -176,7 +187,7 @@ void prefetchNextPage() {
     if (!document || nextPage >= pageCount) return;
     if (pageLayoutMode == PageLayoutMode::ContinuousNavigation &&
         hasCachedPage(nextPage, zoom)) {
-        continuousNextPage = pageCache.Take(nextPage, zoom, currentDpi);
+        continuousNextPage = pageCache.Get(nextPage, zoom, currentDpi);
         updateCanvasScrollbars();
         InvalidateRect(canvas, nullptr, FALSE);
         return;
@@ -272,100 +283,20 @@ bool scrollContinuousBy(int delta) {
     const int oldScroll = scrollY;
     const int target = std::clamp(scrollY + delta, 0, maximumScroll);
 
-    // Absolute offset where the next page really begins, derived from the
-    // current page's actual rendered height. This must match how WM_PAINT
-    // places the next page (top + pixelHeight + gap), otherwise scrolling
-    // promotes too early and the next page appears to "eat" the previous one.
-    const int currentPageTop = pageIndex < static_cast<int>(pagePixelOffsets.size())
-        ? pagePixelOffsets[static_cast<std::size_t>(pageIndex)] : 0;
-    const int nextPageTop = currentPageTop + pixelHeight + gapBetweenPages;
-
-    if (target < nextPageTop) {
-        // Still inside the current page or the gap below it: the current
-        // bitmap stays; both pages are painted naturally.
-        if (target < pagePixelOffsets[static_cast<std::size_t>(pageIndex)]) {
-            // Scrolled back above the top of the current page.
-            if (pageIndex > 0) {
-                auto previous = pageCache.Take(pageIndex - 1, zoom, currentDpi);
-                if (previous) {
-                    if (!tryCrossPageBoundary()) {
-                        scrollY = target;
-                        InvalidateRect(canvas, nullptr, FALSE);
-                        return scrollY != oldScroll;
-                    }
-                    cacheCurrentPageAndRelease();
-                    --pageIndex;
-                    pixels = std::move(previous->pixels);
-                    pixelWidth = previous->width;
-                    pixelHeight = previous->height;
-                    pixelStride = previous->stride;
-                    scrollY = target;
-                    refreshTextGeometry();
-                    updatePageControls();
-                    updateCanvasScrollbars();
-                    continuousNextPage = pageCache.Take(pageIndex + 1, zoom, currentDpi);
-                    InvalidateRect(canvas, nullptr, FALSE);
-                    prefetchNextPage();
-                    return true;
-                }
-                // Fall through: previous page not cached, render it.
-                pendingScrollY = target;
-                scrollY = target;
-                --pageIndex;
-                renderPage();
-                return true;
-            }
-        }
-        scrollY = target;
-        if (scrollY != oldScroll) InvalidateRect(canvas, nullptr, FALSE);
-        return scrollY != oldScroll;
-    }
-
-    // target is at or past the top of the next page: the current page has
-    // fully scrolled away, so it is safe to promote the next bitmap.
-    if (pageIndex + 1 < pageCount && continuousNextPage) {
-        if (!tryCrossPageBoundary()) {
-            scrollY = target;
-            InvalidateRect(canvas, nullptr, FALSE);
-            return scrollY != oldScroll;
-        }
-        cacheCurrentPageAndRelease();
-        PageBitmap next = std::move(*continuousNextPage);
-        continuousNextPage.reset();
-        ++pageIndex;
-        pixels = std::move(next.pixels);
-        pixelWidth = next.width;
-        pixelHeight = next.height;
-        pixelStride = next.stride;
-        scrollY = target;
-        refreshTextGeometry();
-        updatePageControls();
-        updateCanvasScrollbars();
-        InvalidateRect(canvas, nullptr, FALSE);
-        prefetchNextPage();
-        return true;
-    }
-
-    // The next (or a farther) page is not rendered yet: schedule it and
-    // remember the absolute offset so finishPageLayout jumps straight there.
-    int farPage = pageIndex;
-    for (int page = 0; page < pageCount; ++page) {
-        if (page >= static_cast<int>(pagePixelOffsets.size())) break;
-        const int offset = pagePixelOffsets[static_cast<std::size_t>(page)];
-        const int height = pagePixelHeights.empty()
-            ? pixelHeight : pagePixelHeights[static_cast<std::size_t>(page)];
-        if (target < offset + height) { farPage = page; break; }
-        farPage = page;
-    }
-    farPage = std::clamp(farPage, 0, std::max(0, pageCount - 1));
-    if (farPage != pageIndex) {
-        pendingScrollY = target;
-        scrollY = target;
-        pageIndex = farPage;
-        renderPage();
-        return true;
-    }
     scrollY = target;
+    const int targetPage = pageAtScrollOffset(target);
+    if (targetPage != pageIndex) {
+        pendingScrollY = target;
+        pageIndex = targetPage;
+        if (applyCachedPage(targetPage, zoom)) {
+            continuousNextPage.reset();
+            prefetchNextPage();
+        } else {
+            renderPage();
+        }
+        return true;
+    }
+    if (scrollY != oldScroll) InvalidateRect(canvas, nullptr, FALSE);
     return scrollY != oldScroll;
 }
 
@@ -446,7 +377,7 @@ void setZoom(const double value) {
     if (std::abs(next - zoom) < 1.0e-9) return;
     zoomAnchor = {};
     zoom = next;
-    renderPage();
+    requestZoomRender();
 }
 
 void setZoomAtPoint(const double value, POINT point) {
@@ -467,7 +398,16 @@ void setZoomAtPoint(const double value, POINT point) {
             static_cast<double>(point.y + scrollY - pageTop) / pixelHeight, 0.0, 1.0);
     }
     zoom = next;
-    renderPage();
+    requestZoomRender();
+}
+
+void requestZoomRender() {
+    if (!document) return;
+    zoomRenderPending = true;
+    zoomRequestTick = GetTickCount64();
+    SetTimer(mainWindow, ZOOM_TIMER, kZoomDebounceMs, nullptr);
+    updateZoomLabel();
+    InvalidateRect(canvas, nullptr, FALSE);
 }
 
 void fitToWidth() {

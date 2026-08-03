@@ -1,6 +1,7 @@
 #include <CPPPdf/Fonts/PdfTrueTypeFont.hpp>
 #include <algorithm>
 #include <cmath>
+#include <bit>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -126,7 +127,7 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
     const auto tables=ParseTables(bytes); auto require=[&](const char* tag)->const Table&{auto it=tables.find(tag);if(it==tables.end())throw std::runtime_error(std::string("TrueType font is missing ")+tag+" table.");return it->second;};
     PdfTrueTypeFont f;f.sourceName_=std::move(sourceName);f.unicodeToGlyph_=ParseCMap(bytes,require("cmap"));
     const auto& head=require("head");f.metrics_.unitsPerEm=Read16(bytes,head.offset+18);if(!f.metrics_.unitsPerEm)throw std::runtime_error("TrueType unitsPerEm is zero.");
-    const auto& maxp=require("maxp");f.metrics_.glyphCount=Read16(bytes,maxp.offset+4);
+    const auto& maxp=require("maxp");f.metrics_.glyphCount=Read16(bytes,maxp.offset+4); f.outlineCache_.reserve(f.metrics_.glyphCount);
     const auto& hhea=require("hhea");f.metrics_.ascent=ReadS16(bytes,hhea.offset+4);f.metrics_.descent=ReadS16(bytes,hhea.offset+6);f.metrics_.lineGap=ReadS16(bytes,hhea.offset+8);const auto longCount=Read16(bytes,hhea.offset+34);
     const auto& hmtx=require("hmtx"); if(!longCount||longCount>f.metrics_.glyphCount)throw std::runtime_error("Invalid TrueType horizontal metrics count.");
     f.advanceWidths_.resize(f.metrics_.glyphCount);std::uint16_t last=0;for(std::uint16_t i=0;i<longCount;++i){last=Read16(bytes,hmtx.offset+std::size_t(i)*4);f.advanceWidths_[i]=last;}for(std::size_t i=longCount;i<f.advanceWidths_.size();++i)f.advanceWidths_[i]=last;
@@ -136,9 +137,238 @@ const std::string& PdfTrueTypeFont::GetSourceName()const noexcept{return sourceN
 const PdfTrueTypeMetrics& PdfTrueTypeFont::GetMetrics()const noexcept{return metrics_;} std::size_t PdfTrueTypeFont::GetGlyphMappingCount()const noexcept{return unicodeToGlyph_.size();}
 bool PdfTrueTypeFont::Supports(std::uint32_t cp)const noexcept{return unicodeToGlyph_.contains(cp);} std::optional<std::uint16_t> PdfTrueTypeFont::GetGlyphId(std::uint32_t cp)const noexcept{auto it=unicodeToGlyph_.find(cp);return it==unicodeToGlyph_.end()?std::nullopt:std::optional<std::uint16_t>(it->second);}
 std::uint16_t PdfTrueTypeFont::GetAdvanceWidth(std::uint16_t gid)const noexcept{return gid<advanceWidths_.size()?advanceWidths_[gid]:0;}
+bool PdfTrueTypeFont::HasTable(const std::string_view tag) const noexcept {
+    if (tag.size() != 4U) return false;
+    const auto tables = ParseTables(bytes_);
+    return tables.find(std::string(tag)) != tables.end();
+}
 double PdfTrueTypeFont::GetAdvanceWidth(std::uint16_t gid,double size)const{if(size<=0||!std::isfinite(size))throw std::invalid_argument("Font size must be positive and finite.");return double(GetAdvanceWidth(gid))*size/metrics_.unitsPerEm;}
-double PdfTrueTypeFont::MeasureTextUtf8(std::string_view text,double size)const{if(size<=0||!std::isfinite(size))throw std::invalid_argument("Font size must be positive and finite.");double w=0;for(auto cp:DecodeUtf8(text)){auto gid=GetGlyphId(cp);if(!gid)throw std::invalid_argument("The TrueType font does not contain a requested Unicode code point.");w+=GetAdvanceWidth(*gid,size);}return w;}
+double PdfTrueTypeFont::GetCachedAdvanceWidth(std::uint16_t gid,double size)const{const auto key=(std::bit_cast<std::uint64_t>(size)*0x9E3779B97F4A7C15ULL)^gid;const auto found=advanceCache_.find(key);if(found!=advanceCache_.end()){++advanceCacheHits_;advanceLru_.splice(advanceLru_.end(),advanceLru_,found->second);return found->second->second;}++advanceCacheMisses_;if(advanceCache_.size()>=kGlyphCacheLimit){advanceCache_.erase(advanceLru_.front().first);advanceLru_.pop_front();}const auto value=GetAdvanceWidth(gid,size);advanceLru_.emplace_back(key,value);advanceCache_.emplace(key,std::prev(advanceLru_.end()));return value;}
+void PdfTrueTypeFont::ClearGlyphCaches() const noexcept { outlineCache_.clear(); outlineLru_.clear(); advanceCache_.clear(); advanceLru_.clear(); }
+double PdfTrueTypeFont::MeasureTextUtf8(std::string_view text,double size)const{if(size<=0||!std::isfinite(size))throw std::invalid_argument("Font size must be positive and finite.");double w=0;for(auto cp:DecodeUtf8(text)){auto gid=GetGlyphId(cp);if(!gid)throw std::invalid_argument("The TrueType font does not contain a requested Unicode code point.");w+=GetCachedAdvanceWidth(*gid,size);}return w;}
 double PdfTrueTypeFont::GetLineHeight(double size,double spacing)const{if(size<=0||!std::isfinite(size)||spacing<=0||!std::isfinite(spacing))throw std::invalid_argument("Font size and line spacing must be positive and finite.");return double(metrics_.ascent-metrics_.descent+metrics_.lineGap)*size/metrics_.unitsPerEm*spacing;}
+
+PdfTrueTypeGlyphOutline PdfTrueTypeFont::ReadGlyphOutline(
+    const std::uint16_t glyphId, std::unordered_set<std::uint16_t>& active) const {
+    if (glyphId >= metrics_.glyphCount) throw std::out_of_range("TrueType glyph ID is out of range.");
+    if (!active.insert(glyphId).second) throw std::runtime_error("Cyclic TrueType composite glyph.");
+    if (active.size() > 64U) throw std::runtime_error("TrueType composite glyph depth exceeds limit.");
+    const auto tables = ParseTables(bytes_);
+    const auto glyfIt = tables.find("glyf");
+    const auto locaIt = tables.find("loca");
+    const auto headIt = tables.find("head");
+    if (glyfIt == tables.end() || locaIt == tables.end() || headIt == tables.end()) {
+        throw std::runtime_error("TrueType font has no glyph outline tables.");
+    }
+    const auto locaFormat = ReadS16(bytes_, headIt->second.offset + 50U);
+    const std::size_t locaEntrySize = locaFormat == 0 ? 2U : 4U;
+    const std::size_t locaPosition = locaIt->second.offset + std::size_t(glyphId) * locaEntrySize;
+    const std::uint32_t startOffset = locaFormat == 0 ? std::uint32_t(Read16(bytes_, locaPosition)) * 2U
+                                                       : Read32(bytes_, locaPosition);
+    const std::uint32_t endOffset = locaFormat == 0
+        ? std::uint32_t(Read16(bytes_, locaPosition + 2U)) * 2U
+        : Read32(bytes_, locaPosition + 4U);
+    if (endOffset < startOffset || endOffset > glyfIt->second.length) {
+        throw std::runtime_error("Invalid TrueType glyph range.");
+    }
+    PdfTrueTypeGlyphOutline result;
+    const std::size_t glyphStart = glyfIt->second.offset + startOffset;
+    if (startOffset == endOffset) { active.erase(glyphId); return result; }
+    const auto contours = ReadS16(bytes_, glyphStart);
+    result.xMin = ReadS16(bytes_, glyphStart + 2U);
+    result.yMin = ReadS16(bytes_, glyphStart + 4U);
+    result.xMax = ReadS16(bytes_, glyphStart + 6U);
+    result.yMax = ReadS16(bytes_, glyphStart + 8U);
+    if (contours < 0) {
+        result.composite = true;
+        std::size_t position = glyphStart + 10U;
+        const std::size_t glyphEnd = glyfIt->second.offset + endOffset;
+        bool moreComponents = true;
+        std::uint16_t lastFlags{};
+        while (moreComponents) {
+            if (position + 4U > glyphEnd) throw std::runtime_error("Invalid TrueType composite glyph.");
+            const auto flags = Read16(bytes_, position);
+            lastFlags = flags;
+            const auto componentGlyph = Read16(bytes_, position + 2U);
+            position += 4U;
+            PdfTrueTypeGlyphOutline::Component component;
+            component.glyphId = componentGlyph;
+            component.argumentsAreXY = (flags & 0x0002U) != 0U;
+            component.roundToGrid = (flags & 0x0004U) != 0U;
+            if ((flags & 0x0001U) != 0U) {
+                component.argument1 = component.argumentsAreXY
+                    ? ReadS16(bytes_, position) : Read16(bytes_, position);
+                component.argument2 = component.argumentsAreXY
+                    ? ReadS16(bytes_, position + 2U) : Read16(bytes_, position + 2U);
+                position += 4U;
+            } else {
+                if (position + 2U > glyphEnd) throw std::runtime_error("Invalid TrueType composite arguments.");
+                component.argument1 = component.argumentsAreXY
+                    ? static_cast<std::int8_t>(bytes_[position]) : bytes_[position];
+                component.argument2 = component.argumentsAreXY
+                    ? static_cast<std::int8_t>(bytes_[position + 1U]) : bytes_[position + 1U];
+                position += 2U;
+            }
+            auto readScale = [&]() {
+                return static_cast<double>(ReadS16(bytes_, position)) / 16384.0;
+            };
+            if ((flags & 0x0008U) != 0U) {
+                if (position + 2U > glyphEnd) throw std::runtime_error("Invalid TrueType composite scale.");
+                component.xx = component.yy = readScale();
+                position += 2U;
+            } else if ((flags & 0x0040U) != 0U) {
+                if (position + 4U > glyphEnd) throw std::runtime_error("Invalid TrueType composite scale.");
+                component.xx = readScale(); position += 2U;
+                component.yy = readScale(); position += 2U;
+            } else if ((flags & 0x0080U) != 0U) {
+                if (position + 8U > glyphEnd) throw std::runtime_error("Invalid TrueType composite transform.");
+                component.xx = readScale(); position += 2U;
+                component.xy = readScale(); position += 2U;
+                component.yx = readScale(); position += 2U;
+                component.yy = readScale(); position += 2U;
+            }
+            result.components.push_back(component);
+            moreComponents = (flags & 0x0020U) != 0U;
+        }
+        if (position + 2U <= glyphEnd && (lastFlags & 0x0100U) != 0U) {
+            const auto instructionLength = Read16(bytes_, position);
+            if (position + 2U + instructionLength > glyphEnd)
+                throw std::runtime_error("Invalid TrueType composite instructions.");
+        }
+        for (const auto& component : result.components) {
+            const auto child = ReadGlyphOutline(component.glyphId, active);
+            std::vector<PdfTrueTypePoint> parentPoints;
+            for (const auto& contour : result.contours)
+                parentPoints.insert(parentPoints.end(), contour.begin(), contour.end());
+            std::vector<PdfTrueTypePoint> childPoints;
+            for (const auto& contour : child.contours)
+                childPoints.insert(childPoints.end(), contour.begin(), contour.end());
+            double translateX = component.argumentsAreXY ? component.argument1 : 0.0;
+            double translateY = component.argumentsAreXY ? component.argument2 : 0.0;
+            if (!component.argumentsAreXY && component.argument1 >= 0 && component.argument2 >= 0 &&
+                static_cast<std::size_t>(component.argument1) < parentPoints.size() &&
+                static_cast<std::size_t>(component.argument2) < childPoints.size()) {
+                const auto& parentPoint = parentPoints[static_cast<std::size_t>(component.argument1)];
+                const auto& childPoint = childPoints[static_cast<std::size_t>(component.argument2)];
+                const double transformedX = component.xx * childPoint.x + component.xy * childPoint.y;
+                const double transformedY = component.yx * childPoint.x + component.yy * childPoint.y;
+                translateX = parentPoint.x - transformedX;
+                translateY = parentPoint.y - transformedY;
+            }
+            for (const auto& sourceContour : child.contours) {
+                auto& contour = result.contours.emplace_back();
+                contour.reserve(sourceContour.size());
+                for (const auto point : sourceContour) {
+                    const double x = component.xx * point.x + component.xy * point.y +
+                        translateX;
+                    const double y = component.yx * point.x + component.yy * point.y +
+                        translateY;
+                    contour.push_back({static_cast<std::int16_t>(std::lround(x)),
+                                       static_cast<std::int16_t>(std::lround(y)), point.onCurve});
+                }
+            }
+        }
+        active.erase(glyphId);
+        return result;
+    }
+    const std::size_t contourCount = static_cast<std::size_t>(contours);
+    if (contourCount > 65535U) throw std::runtime_error("TrueType glyph has too many contours.");
+    std::size_t position = glyphStart + 10U;
+    if (position + contourCount * 2U + 2U > glyfIt->second.offset + endOffset) {
+        throw std::runtime_error("Invalid TrueType simple glyph header.");
+    }
+    std::vector<std::uint16_t> ends(contourCount);
+    for (auto& end : ends) { end = Read16(bytes_, position); position += 2U; }
+    const auto instructionLength = Read16(bytes_, position);
+    position += 2U;
+    const std::size_t glyphEnd = glyfIt->second.offset + endOffset;
+    if (position + instructionLength > glyphEnd) throw std::runtime_error("Invalid TrueType glyph instructions.");
+    position += instructionLength;
+    const std::size_t pointCount = contourCount == 0U ? 0U : static_cast<std::size_t>(ends.back()) + 1U;
+    if (pointCount > 1'000'000U) throw std::runtime_error("TrueType glyph has too many points.");
+    std::vector<std::uint8_t> flags;
+    flags.reserve(pointCount);
+    while (flags.size() < pointCount) {
+        if (position >= glyphEnd) throw std::runtime_error("Invalid TrueType glyph flags.");
+        const auto flag = bytes_[position++];
+        flags.push_back(flag);
+        if ((flag & 0x08U) != 0U) {
+            if (position >= glyphEnd) throw std::runtime_error("Invalid TrueType glyph flag repeat.");
+            const auto repeat = bytes_[position++];
+            if (flags.size() + repeat > pointCount) throw std::runtime_error("TrueType glyph flag repeat exceeds points.");
+            for (std::size_t i = 0; i < repeat; ++i) flags.push_back(flag);
+        }
+    }
+    std::vector<std::int16_t> x(pointCount), y(pointCount);
+    std::int32_t currentX = 0;
+    for (std::size_t i = 0; i < pointCount; ++i) {
+        const auto flag = flags[i];
+        std::int32_t delta = 0;
+        if ((flag & 0x02U) != 0U) {
+            if (position >= glyphEnd) throw std::runtime_error("Invalid TrueType X coordinates.");
+            const auto value = bytes_[position++];
+            delta = (flag & 0x10U) != 0U ? value : -static_cast<std::int32_t>(value);
+        } else if ((flag & 0x10U) == 0U) {
+            delta = ReadS16(bytes_, position);
+            position += 2U;
+        }
+        currentX += delta;
+        if (currentX < std::numeric_limits<std::int16_t>::min() || currentX > std::numeric_limits<std::int16_t>::max())
+            throw std::runtime_error("TrueType X coordinate overflow.");
+        x[i] = static_cast<std::int16_t>(currentX);
+    }
+    std::int32_t currentY = 0;
+    for (std::size_t i = 0; i < pointCount; ++i) {
+        const auto flag = flags[i];
+        std::int32_t delta = 0;
+        if ((flag & 0x04U) != 0U) {
+            if (position >= glyphEnd) throw std::runtime_error("Invalid TrueType Y coordinates.");
+            const auto value = bytes_[position++];
+            delta = (flag & 0x20U) != 0U ? value : -static_cast<std::int32_t>(value);
+        } else if ((flag & 0x20U) == 0U) {
+            delta = ReadS16(bytes_, position);
+            position += 2U;
+        }
+        currentY += delta;
+        if (currentY < std::numeric_limits<std::int16_t>::min() || currentY > std::numeric_limits<std::int16_t>::max())
+            throw std::runtime_error("TrueType Y coordinate overflow.");
+        y[i] = static_cast<std::int16_t>(currentY);
+    }
+    std::size_t begin = 0;
+    for (const auto end : ends) {
+        if (end < begin || end >= pointCount) throw std::runtime_error("Invalid TrueType contour endpoint.");
+        auto& contour = result.contours.emplace_back();
+        contour.reserve(static_cast<std::size_t>(end) - begin + 1U);
+        for (std::size_t i = begin; i <= end; ++i) contour.push_back({x[i], y[i], (flags[i] & 1U) != 0U});
+        begin = static_cast<std::size_t>(end) + 1U;
+    }
+    active.erase(glyphId);
+    return result;
+}
+
+PdfTrueTypeGlyphOutline PdfTrueTypeFont::GetGlyphOutline(const std::uint16_t glyphId) const {
+    return GetGlyphOutlineCached(glyphId);
+}
+
+const PdfTrueTypeGlyphOutline& PdfTrueTypeFont::GetGlyphOutlineCached(
+    const std::uint16_t glyphId) const {
+    if (const auto cached = outlineCache_.find(glyphId); cached != outlineCache_.end()) {
+        ++outlineCacheHits_;
+        outlineLru_.splice(outlineLru_.end(), outlineLru_, cached->second);
+        return cached->second->second;
+    }
+    ++outlineCacheMisses_;
+    if (outlineCache_.size() >= kGlyphCacheLimit) {
+        outlineCache_.erase(outlineLru_.front().first);
+        outlineLru_.pop_front();
+    }
+    std::unordered_set<std::uint16_t> active;
+    auto outline = ReadGlyphOutline(glyphId, active);
+    outlineLru_.emplace_back(glyphId, std::move(outline));
+    auto entry = std::prev(outlineLru_.end());
+    outlineCache_.emplace(glyphId, entry);
+    return entry->second;
+}
 
 PdfTrueTypeSubset PdfTrueTypeFont::BuildSubset(std::span<const std::uint16_t> glyphIds) const {
     PdfTrueTypeSubset result; result.originalByteSize = bytes_.size();

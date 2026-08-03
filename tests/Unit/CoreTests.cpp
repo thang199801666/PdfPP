@@ -7,10 +7,17 @@
 #include <CPPPdf/Content/PdfContentProcessor.hpp>
 #include <CPPPdf/Text/PdfTextExtractor.hpp>
 #include <CPPPdf/Text/PdfTextSearch.hpp>
+#include <CPPPdf/Rendering/PdfBitmap.hpp>
+#include <CPPPdf/Rendering/PdfTransparencyGroup.h>
+#include <CPPPdf/Graphics/PdfFunction.hpp>
+#include <CPPPdf/Rendering/PdfShading.hpp>
+#include <CPPPdf/Fonts/PdfCff.hpp>
+#include <CPPPdf/Rendering/PdfDisplayList.hpp>
 #include "Internal/Parsing/PdfObjectParser.hpp"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <array>
 #include <span>
@@ -93,6 +100,179 @@ int RunCoreTests() {
     PDFPP_TEST_CHECK(dictionary->GetAsArray(PdfName::MediaBox)->size() == 4);
     PDFPP_TEST_CHECK(dictionary->Get(PdfName("Parent")).AsReference()->first == 2);
 
+    const auto streamObject = Internal::PdfObjectParser::Parse(
+        "7 0 obj << /Length 5 /Type /XObject >>\nstream\nhello\nendstream\nendobj");
+    const auto* stream = streamObject.AsStream();
+    PDFPP_TEST_CHECK(stream != nullptr);
+    PDFPP_TEST_CHECK(stream->bytes().size() == 5);
+    PDFPP_TEST_CHECK(std::string(reinterpret_cast<const char*>(stream->bytes().data()),
+                                 stream->bytes().size()) == "hello");
+
+    bool rejectedNegativeStreamLength = false;
+    try {
+        Internal::PdfObjectParser::Parse(
+            "<< /Length -1 >>\nstream\nhello\nendstream");
+    } catch (const PdfException& error) {
+        rejectedNegativeStreamLength = error.code() == PdfErrorCode::MalformedObject;
+    }
+    PDFPP_TEST_CHECK(rejectedNegativeStreamLength);
+
+    bool rejectedTruncatedStream = false;
+    try {
+        Internal::PdfObjectParser::Parse(
+            "<< /Length 8 >>\nstream\nhello\nendstream");
+    } catch (const PdfException& error) {
+        rejectedTruncatedStream = error.code() == PdfErrorCode::MalformedObject;
+    }
+    PDFPP_TEST_CHECK(rejectedTruncatedStream);
+
+    const auto escapedString = Internal::PdfObjectParser::Parse(
+        "(A\\053B \\(nested\\) \\\\ C\\r\\nD)");
+    PDFPP_TEST_CHECK(escapedString.AsString() != nullptr);
+    PDFPP_TEST_CHECK(*escapedString.AsString() == "A+B (nested) \\ C\r\nD");
+
+    const auto boolean = Internal::PdfObjectParser::Parse("true");
+    PDFPP_TEST_CHECK(boolean.AsBoolean().value_or(false));
+    bool rejectedKeywordPrefix = false;
+    try {
+        Internal::PdfObjectParser::Parse("trueValue");
+    } catch (const PdfException& error) {
+        rejectedKeywordPrefix = error.code() == PdfErrorCode::MalformedObject;
+    }
+    PDFPP_TEST_CHECK(rejectedKeywordPrefix);
+
+    const auto objectWithEnd = Internal::PdfObjectParser::Parse(
+        "12 0 obj << /Value 7 >> endobj");
+    PDFPP_TEST_CHECK(objectWithEnd.AsDictionary() != nullptr);
+    bool rejectedTrailingData = false;
+    try {
+        Internal::PdfObjectParser::Parse("7 junk");
+    } catch (const PdfException& error) {
+        rejectedTrailingData = error.code() == PdfErrorCode::MalformedObject;
+    }
+    PDFPP_TEST_CHECK(rejectedTrailingData);
+
+    const auto negativeNumber = Internal::PdfObjectParser::Parse("-42");
+    PDFPP_TEST_CHECK(negativeNumber.AsInteger().value_or(0) == -42);
+    const auto reference = Internal::PdfObjectParser::Parse("12 65535 R");
+    PDFPP_TEST_CHECK(reference.AsReference().has_value());
+    bool rejectedInvalidReference = false;
+    try {
+        Internal::PdfObjectParser::Parse("12 65536 R");
+    } catch (const PdfException& error) {
+        rejectedInvalidReference = error.code() == PdfErrorCode::MalformedObject;
+    }
+    PDFPP_TEST_CHECK(rejectedInvalidReference);
+
+    bool rejectedBitmapOverflow = false;
+    try {
+        CPPPdf::PdfBitmap invalidBitmap(std::numeric_limits<std::size_t>::max(), 2U);
+        (void)invalidBitmap;
+    } catch (const PdfException& error) {
+        rejectedBitmapOverflow = error.code() == PdfErrorCode::InvalidArgument;
+    }
+    PDFPP_TEST_CHECK(rejectedBitmapOverflow);
+
+    CPPPdf::PdfBitmap alphaBitmap(1U, 1U, {0U, 0U, 0U, 0U});
+    alphaBitmap.BlendPixelInBounds(0U, 0U, {255U, 0U, 0U, 128U});
+    PDFPP_TEST_CHECK(alphaBitmap.GetPixel(0U, 0U).alpha == 128U);
+    const auto beforeTransparentBlend = alphaBitmap.GetPixel(0U, 0U);
+    alphaBitmap.BlendPixelInBounds(0U, 0U, {0U, 255U, 0U, 0U});
+    const auto afterTransparentBlend = alphaBitmap.GetPixel(0U, 0U);
+    PDFPP_TEST_CHECK(beforeTransparentBlend.red == afterTransparentBlend.red &&
+                     beforeTransparentBlend.green == afterTransparentBlend.green &&
+                     beforeTransparentBlend.alpha == afterTransparentBlend.alpha);
+    alphaBitmap.BlendPixelInBounds(0U, 0U, {0U, 0U, 255U, 128U});
+    PDFPP_TEST_CHECK(alphaBitmap.GetPixel(0U, 0U).alpha == 192U);
+    PdfBitmap blendBitmap(1U, 1U, {100U, 150U, 200U, 255U});
+    blendBitmap.BlendPixel(0, 0, {200U, 100U, 50U, 255U}, PdfBlendMode::Multiply);
+    PDFPP_TEST_CHECK(blendBitmap.GetPixel(0U, 0U).red == 78U);
+    PDFPP_TEST_CHECK(blendBitmap.GetPixel(0U, 0U).green == 58U);
+    PDFPP_TEST_CHECK(blendBitmap.GetPixel(0U, 0U).blue == 39U);
+    PdfBitmap screenBitmap(1U, 1U, {100U, 150U, 200U, 255U});
+    screenBitmap.BlendPixel(0, 0, {200U, 100U, 50U, 255U}, PdfBlendMode::Screen);
+    PDFPP_TEST_CHECK(screenBitmap.GetPixel(0U, 0U).red > 100U);
+    PdfBitmap differenceBitmap(1U, 1U, {100U, 150U, 200U, 255U});
+    differenceBitmap.BlendPixel(0, 0, {200U, 100U, 50U, 255U}, PdfBlendMode::Difference);
+    PDFPP_TEST_CHECK(differenceBitmap.GetPixel(0U, 0U).red == 100U);
+    PdfBitmap overlayBitmap(1U, 1U, {100U, 150U, 200U, 255U});
+    overlayBitmap.BlendBitmap(blendBitmap, 0, 0, PdfBlendMode::Overlay, 128U);
+
+    PdfBitmap groupTarget(2U, 1U, PdfRgbaColor::White());
+    PdfTransparencyGroup group{PdfBitmap(2U, 1U, {0U, 0U, 0U, 0U}), false, false,
+                               PdfBlendMode::SourceOver};
+    group.bitmap.SetPixel(0, 0, {255U, 0U, 0U, 128U});
+    group.CompositeInto(groupTarget);
+    PDFPP_TEST_CHECK(groupTarget.GetPixel(0U, 0U).red > 250U);
+    PDFPP_TEST_CHECK(groupTarget.GetPixel(0U, 0U).green < 200U);
+    group.knockout = true;
+    group.bitmap.SetPixel(1, 0, {0U, 0U, 255U, 255U});
+    group.BlendInto(groupTarget);
+    PDFPP_TEST_CHECK(groupTarget.GetPixel(1U, 0U).blue == 255U);
+
+    PdfExponentialFunction function({0.0, 0.2}, {1.0, 0.8}, 2.0);
+    const auto midpoint = function.Evaluate(0.5);
+    PDFPP_TEST_CHECK(midpoint.size() == 2U);
+    PDFPP_TEST_CHECK(std::abs(midpoint[0] - 0.25) < 1.0e-9);
+    PDFPP_TEST_CHECK(std::abs(midpoint[1] - 0.35) < 1.0e-9);
+
+    PdfAxialShading shading;
+    shading.coordinates = {0.0, 0.0, 100.0, 0.0};
+    shading.function.emplace(std::vector<double>{0.0}, std::vector<double>{1.0}, 1.0);
+    const auto sample = shading.Sample(50.0, 0.0);
+    PDFPP_TEST_CHECK(sample.has_value());
+    PDFPP_TEST_CHECK(std::abs(sample->at(0) - 0.5) < 1.0e-9);
+    PDFPP_TEST_CHECK(!shading.Sample(-1.0, 0.0).has_value());
+    PdfRadialShading radial;
+    radial.coordinates = {50.0, 50.0, 0.0, 50.0, 50.0, 50.0};
+    radial.function.emplace(std::vector<double>{0.0}, std::vector<double>{1.0}, 1.0);
+    const auto radialSample = radial.Sample(50.0, 25.0);
+    PDFPP_TEST_CHECK(radialSample.has_value());
+    PDFPP_TEST_CHECK(std::abs(radialSample->at(0) - 0.5) < 1.0e-9);
+    radial.coordinates = {0.0, 0.0, 10.0, 10.0, 0.0, 20.0};
+    PDFPP_TEST_CHECK(radial.Sample(10.0, 0.0).has_value());
+    radial.extendEnd = false;
+    PDFPP_TEST_CHECK(!radial.Sample(100.0, 100.0).has_value());
+    PdfSampledFunction sampled(1U, 1U, {2U}, {0U, 65535U}, {0.0, 1.0}, {0.0, 1.0}, 16U);
+    const auto sampledValue = sampled.Evaluate(std::array<double, 1>{0.75});
+    PDFPP_TEST_CHECK(sampledValue.size() == 1U);
+    PDFPP_TEST_CHECK(sampledValue[0] > 0.9);
+    auto first = std::make_shared<const PdfExponentialFunction>(
+        std::vector<double>{0.0}, std::vector<double>{1.0}, 1.0);
+    auto second = std::make_shared<const PdfExponentialFunction>(
+        std::vector<double>{1.0}, std::vector<double>{0.0}, 1.0);
+    PdfStitchedFunction stitched({first, second}, {0.5}, {0.0, 1.0, 0.0, 1.0});
+    PDFPP_TEST_CHECK(stitched.Evaluate(0.25)[0] > 0.4);
+    PDFPP_TEST_CHECK(stitched.Evaluate(0.75)[0] < 0.6);
+    PdfCalculatorFunction calculator("3 3 mul");
+    PDFPP_TEST_CHECK(std::abs(calculator.Evaluate({}, 1)[0] - 9.0) < 1.0e-9);
+    bool rejectedOperator = false;
+    try { (void)PdfCalculatorFunction("exec").Evaluate({}, 1U); }
+    catch (const std::runtime_error&) { rejectedOperator = true; }
+    PDFPP_TEST_CHECK(rejectedOperator);
+    PdfDictionary functionDictionary;
+    PdfArray c0, c1;
+    c0.push_back(PdfObject(0.0));
+    c1.push_back(PdfObject(1.0));
+    functionDictionary.Put(PdfName("FunctionType"), PdfObject(static_cast<std::int64_t>(2)));
+    functionDictionary.Put(PdfName("C0"), PdfObject(c0));
+    functionDictionary.Put(PdfName("C1"), PdfObject(c1));
+    functionDictionary.Put(PdfName("N"), PdfObject(1.0));
+    const auto parsedFunction = ParsePdfFunction(functionDictionary);
+    PDFPP_TEST_CHECK(parsedFunction.has_value());
+    const std::array<std::byte, 10> cffIndexBytes{
+        std::byte{0}, std::byte{1}, std::byte{1}, std::byte{1}, std::byte{2},
+        std::byte{'A'}, std::byte{'B'}, std::byte{0}, std::byte{0}, std::byte{0}};
+    std::size_t cffOffset{};
+    const auto cffIndex = PdfCffParser::ParseIndex(cffIndexBytes, cffOffset);
+    PDFPP_TEST_CHECK(cffIndex.objects.size() == 1U);
+    PDFPP_TEST_CHECK(cffIndex.objects[0].size() == 1U);
+    const std::array<std::byte, 2> cffDictBytes{std::byte{139}, std::byte{15}};
+    const auto cffDict = PdfCffParser::ParseDict(cffDictBytes);
+    PDFPP_TEST_CHECK(cffDict.size() == 1U);
+    PDFPP_TEST_CHECK(cffDict[0].operands[0] == 0.0);
+    PDFPP_TEST_CHECK(overlayBitmap.GetPixel(0U, 0U).alpha == 255U);
+
     const std::string asciiHex = "48656c6c6f>";
     const auto hex = PdfFilterPipeline::DecodeAsciiHex(std::span(
         reinterpret_cast<const std::byte*>(asciiHex.data()), asciiHex.size()));
@@ -155,6 +335,7 @@ int RunCoreTests() {
     int fontEvents = 0;
     int matrixEvents = 0;
     int xobjectEvents = 0;
+    int shadingEvents = 0;
     processor.SetHandler([&](const PdfContentEvent& event) {
         if (event.type == PdfContentEventType::BeginText) ++beginText;
         if (event.type == PdfContentEventType::RenderText) rendered += event.text;
@@ -168,16 +349,33 @@ int RunCoreTests() {
             ++xobjectEvents;
             PDFPP_TEST_CHECK(event.text == "Im1");
         }
+        if (event.type == PdfContentEventType::PaintShading) {
+            ++shadingEvents;
+            PDFPP_TEST_CHECK(event.text == "Sh1");
+        }
     });
     processor.Process(
         "q BT /F1 12 Tf 1 0 0 1 72 720 Tm "
         "[(Hel) -120 (lo)] TJ ( World) Tj T* (Next) ' "
-        "0 0 (Quoted) \" ET /Im1 Do Q");
+         "0 0 (Quoted) \" ET /Im1 Do /Sh1 sh Q");
     PDFPP_TEST_CHECK(beginText == 1);
     PDFPP_TEST_CHECK(fontEvents == 1);
     PDFPP_TEST_CHECK(matrixEvents == 1);
     PDFPP_TEST_CHECK(xobjectEvents == 1);
+    PDFPP_TEST_CHECK(shadingEvents == 1);
     PDFPP_TEST_CHECK(rendered == "Hello WorldNextQuoted");
+
+    PdfDisplayList displayList;
+    processor.SetHandler([&](const PdfContentEvent& event) { displayList.Add(event); });
+    processor.Process("q BT /F1 10 Tf (A) Tj ET Q");
+    PDFPP_TEST_CHECK(!displayList.Empty());
+    PDFPP_TEST_CHECK(displayList.Events().front().type == PdfContentEventType::SaveState);
+    PDFPP_TEST_CHECK(displayList.Events().back().type == PdfContentEventType::RestoreState);
+    PDFPP_TEST_CHECK(displayList.Size() == displayList.Events().size());
+    PDFPP_TEST_CHECK(displayList.Count(PdfContentEventType::RenderText) == 1U);
+    int replayedEvents = 0;
+    displayList.Replay([&](const PdfContentEvent&) { ++replayedEvents; });
+    PDFPP_TEST_CHECK(replayedEvents == static_cast<int>(displayList.Events().size()));
 
     PdfTextExtractionRequest textRequest;
     textRequest.strategy = PdfTextExtractionStrategy::Location;
@@ -188,9 +386,11 @@ int RunCoreTests() {
         textRequest);
     PDFPP_TEST_CHECK(chunks.size() == 2);
     PDFPP_TEST_CHECK(chunks[0].fontResource == "F1");
+    PDFPP_TEST_CHECK(chunks[0].encodedText == "World");
     PDFPP_TEST_CHECK(chunks[0].sourceObjectNumber == 77);
     PDFPP_TEST_CHECK(chunks[0].boundingBox.right > chunks[0].boundingBox.left);
     PDFPP_TEST_CHECK(PdfTextExtractor::BuildText(chunks, textRequest) == "Hello\nWorld");
+
 
     PdfTextExtractionRequest regionRequest;
     regionRequest.strategy = PdfTextExtractionStrategy::Region;
@@ -220,6 +420,8 @@ int RunCoreTests() {
     simpleFontDictionary.Put(PdfName("Widths"), PdfObject(std::move(simpleWidths)));
     const auto simpleFont = PdfFontResource::Create(simpleFontDictionary);
     PDFPP_TEST_CHECK(simpleFont.GetSubtype() == PdfFontSubtype::TrueType);
+    PDFPP_TEST_CHECK(simpleFont.GetCharacterCodes("AZ").size() == 2U);
+    PDFPP_TEST_CHECK(simpleFont.GetCharacterCodes("AZ")[0] == 65U);
     PDFPP_TEST_CHECK(simpleFont.Decode("A") == std::string("\xCE\xA9"));
     PDFPP_TEST_CHECK(simpleFont.GetGlyphWidth(65) == 600);
     PDFPP_TEST_CHECK(simpleFont.GetGlyphWidth(90) == 500);

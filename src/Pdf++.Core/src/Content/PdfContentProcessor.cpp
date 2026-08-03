@@ -312,6 +312,11 @@ void PdfContentProcessor::Process(
         std::array<double, 3> strokeColor{};
         std::array<double, 3> fillColor{};
         double lineWidth{};
+        int lineCap{};
+        int lineJoin{};
+        double miterLimit{10.0};
+        double strokeAlpha{1.0};
+        double fillAlpha{1.0};
     };
     std::vector<GraphicsState> graphicsStack;
     std::size_t offset{};
@@ -355,8 +360,13 @@ void PdfContentProcessor::Process(
         else if (token == "q") {
             graphicsStack.push_back({textState.currentTransformationMatrix,
                                      textState.strokeColor,
-                                     textState.fillColor,
-                                     textState.lineWidth});
+                                      textState.fillColor,
+                                      textState.lineWidth,
+                                      textState.lineCap,
+                                      textState.lineJoin,
+                                      textState.miterLimit,
+                                      textState.strokeAlpha,
+                                      textState.fillAlpha});
             Emit(handler_, PdfContentEventType::SaveState, std::string(token), textState);
         }
         else if (token == "Q") {
@@ -367,6 +377,11 @@ void PdfContentProcessor::Process(
                 textState.strokeColor = state.strokeColor;
                 textState.fillColor = state.fillColor;
                 textState.lineWidth = state.lineWidth;
+                textState.lineCap = state.lineCap;
+                textState.lineJoin = state.lineJoin;
+                textState.miterLimit = state.miterLimit;
+                textState.strokeAlpha = state.strokeAlpha;
+                textState.fillAlpha = state.fillAlpha;
             }
             Emit(handler_, PdfContentEventType::RestoreState, std::string(token), textState);
         }
@@ -384,6 +399,19 @@ void PdfContentProcessor::Process(
         else if (token == "w") {
             textState.lineWidth = std::max(0.0, NumberAt(operands, 0, 1.0));
             Emit(handler_, PdfContentEventType::SetLineWidth, std::string(token), textState, {}, {textState.lineWidth});
+        }
+        else if (token == "J") {
+            textState.lineCap = std::clamp(static_cast<int>(NumberAt(operands, 0)), 0, 2);
+        }
+        else if (token == "j") {
+            textState.lineJoin = std::clamp(static_cast<int>(NumberAt(operands, 0)), 0, 2);
+        }
+        else if (token == "M") {
+            textState.miterLimit = std::max(1.0, NumberAt(operands, 0, 10.0));
+        }
+        else if (token == "gs") {
+            Emit(handler_, PdfContentEventType::UnknownOperator, std::string(token), textState,
+                 NameAt(operands, 0));
         }
         else if (token == "RG" || token == "rg") {
             auto& color = token == "RG" ? textState.strokeColor : textState.fillColor;
@@ -469,6 +497,7 @@ void PdfContentProcessor::Process(
                      textState.currentTransformationMatrix.end()));
         }
         else if (token == "Do") Emit(handler_, PdfContentEventType::InvokeXObject, std::string(token), textState, NameAt(operands, 0));
+        else if (token == "sh") Emit(handler_, PdfContentEventType::PaintShading, std::string(token), textState, NameAt(operands, 0));
         else if (token == "m" || token == "l" || token == "c" || token == "v" || token == "y" ||
                  token == "h" || token == "re" || token == "S" || token == "s" || token == "f" ||
                  token == "F" || token == "f*" || token == "B" || token == "B*" || token == "b" ||

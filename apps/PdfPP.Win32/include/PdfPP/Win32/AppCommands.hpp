@@ -45,5 +45,6 @@ inline constexpr int ID_CLOSE_TAB = 1037;
 inline constexpr UINT WM_RENDER_COMPLETE = WM_APP + 41;
 inline constexpr UINT WM_OPEN_COMPLETE = WM_APP + 42;
 inline constexpr UINT_PTR RENDER_TIMER = 41;
+inline constexpr UINT_PTR ZOOM_TIMER = 42;
 
 } // namespace PdfPP::Win32::Command

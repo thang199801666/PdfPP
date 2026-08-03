@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <vector>
+#include <array>
 
 namespace CPPPdf {
 
@@ -54,6 +55,21 @@ struct PdfImageInfo {
     PdfReference softMaskReference{};
     PdfReference explicitMaskReference{};
     PdfRectangle boundingBox{};
+    double fillAlpha{1.0};
+    double strokeAlpha{1.0};
+    std::vector<std::byte> colorSpaceData;
+    std::uint32_t colorSpaceHighValue{};
+    std::uint8_t colorSpaceComponents{};
+    std::array<std::uint8_t, 4> separationAlternate{};
+    bool hasSeparationAlternate{};
+    std::vector<double> separationC0;
+    std::vector<double> separationC1;
+    double separationExponent{1.0};
+    bool hasSeparationFunction{};
+    std::uint32_t alternateComponentCount{};
+    std::uint32_t deviceNComponentCount{};
+    bool hasIccProfile{};
+    std::vector<std::byte> iccProfileBytes;
 };
 
 struct PdfExtractedImage {

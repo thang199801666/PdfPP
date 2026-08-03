@@ -18,6 +18,14 @@ int pageLeft(const RECT& client, const int width) {
     return std::max(scaleDip(12), static_cast<int>((client.right - width) / 2));
 }
 
+int pageAtScrollOffset(const int offset) {
+    if (pagePixelOffsets.empty()) return 0;
+    const auto it = std::upper_bound(pagePixelOffsets.begin(), pagePixelOffsets.end(),
+        std::max(0, offset));
+    return std::clamp(static_cast<int>(std::distance(pagePixelOffsets.begin(), it)) - 1,
+        0, std::max(0, pageCount - 1));
+}
+
 void updateCommandState() {
     if (!mainMenu) return;
     const bool hasDocument = document && pageCount > 0;

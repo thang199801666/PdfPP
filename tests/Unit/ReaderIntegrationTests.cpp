@@ -157,7 +157,7 @@ std::vector<std::byte> makeFontResourcePdf() {
 
 std::vector<std::byte> makeFormXObjectPdf() {
     std::string pdf = "%PDF-1.4\n";
-    std::array<std::size_t, 7> offsets{};
+    std::array<std::size_t, 8> offsets{};
 
     auto addObject = [&](const std::size_t number, const std::string_view body) {
         offsets[number] = pdf.size();
@@ -173,23 +173,24 @@ std::vector<std::byte> makeFormXObjectPdf() {
     const std::string pageContent = "/Fm1 Do";
     addObject(4, "<< /Length " + std::to_string(pageContent.size()) + ">>\nstream\n" +
                  pageContent + "\nendstream");
-    const std::string formContent = "BT /F2 10 Tf 1 0 0 1 5 7 Tm (AA) Tj ET";
+    const std::string formContent = "/GS1 gs BT /F2 10 Tf 1 0 0 1 5 7 Tm (AA) Tj ET";
     addObject(5, "<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] "
                  "/Matrix [2 0 0 2 100 200] "
-                 "/Resources << /Font << /F2 6 0 R >> >> "
+                  "/Resources << /Font << /F2 6 0 R >> /ExtGState << /GS1 7 0 R >> >> "
                  "/Length " + std::to_string(formContent.size()) + ">>\nstream\n" +
                  formContent + "\nendstream");
     addObject(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
                  "/FirstChar 65 /Widths [600] "
-                 "/Encoding << /BaseEncoding /WinAnsiEncoding /Differences [65 /Omega] >> >>");
+                  "/Encoding << /BaseEncoding /WinAnsiEncoding /Differences [65 /Omega] >> >>");
+    addObject(7, "<< /ca 0.25 /CA 0.5 >>");
 
     const std::size_t xrefOffset = pdf.size();
     std::ostringstream xref;
-    xref << "xref\n0 7\n0000000000 65535 f \n";
+    xref << "xref\n0 8\n0000000000 65535 f \n";
     for (std::size_t i = 1; i < offsets.size(); ++i) {
         xref << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
     }
-    xref << "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n"
+    xref << "trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n"
          << xrefOffset << "\n%%EOF\n";
     pdf += xref.str();
 
@@ -302,6 +303,80 @@ int RunReaderIntegrationTests() {
         return 28;
     }
 
+    auto malformedXrefBytes = bytes;
+    std::string malformedXref(reinterpret_cast<const char*>(malformedXrefBytes.data()),
+                              malformedXrefBytes.size());
+    const std::size_t subsection = malformedXref.find("0 5\n");
+    if (subsection != std::string::npos) {
+        malformedXref.replace(subsection, 4U, "0 5X");
+        for (std::size_t index = 0; index < malformedXref.size(); ++index) {
+            malformedXrefBytes[index] = static_cast<std::byte>(
+                static_cast<unsigned char>(malformedXref[index]));
+        }
+    }
+    CPPPdf::PdfReaderOptions strictXrefOptions;
+    strictXrefOptions.strictParsing = true;
+    bool malformedXrefRejected = false;
+    try {
+        (void)CPPPdf::PdfDocument::Open(
+            std::span<const std::byte>(malformedXrefBytes), strictXrefOptions);
+    } catch (const CPPPdf::PdfException& error) {
+        malformedXrefRejected = error.code() == CPPPdf::PdfErrorCode::MalformedXref;
+    }
+    if (!malformedXrefRejected) {
+        std::cerr << "Strict xref parsing accepted a malformed subsection header.\n";
+        return 29;
+    }
+
+    auto malformedPrevBytes = bytes;
+    std::string malformedPrev(reinterpret_cast<const char*>(malformedPrevBytes.data()),
+                              malformedPrevBytes.size());
+    const std::size_t prevTrailer = malformedPrev.find("/Root 1 0 R >>");
+    if (prevTrailer != std::string::npos) {
+        malformedPrev.replace(prevTrailer, 14U, "/Root 1 0 R /Prev -1 >>");
+        malformedPrevBytes.resize(malformedPrev.size());
+        for (std::size_t index = 0; index < malformedPrev.size(); ++index) {
+            malformedPrevBytes[index] = static_cast<std::byte>(
+                static_cast<unsigned char>(malformedPrev[index]));
+        }
+    }
+    bool malformedPrevRejected = false;
+    try {
+        (void)CPPPdf::PdfDocument::Open(
+            std::span<const std::byte>(malformedPrevBytes), strictXrefOptions);
+    } catch (const CPPPdf::PdfException& error) {
+        malformedPrevRejected = error.code() == CPPPdf::PdfErrorCode::MalformedXref;
+    }
+    if (!malformedPrevRejected) {
+        std::cerr << "Strict xref parsing accepted an invalid Prev offset.\n";
+        return 31;
+    }
+
+    auto cyclicPrevBytes = bytes;
+    std::string cyclicPrev(reinterpret_cast<const char*>(cyclicPrevBytes.data()), cyclicPrevBytes.size());
+    const std::size_t xrefMarker = cyclicPrev.find("xref\n");
+    const std::size_t cyclicTrailer = cyclicPrev.find("/Root 1 0 R >>");
+    if (xrefMarker != std::string::npos && cyclicTrailer != std::string::npos) {
+        cyclicPrev.replace(cyclicTrailer, 14U,
+            "/Root 1 0 R /Prev " + std::to_string(xrefMarker) + " >>");
+        cyclicPrevBytes.resize(cyclicPrev.size());
+        for (std::size_t index = 0; index < cyclicPrev.size(); ++index) {
+            cyclicPrevBytes[index] = static_cast<std::byte>(
+                static_cast<unsigned char>(cyclicPrev[index]));
+        }
+    }
+    bool cyclicPrevRejected = false;
+    try {
+        (void)CPPPdf::PdfDocument::Open(
+            std::span<const std::byte>(cyclicPrevBytes), strictXrefOptions);
+    } catch (const CPPPdf::PdfException& error) {
+        cyclicPrevRejected = error.code() == CPPPdf::PdfErrorCode::MalformedXref;
+    }
+    if (!cyclicPrevRejected) {
+        std::cerr << "Strict xref parsing accepted a cyclic revision chain.\n";
+        return 32;
+    }
+
     document.ClearObjectCache();
     (void)document.GetObject(CPPPdf::PdfReference{1U, 0U});
     (void)document.GetObject(CPPPdf::PdfReference{1U, 1U});
@@ -344,6 +419,31 @@ int RunReaderIntegrationTests() {
     }
 
     const auto objectStreamBytes = makeObjectStreamPdf();
+    auto malformedXrefStreamBytes = objectStreamBytes;
+    std::string malformedXrefStream(reinterpret_cast<const char*>(malformedXrefStreamBytes.data()),
+                                    malformedXrefStreamBytes.size());
+    const std::size_t widthMarker = malformedXrefStream.find("/W [1 4 2]");
+    if (widthMarker != std::string::npos) {
+        malformedXrefStream[widthMarker + 4U] = '9';
+        for (std::size_t index = 0; index < malformedXrefStream.size(); ++index) {
+            malformedXrefStreamBytes[index] = static_cast<std::byte>(
+                static_cast<unsigned char>(malformedXrefStream[index]));
+        }
+    }
+    CPPPdf::PdfReaderOptions strictXrefStreamOptions;
+    strictXrefStreamOptions.strictParsing = true;
+    bool malformedXrefStreamRejected = false;
+    try {
+        (void)CPPPdf::PdfDocument::Open(
+            std::span<const std::byte>(malformedXrefStreamBytes), strictXrefStreamOptions);
+    } catch (const CPPPdf::PdfException& error) {
+        malformedXrefStreamRejected = error.code() == CPPPdf::PdfErrorCode::MalformedXref;
+    }
+    if (!malformedXrefStreamRejected) {
+        std::cerr << "Strict xref stream parsing accepted an invalid field width.\n";
+        return 30;
+    }
+
     CPPPdf::PdfReaderOptions objectStreamOptions;
     objectStreamOptions.limits.maxCachedObjects = 0U;
     objectStreamOptions.limits.maxCachedObjectStreams = 1U;
@@ -434,6 +534,11 @@ int RunReaderIntegrationTests() {
         std::cerr << "Form XObject matrix was not applied to text geometry.\n";
         return 9;
     }
+    if (std::abs(formChunks.front().fillAlpha - 0.25) > 0.01 ||
+        std::abs(formChunks.front().strokeAlpha - 0.5) > 0.01) {
+        std::cerr << "Form XObject ExtGState alpha was not scoped correctly.\n";
+        return 26;
+    }
 
     const auto inlineBytes = makeInlineImagePdf();
     auto inlineDocument = CPPPdf::PdfDocument::Open(std::span<const std::byte>(inlineBytes));
@@ -461,6 +566,11 @@ int RunReaderIntegrationTests() {
         std::to_integer<unsigned int>(maskedImages.front().alphaBytes.front()) != 128U) {
         std::cerr << "Soft-mask image extraction failed.\n";
         return 12;
+    }
+    if (maskedImages.front().info.fillAlpha != 1.0 ||
+        maskedImages.front().info.strokeAlpha != 1.0) {
+        std::cerr << "Soft-mask image graphics alpha state was not preserved.\n";
+        return 27;
     }
 
 

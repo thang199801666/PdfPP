@@ -887,7 +887,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         objects[pageLabelsObject] = labels.str();
     }
     objects[base14Font]="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
-    for(std::size_t i=0;i<state_->extGStates.size();++i){ const auto& gs=state_->extGStates[i]; std::ostringstream d; d<<"<< /Type /ExtGState /CA "<<gs.strokeOpacity<<" /ca "<<gs.fillOpacity<<" >>"; objects[extGStateIds[i]]=d.str(); }
+    for(std::size_t i=0;i<state_->extGStates.size();++i){ const auto& gs=state_->extGStates[i]; const auto bm=gs.blendMode==PdfBlendMode::Multiply?"/Multiply":gs.blendMode==PdfBlendMode::Screen?"/Screen":gs.blendMode==PdfBlendMode::Darken?"/Darken":gs.blendMode==PdfBlendMode::Lighten?"/Lighten":gs.blendMode==PdfBlendMode::Overlay?"/Overlay":gs.blendMode==PdfBlendMode::Difference?"/Difference":gs.blendMode==PdfBlendMode::Exclusion?"/Exclusion":"/Normal"; std::ostringstream d; d<<"<< /Type /ExtGState /CA "<<gs.strokeOpacity<<" /ca "<<gs.fillOpacity<<" /BM "<<bm<<" >>"; objects[extGStateIds[i]]=d.str(); }
     for(std::size_t i=0;i<state_->images.size();++i){
         const auto& image=state_->images[i].image; std::string bytes; const char* filterName=nullptr;
         if(image.GetEncoding()==PdfImageEncoding::Dct){const auto span=image.GetBytes();bytes.assign(reinterpret_cast<const char*>(span.data()),span.size());filterName="/DCTDecode";}else{bytes=compressBytes(image.GetBytes());filterName="/FlateDecode";}

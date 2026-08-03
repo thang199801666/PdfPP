@@ -4,6 +4,8 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <cmath>
 #include <system_error>
 
 namespace CPPPdf::Internal {
@@ -46,18 +48,33 @@ class Parser {
 public:
     Parser(std::string_view s, std::size_t maxDepth) : s_(s), maxDepth_(maxDepth) {}
 
+    void Finish() {
+        Skip();
+        if (Starts("endobj") && (p_ + 6U == s_.size() || Delim(s_[p_ + 6U]))) {
+            p_ += 6U;
+            Skip();
+        }
+        if (!End()) {
+            throw PdfException(PdfErrorCode::MalformedObject,
+                "Unexpected trailing data after PDF object.");
+        }
+    }
+
     PdfObject ParseValue(std::size_t depth = 0) {
         if (depth > maxDepth_) throw PdfException(PdfErrorCode::MalformedObject, "PDF object recursion limit exceeded.");
         Skip(); if (End()) return {};
-        if (Match("null")) return {};
-        if (Match("true")) return PdfObject(true);
-        if (Match("false")) return PdfObject(false);
+        if (MatchKeyword("null")) return {};
+        if (MatchKeyword("true")) return PdfObject(true);
+        if (MatchKeyword("false")) return PdfObject(false);
         if (Peek('/')) return PdfObject(ParseName());
         if (Peek('(')) return PdfObject(ParseLiteralString());
         if (Starts("<<")) {
             PdfDictionary dictionary = ParseDictionary(depth + 1);
             if (HasStreamKeyword()) {
-                return PdfObject(PdfStream(std::move(dictionary), ParseStreamData(dictionary)));
+                // Resolve the direct /Length before moving the dictionary into
+                // the stream object.
+                auto data = ParseStreamData(dictionary);
+                return PdfObject(PdfStream(std::move(dictionary), std::move(data)));
             }
             return PdfObject(std::move(dictionary));
         }
@@ -80,8 +97,15 @@ private:
     char Current() const { return End() ? '\0' : s_[p_]; }
     bool Peek(char c) const { return Current() == c; }
     bool Starts(std::string_view t) const { return p_ + t.size() <= s_.size() && s_.substr(p_, t.size()) == t; }
-    bool Match(std::string_view t) { Skip(); if (!Starts(t)) return false; p_ += t.size(); return true; }
     static bool Delim(char c) { return std::isspace(static_cast<unsigned char>(c)) || c == '/' || c == '<' || c == '>' || c == '[' || c == ']' || c == '(' || c == ')' || c == '%'; }
+    bool MatchKeyword(std::string_view t) {
+        Skip();
+        if (!Starts(t)) return false;
+        const std::size_t after = p_ + t.size();
+        if (after < s_.size() && !Delim(s_[after])) return false;
+        p_ = after;
+        return true;
+    }
 
     PdfName ParseName() {
         ++p_; std::string v;
@@ -120,7 +144,21 @@ private:
                 case 'f': out += '\f'; break;
                 case '\n': break;
                 case '\r': if (!End() && Current() == '\n') ++p_; break;
-                default: out += c;
+                default:
+                    if (c >= '0' && c <= '7') {
+                        int value = c - '0';
+                        for (int digits = 1; digits < 3 && !End(); ++digits) {
+                            const char next = Current();
+                            if (next < '0' || next > '7') break;
+                            value = value * 8 + (next - '0');
+                            ++p_;
+                        }
+                        out.push_back(static_cast<char>(value & 0xff));
+                    } else {
+                        // PDF treats an unknown escape as the escaped byte,
+                        // which also covers escaped parentheses and backslash.
+                        out += c;
+                    }
                 }
                 continue;
             }
@@ -190,7 +228,8 @@ private:
             double value{};
             const auto parsed = std::from_chars(token.data(), token.data() + token.size(), value,
                                                 std::chars_format::general);
-            if (parsed.ec == std::errc{} && parsed.ptr == token.data() + token.size()) {
+            if (parsed.ec == std::errc{} && parsed.ptr == token.data() + token.size() &&
+                std::isfinite(value)) {
                 return PdfObject(value);
             }
             // Some older standard libraries have incomplete floating-point
@@ -201,11 +240,17 @@ private:
             if (end != temporary.c_str() + temporary.size()) {
                 throw PdfException(PdfErrorCode::MalformedObject, "Invalid real number.");
             }
+            if (!std::isfinite(value)) {
+                throw PdfException(PdfErrorCode::MalformedObject,
+                    "PDF real number is not finite.");
+            }
             return PdfObject(value);
         }
         std::int64_t first{};
         auto r = std::from_chars(token.data(), token.data() + token.size(), first);
-        if (r.ec != std::errc{}) throw PdfException(PdfErrorCode::MalformedObject, "Invalid number.");
+        if (r.ec != std::errc{} || r.ptr != token.data() + token.size()) {
+            throw PdfException(PdfErrorCode::MalformedObject, "Invalid PDF integer.");
+        }
         const auto save = p_;
         Skip();
         const auto secondStart = p_;
@@ -213,9 +258,15 @@ private:
         const auto secondToken = s_.substr(secondStart, p_ - secondStart);
         std::int64_t second{};
         const auto r2 = std::from_chars(secondToken.data(), secondToken.data() + secondToken.size(), second);
-        if (r2.ec == std::errc{}) {
+        if (r2.ec == std::errc{} && r2.ptr == secondToken.data() + secondToken.size() &&
+            first >= 0 && static_cast<std::uint64_t>(first) <= std::numeric_limits<std::uint32_t>::max() &&
+            second >= 0 && static_cast<std::uint64_t>(second) <= std::numeric_limits<std::uint16_t>::max()) {
             Skip();
-            if (Peek('R')) { ++p_; return PdfObject::IndirectReference(static_cast<std::uint32_t>(first), static_cast<std::uint16_t>(second)); }
+            if (Peek('R') && (p_ + 1U == s_.size() || Delim(s_[p_ + 1U]))) {
+                ++p_;
+                return PdfObject::IndirectReference(static_cast<std::uint32_t>(first),
+                    static_cast<std::uint16_t>(second));
+            }
         }
         p_ = save;
         return PdfObject(first);
@@ -246,9 +297,17 @@ private:
         // endstream marker. An indirect /Length cannot be resolved here.
         std::size_t dataEnd = std::string_view::npos;
         if (const auto* lengthObject = dictionary.Find(PdfName("Length"))) {
-            if (const auto length = lengthObject->AsInteger(); length.has_value() && *length >= 0) {
+            if (const auto length = lengthObject->AsInteger(); length.has_value()) {
+                if (*length < 0) {
+                    throw PdfException(PdfErrorCode::MalformedObject,
+                        "PDF stream length cannot be negative.");
+                }
                 const auto requested = static_cast<std::size_t>(*length);
-                if (requested <= s_.size() - dataStart) dataEnd = dataStart + requested;
+                if (requested > s_.size() - dataStart) {
+                    throw PdfException(PdfErrorCode::MalformedObject,
+                        "PDF stream is shorter than its declared length.");
+                }
+                dataEnd = dataStart + requested;
             }
         }
         if (dataEnd == std::string_view::npos) {
@@ -263,6 +322,14 @@ private:
         if (!bytes.empty()) {
             std::memcpy(bytes.data(), s_.data() + dataStart, bytes.size());
         }
+        p_ = dataEnd;
+        if (Peek('\r')) { ++p_; if (Peek('\n')) ++p_; }
+        else if (Peek('\n')) ++p_;
+        if (!Starts("endstream")) {
+            throw PdfException(PdfErrorCode::MalformedObject,
+                "PDF stream is missing endstream marker.");
+        }
+        p_ += 9U;
         return bytes;
     }
 
@@ -274,6 +341,9 @@ private:
 
 PdfObject PdfObjectParser::Parse(std::string_view source, std::size_t maxDepth) {
     const std::string_view body = StripIndirectHeader(source);
-    return Parser(body, maxDepth).ParseValue();
+    Parser parser(body, maxDepth);
+    PdfObject result = parser.ParseValue();
+    parser.Finish();
+    return result;
 }
 } // namespace CPPPdf::Internal

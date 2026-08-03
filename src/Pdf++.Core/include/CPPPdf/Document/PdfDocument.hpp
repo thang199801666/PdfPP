@@ -17,13 +17,18 @@
 #include <CPPPdf/IO/PdfReader.hpp>
 #include <CPPPdf/Core/PdfTypes.hpp>
 #include <CPPPdf/Content/PdfContentProcessor.hpp>
+#include <CPPPdf/Rendering/PdfBitmap.hpp>
 #include <CPPPdf/Objects/PdfObject.hpp>
 #include <CPPPdf/Text/PdfTextExtractor.hpp>
 #include <CPPPdf/Graphics/PdfImage.hpp>
+#include <CPPPdf/Rendering/PdfShading.hpp>
 
 namespace CPPPdf {
 
+class PdfFontResource;
+
 class PdfPage;
+class PdfDisplayList;
 class PdfFontResource;
 namespace Internal { class PdfObjectResolver; class PdfStandardSecurity; class PdfIncrementalWriter; }
 
@@ -58,6 +63,7 @@ public:
     [[nodiscard]] std::uint64_t GetFileSize() const noexcept { return static_cast<std::uint64_t>(bytes_.size()); }
     [[nodiscard]] std::size_t GetXrefEntryCount() const noexcept { return xref_.size(); }
     [[nodiscard]] std::size_t GetPageCount() const { return pageCount(); }
+    [[nodiscard]] bool HasPage(std::size_t pageIndex) const noexcept { return pageIndex < pageCount(); }
 
     // Compatibility accessors retained for existing clients.
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return GetPath(); }
@@ -121,10 +127,36 @@ public:
     [[nodiscard]] std::vector<PdfTextChunk> ExtractTextChunks(
         std::size_t pageIndex,
         const PdfTextExtractionRequest& request = {}) const;
+    [[nodiscard]] std::shared_ptr<const PdfFontResource> ResolvePageFont(
+        std::size_t pageIndex, std::string_view resourceName) const;
+    [[nodiscard]] std::shared_ptr<const PdfFontResource> ResolveFont(
+        std::size_t pageIndex, std::uint32_t resourceObjectNumber,
+        std::string_view resourceName) const;
+    [[nodiscard]] std::array<double, 2> ResolvePageExtGStateAlpha(
+        std::size_t pageIndex, std::string_view resourceName) const;
+    [[nodiscard]] std::array<double, 2> ResolveExtGStateAlpha(
+        std::size_t pageIndex, std::uint32_t resourceObjectNumber,
+        std::string_view resourceName) const;
+    [[nodiscard]] std::pair<std::array<double, 2>, PdfBlendMode> ResolveExtGState(
+        std::size_t pageIndex, std::uint32_t resourceObjectNumber,
+        std::string_view resourceName) const;
+    [[nodiscard]] std::pair<bool, bool> ResolveTransparencyFlags(
+        std::size_t pageIndex, std::uint32_t resourceObjectNumber,
+        std::string_view resourceName) const;
+    [[nodiscard]] std::optional<PdfDictionary> ResolveShading(
+        std::size_t pageIndex, std::uint32_t resourceObjectNumber,
+        std::string_view resourceName) const;
+    [[nodiscard]] std::optional<PdfResolvedShading> ResolveAxialShading(
+        std::size_t pageIndex, std::uint32_t resourceObjectNumber,
+        std::string_view resourceName) const;
+    [[nodiscard]] std::optional<PdfResolvedShading> ResolveRadialShading(
+        std::size_t pageIndex, std::uint32_t resourceObjectNumber,
+        std::string_view resourceName) const;
     using PdfContentEventHandler = std::function<void(const PdfContentEvent&)>;
     void ForEachPageContentEvent(
         std::size_t pageIndex,
         const PdfContentEventHandler& handler) const;
+    [[nodiscard]] PdfDisplayList BuildPageDisplayList(std::size_t pageIndex) const;
     [[nodiscard]] std::string ExtractText(
         std::size_t pageIndex,
         const PdfTextExtractionRequest& request) const;

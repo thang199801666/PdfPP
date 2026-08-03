@@ -66,15 +66,18 @@
     <ClInclude Include="include\CPPPdf\Fonts\PdfFont.hpp" />
     <ClInclude Include="include\CPPPdf\Fonts\PdfFontResource.hpp" />
     <ClInclude Include="include\CPPPdf\Fonts\PdfTrueTypeFont.hpp" />
+    <ClInclude Include="include\CPPPdf\Fonts\PdfCff.hpp" />
     <ClInclude Include="include\CPPPdf\Content\PdfContentProcessor.hpp" />
     <ClInclude Include="include\CPPPdf\Writer\PdfWriter.hpp" />
     <ClInclude Include="include\CPPPdf\Security\PdfSecurity.hpp" />
     <ClInclude Include="src\Internal\Security\PdfStandardSecurity.hpp" />
     <ClInclude Include="include\CPPPdf\Graphics\PdfCanvas.hpp" />
     <ClInclude Include="include\CPPPdf\Graphics\PdfImage.hpp" />
+    <ClInclude Include="include\CPPPdf\Graphics\PdfFunction.hpp" />
     <ClInclude Include="include\CPPPdf\Rendering.hpp" />
     <ClInclude Include="include\CPPPdf\Rendering\PdfBitmap.hpp" />
     <ClInclude Include="include\CPPPdf\Rendering\PdfPageRenderer.hpp" />
+    <ClInclude Include="include\CPPPdf\Rendering\PdfShading.hpp" />
     <ClInclude Include="src\Writer\PdfWriterState.hpp" />
     <ClInclude Include="include\CPPPdf\Text\PdfTextExtractor.hpp" />
     <ClInclude Include="include\CPPPdf\Text\PdfTextSearch.hpp" />
@@ -109,6 +112,7 @@
     <ClCompile Include="src\Fonts\PdfFont.cpp" />
     <ClCompile Include="src\Fonts\PdfFontResource.cpp" />
     <ClCompile Include="src\Fonts\PdfTrueTypeFont.cpp" />
+    <ClCompile Include="src\Fonts\PdfCff.cpp" />
     <ClCompile Include="src\Content\PdfContentProcessor.cpp" />
     <ClCompile Include="src\Writer\PdfWriter.cpp" />
     <ClCompile Include="src\Security\PdfStandardSecurity.cpp" />
@@ -116,8 +120,10 @@
     <ClCompile Include="src\Security\PdfPasswordManager.cpp" />
     <ClCompile Include="src\Graphics\PdfCanvas.cpp" />
     <ClCompile Include="src\Graphics\PdfImage.cpp" />
+    <ClCompile Include="src\Graphics\PdfFunction.cpp" />
     <ClCompile Include="src\Rendering\PdfBitmap.cpp" />
     <ClCompile Include="src\Rendering\PdfPageRenderer.cpp" />
+    <ClCompile Include="src\Rendering\PdfShading.cpp" />
     <ClCompile Include="src\Text\PdfTextExtractor.cpp" />
     <ClCompile Include="src\Text\PdfTextSearch.cpp" />
     <ClCompile Include="src\Text\PdfTextDocumentIndex.cpp" />

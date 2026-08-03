@@ -9,6 +9,7 @@
 #include "CPPPdf/Fonts/PdfFontResource.hpp"
 #include "CPPPdf/Graphics/PdfImage.hpp"
 #include "CPPPdf/Content/PdfContentProcessor.hpp"
+#include "CPPPdf/Rendering/PdfDisplayList.hpp"
 
 #include <algorithm>
 #include <array>
@@ -150,7 +151,9 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
         ch = value[i];
         switch (ch) {
         case 'n': result.push_back('\n'); break;
-        case 'r': result.push_back('\r'); break;
+        case 'r':
+            if (i + 1 < value.size() && value[i + 1] == '\n') ++i;
+            break;
         case 't': result.push_back('\t'); break;
         case 'b': result.push_back('\b'); break;
         case 'f': result.push_back('\f'); break;
@@ -370,7 +373,7 @@ using PageFontMap = std::unordered_map<std::string, PdfFontResource>;
 void attachPageFontResolver(
     PdfTextExtractionRequest& request,
     const std::shared_ptr<PageFontMap>& fonts) {
-    request.fontResolver = [fonts](const std::string_view resourceName)
+    request.fontResolver = [fonts](const std::uint32_t, const std::string_view resourceName)
         -> const PdfFontResource* {
         const auto it = fonts->find(std::string(resourceName));
         return it == fonts->end() ? nullptr : &it->second;
@@ -441,6 +444,7 @@ void extractContentRecursively(
 
     const auto fonts = buildFontMap(document, resources);
     attachPageFontResolver(request, fonts);
+    request.resourceObjectNumber = request.sourceObjectNumber;
     request.xObjectHandler = [&](const std::string_view resourceName,
                                  const std::array<double, 6>& invocationCtm,
                                  std::vector<PdfTextChunk>& destination) {
@@ -531,12 +535,16 @@ void processPageContentRecursively(
     const StreamDecoder& decodeStream,
     std::unordered_set<std::uint64_t>& activeForms,
     const std::size_t depth,
+    const std::uint32_t resourceObjectNumber,
     const PdfDocument::PdfContentEventHandler& handler) {
     if (depth > 32U || !handler) return;
 
     PdfContentProcessor processor;
     processor.SetHandler([&](const PdfContentEvent& event) {
-        handler(event);
+        PdfContentEvent scopedEvent = event;
+        scopedEvent.resourceScope = depth == 0U ? "Page" : "Form" + std::to_string(depth);
+        scopedEvent.resourceObjectNumber = resourceObjectNumber;
+        handler(scopedEvent);
         if (event.type != PdfContentEventType::InvokeXObject || resources == nullptr) return;
 
         const auto* xObjects = objectDictionary(document, resources->Find(PdfName("XObject")));
@@ -589,7 +597,8 @@ void processPageContentRecursively(
             childContent.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         }
         processPageContentRecursively(document, childContent, childResources, childState,
-                                      decodeStream, activeForms, depth + 1U, handler);
+                                      decodeStream, activeForms, depth + 1U,
+                                      reference.objectNumber, handler);
 
         if (reference.objectNumber != 0U) {
             const std::uint64_t key =
@@ -640,6 +649,64 @@ void processPageContentRecursively(
     if (value == "DeviceN") return PdfImageColorSpace::DeviceN;
     if (value == "Pattern") return PdfImageColorSpace::Pattern;
     return PdfImageColorSpace::Unknown;
+}
+
+void imageColorSpaceMetadata(const PdfDocument& document, const PdfDictionary& dictionary, PdfImageInfo& info) {
+    const auto* object = dictionary.Find(PdfName("ColorSpace"));
+    if (object == nullptr) object = dictionary.Find(PdfName("CS"));
+    const auto* array = object ? object->AsArray() : nullptr;
+    if (array == nullptr || array->size() < 2U) return;
+    const auto* name = array->at(0).AsName();
+    if (name == nullptr) return;
+    if (name->value() == "Indexed" || name->value() == "I") {
+        info.colorSpaceHighValue = static_cast<std::uint32_t>(array->at(2).AsInteger().value_or(255));
+        if (const auto* lookup = array->at(3).AsString()) {
+            const auto& bytes = *lookup;
+            info.colorSpaceData.assign(reinterpret_cast<const std::byte*>(bytes.data()),
+                                       reinterpret_cast<const std::byte*>(bytes.data() + bytes.size()));
+        }
+    } else if (name->value() == "Separation" && array->size() >= 4U) {
+        info.colorSpaceComponents = 1U;
+        if (const auto* alternate = array->at(2).AsName()) {
+            info.hasSeparationAlternate = alternate->value() == "DeviceGray" ||
+                alternate->value() == "DeviceRGB" || alternate->value() == "DeviceCMYK";
+            info.separationAlternate[0] = alternate->value() == "DeviceGray" ? 1U :
+                (alternate->value() == "DeviceCMYK" ? 4U : 3U);
+        }
+        const PdfObject* functionObject = &array->at(3);
+        if (const auto reference = functionObject->AsReference()) {
+            functionObject = &document.GetObject({reference->first, reference->second});
+        }
+        const auto* function = functionObject->AsDictionary();
+        if (function != nullptr && function->Find(PdfName("FunctionType")) != nullptr &&
+            function->Find(PdfName("FunctionType"))->AsInteger().value_or(0) == 2) {
+            const auto* c0 = function->GetAsArray(PdfName("C0"));
+            const auto* c1 = function->GetAsArray(PdfName("C1"));
+            if (c0 != nullptr && c1 != nullptr && c0->size() == c1->size() && !c0->empty()) {
+                for (std::size_t index = 0; index < c0->size(); ++index) {
+                    info.separationC0.push_back(objectNumberValue(c0->at(index), 0.0));
+                    info.separationC1.push_back(objectNumberValue(c1->at(index), 1.0));
+                }
+                if (const auto* exponent = function->Find(PdfName("N"))) {
+                    info.separationExponent = objectNumberValue(*exponent, 1.0);
+                    info.hasSeparationFunction = true;
+                }
+            }
+        }
+    } else if (name->value() == "ICCBased") {
+        const PdfObject* profile = &array->at(1);
+        if (const auto reference = profile->AsReference()) profile = &document.GetObject({reference->first, reference->second});
+        if (const auto* stream = profile->AsStream()) {
+            info.hasIccProfile = true;
+            info.colorSpaceComponents = static_cast<std::uint8_t>(stream->dictionary().Find(PdfName("N"))
+                ? stream->dictionary().Find(PdfName("N"))->AsInteger().value_or(0) : 0);
+            const auto bytes = stream->bytes();
+            info.iccProfileBytes.assign(bytes.begin(), bytes.end());
+        }
+    } else if (name->value() == "DeviceN" && array->size() >= 2U) {
+        if (const auto* names = array->at(1).AsArray()) info.deviceNComponentCount = static_cast<std::uint32_t>(names->size());
+        info.colorSpaceComponents = static_cast<std::uint8_t>(std::min<std::uint32_t>(255U, info.deviceNComponentCount));
+    }
 }
 
 [[nodiscard]] std::vector<std::string> imageFilterNames(const PdfDictionary& dictionary) {
@@ -817,6 +884,7 @@ void processPageContentRecursively(
     image.info.bitsPerComponent = static_cast<std::uint16_t>(dictionaryUnsigned(
         stream.dictionary(), "BitsPerComponent", dictionaryUnsigned(stream.dictionary(), "BPC", 8U)));
     image.info.colorSpace = imageColorSpace(stream.dictionary());
+    imageColorSpaceMetadata(document, stream.dictionary(), image.info);
     image.info.imageMask = dictionaryBoolean(stream.dictionary(), "ImageMask",
         dictionaryBoolean(stream.dictionary(), "IM"));
     image.info.boundingBox = transformedUnitSquare(ctm);
@@ -906,6 +974,8 @@ void extractImagesRecursively(
                 document, stream, {}, {}, event.textState.currentTransformationMatrix,
                 options, document.readerOptions().limits.maxDecodedStreamSize);
             image.info.inlineImage = true;
+            image.info.fillAlpha = event.textState.fillAlpha;
+            image.info.strokeAlpha = event.textState.strokeAlpha;
             output.push_back(std::move(image));
             return;
         }
@@ -926,10 +996,13 @@ void extractImagesRecursively(
         const auto subtype = stream->dictionary().GetAsName(PdfName("Subtype"));
         if (!subtype.has_value()) return;
         if (subtype->value() == "Image") {
-            output.push_back(makeExtractedImage(
+            auto image = makeExtractedImage(
                 document, *stream, reference, event.text,
                 event.textState.currentTransformationMatrix,
-                options, document.readerOptions().limits.maxDecodedStreamSize));
+                options, document.readerOptions().limits.maxDecodedStreamSize);
+            image.info.fillAlpha = event.textState.fillAlpha;
+            image.info.strokeAlpha = event.textState.strokeAlpha;
+            output.push_back(std::move(image));
             return;
         }
         if (subtype->value() != "Form" || !options.includeFormXObjects) return;
@@ -1191,6 +1264,10 @@ std::uint64_t PdfDocument::findStartXref() const {
 
 void PdfDocument::parseXrefSection(std::uint64_t offset) {
     if (!parsedXrefOffsets_.insert(offset).second) {
+        if (readerOptions_.strictParsing) {
+            throw PdfException(PdfErrorCode::MalformedXref,
+                               "Cyclic xref revision chain detected.");
+        }
         return;
     }
 
@@ -1224,28 +1301,35 @@ std::string_view PdfDocument::extractStreamDataView(const std::string& streamObj
     if (dataBegin < streamObject.size() && streamObject[dataBegin] == '\n') ++dataBegin;
 
     std::size_t dataEnd = std::string::npos;
-    try {
-        std::size_t length{};
-        const PdfObject parsed = Internal::PdfObjectParser::Parse(
-            streamObject, readerOptions_.limits.maxRecursionDepth);
-        const PdfDictionary* dict = asDictionary(parsed);
-        const PdfObject* lengthObject = dict ? dict->Find(PdfName("Length")) : nullptr;
-        if (lengthObject != nullptr) {
-            if (const auto direct = lengthObject->AsInteger()) {
-                if (*direct >= 0) length = static_cast<std::size_t>(*direct);
-            } else if (const auto reference = lengthObject->AsReference()) {
-                const PdfObject lengthParsed = Internal::PdfObjectParser::Parse(
-                    readIndirectObject(reference->first), readerOptions_.limits.maxRecursionDepth);
-                const auto indirect = lengthParsed.AsInteger();
-                if (!indirect.has_value() || *indirect < 0) {
-                    throw PdfException(PdfErrorCode::MalformedObject,
-                                       "Indirect stream length is not an integer.");
-                }
-                length = static_cast<std::size_t>(*indirect);
+    std::size_t length{};
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(
+        streamObject, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* dict = asDictionary(parsed);
+    const PdfObject* lengthObject = dict ? dict->Find(PdfName("Length")) : nullptr;
+    if (lengthObject != nullptr) {
+        if (const auto direct = lengthObject->AsInteger()) {
+            if (*direct < 0 || static_cast<std::uint64_t>(*direct) > streamObject.size()) {
+                throw PdfException(PdfErrorCode::MalformedObject,
+                                   "Stream length is invalid.");
             }
+            length = static_cast<std::size_t>(*direct);
+        } else if (const auto reference = lengthObject->AsReference()) {
+            const PdfObject lengthParsed = Internal::PdfObjectParser::Parse(
+                readIndirectObject(reference->first), readerOptions_.limits.maxRecursionDepth);
+            const auto indirect = lengthParsed.AsInteger();
+            if (!indirect.has_value() || *indirect < 0 ||
+                static_cast<std::uint64_t>(*indirect) > streamObject.size()) {
+                throw PdfException(PdfErrorCode::MalformedObject,
+                                   "Indirect stream length is invalid.");
+            }
+            length = static_cast<std::size_t>(*indirect);
+        } else {
+            throw PdfException(PdfErrorCode::MalformedObject,
+                               "Stream length is not an integer or reference.");
         }
-        if (dataBegin + length <= streamObject.size()) dataEnd = dataBegin + length;
-    } catch (...) {
+    }
+    if (length <= streamObject.size() - dataBegin) {
+        dataEnd = dataBegin + length;
     }
     if (dataEnd == std::string::npos) dataEnd = streamObject.rfind("endstream");
     if (dataEnd == std::string::npos || dataEnd < dataBegin) {
@@ -1286,22 +1370,29 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
     }
 
     const PdfArray* widthArray = dictionary->GetAsArray(PdfName("W"));
-    if (widthArray == nullptr || widthArray->size() < 3U) {
+    if (widthArray == nullptr || widthArray->size() != 3U) {
         throw PdfException(PdfErrorCode::MalformedXref, "XRef stream /W must contain three integers.");
     }
     std::array<std::size_t, 3> widths{0U, 0U, 0U};
     for (std::size_t i = 0U; i < 3U; ++i) {
-        if (const auto width = widthArray->at(i).AsInteger(); width.has_value() && *width > 0 && *width <= 8) {
-            widths[i] = static_cast<std::size_t>(*width);
+        const auto width = widthArray->at(i).AsInteger();
+        if (!width.has_value() || *width < 0 || *width > 8) {
+            throw PdfException(PdfErrorCode::MalformedXref,
+                               "XRef stream /W contains an invalid field width.");
         }
+        widths[i] = static_cast<std::size_t>(*width);
     }
 
     std::vector<std::size_t> index;
     if (const PdfArray* indexArray = dictionary->GetAsArray(PdfName("Index"))) {
         for (const PdfObject& item : indexArray->values()) {
-            if (const auto value = item.AsInteger(); value.has_value() && *value >= 0) {
-                index.push_back(static_cast<std::size_t>(*value));
+            const auto value = item.AsInteger();
+            if (!value.has_value() || *value < 0 ||
+                static_cast<std::uint64_t>(*value) > std::numeric_limits<std::uint32_t>::max()) {
+                throw PdfException(PdfErrorCode::MalformedXref,
+                                   "XRef stream /Index contains an invalid value.");
             }
+            index.push_back(static_cast<std::size_t>(*value));
         }
     }
     if (index.empty()) {
@@ -1310,10 +1401,23 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
         if (!size.has_value() || *size < 0) {
             throw PdfException(PdfErrorCode::MalformedXref, "XRef stream /Size is missing or invalid.");
         }
+        if (static_cast<std::uint64_t>(*size) > readerOptions_.limits.maxObjectCount ||
+            static_cast<std::uint64_t>(*size) > std::numeric_limits<std::uint32_t>::max()) {
+            throw PdfException(PdfErrorCode::MalformedXref,
+                               "XRef stream /Size exceeds configured limits.");
+        }
         index = {0U, static_cast<std::size_t>(*size)};
     }
     if ((index.size() % 2U) != 0U) {
         throw PdfException(PdfErrorCode::MalformedXref, "XRef stream /Index must contain pairs.");
+    }
+    for (std::size_t pair = 0U; pair < index.size(); pair += 2U) {
+        if (index[pair + 1U] > readerOptions_.limits.maxObjectCount ||
+            static_cast<std::uint64_t>(index[pair]) + index[pair + 1U] >
+                static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1ULL) {
+            throw PdfException(PdfErrorCode::MalformedXref,
+                               "XRef stream /Index exceeds configured limits.");
+        }
     }
 
     std::string decoded = extractStreamData(object);
@@ -1330,7 +1434,7 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
 
     auto readBigEndian = [&](std::size_t& pos, std::size_t width) -> std::uint64_t {
         std::uint64_t value = 0;
-        if (pos + width > decoded.size()) {
+        if (pos > decoded.size() || width > decoded.size() - pos) {
             throw PdfException(PdfErrorCode::MalformedXref, "XRef stream ended before all entries were read.");
         }
         for (std::size_t i = 0; i < width; ++i) {
@@ -1350,15 +1454,20 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
             PdfXrefEntry entry{};
             if (typeValue == 0U) {
                 entry.type = PdfXrefEntry::Type::Free;
+                if (field3 > std::numeric_limits<std::uint16_t>::max()) continue;
                 entry.generation = static_cast<std::uint16_t>(field3);
                 entry.inUse = false;
             } else if (typeValue == 1U) {
                 entry.type = PdfXrefEntry::Type::Uncompressed;
+                if (field2 >= bytes_.size()) continue;
+                if (field3 > std::numeric_limits<std::uint16_t>::max()) continue;
                 entry.offset = field2;
                 entry.generation = static_cast<std::uint16_t>(field3);
                 entry.inUse = true;
             } else if (typeValue == 2U) {
                 entry.type = PdfXrefEntry::Type::Compressed;
+                if (field2 > std::numeric_limits<std::uint32_t>::max() ||
+                    field3 > std::numeric_limits<std::uint32_t>::max()) continue;
                 entry.objectStream = static_cast<std::uint32_t>(field2);
                 entry.objectIndex = static_cast<std::uint32_t>(field3);
                 entry.inUse = true;
@@ -1380,7 +1489,15 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
 
     if (const PdfObject* prev = dictionary->Find(PdfName("Prev"))) {
         if (const auto previous = prev->AsInteger(); previous.has_value() && *previous >= 0) {
-            parseXrefSection(static_cast<std::uint64_t>(*previous));
+            const auto previousOffset = static_cast<std::uint64_t>(*previous);
+            if (previousOffset >= bytes_.size()) {
+                throw PdfException(PdfErrorCode::MalformedXref,
+                                   "XRef stream /Prev points outside the file.");
+            }
+            parseXrefSection(previousOffset);
+        } else if (prev->type() != PdfObjectType::Null) {
+            throw PdfException(PdfErrorCode::MalformedXref,
+                               "XRef stream /Prev is invalid.");
         }
     }
 }
@@ -1416,6 +1533,17 @@ void PdfDocument::parseClassicXref(std::uint64_t offset64) {
             throw PdfException(PdfErrorCode::MalformedXref,
                                "Malformed xref subsection header: " + subsection);
         }
+        std::string subsectionExtra;
+        if (subsectionStream >> subsectionExtra) {
+            throw PdfException(PdfErrorCode::MalformedXref,
+                               "Malformed xref subsection header: " + subsection);
+        }
+        if (count > readerOptions_.limits.maxObjectCount ||
+            static_cast<std::uint64_t>(firstObject) + count >
+                static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1ULL) {
+            throw PdfException(PdfErrorCode::MalformedXref,
+                               "Xref subsection exceeds configured limits.");
+        }
 
         for (std::uint32_t i = 0; i < count; ++i) {
             const std::string line = trim(readLine(bytes_, pos));
@@ -1427,6 +1555,18 @@ void PdfDocument::parseClassicXref(std::uint64_t offset64) {
             if (!entryStream || (state != 'n' && state != 'f')) {
                 throw PdfException(PdfErrorCode::MalformedXref,
                                    "Malformed xref entry: " + line);
+            }
+            std::string entryExtra;
+            if (entryStream >> entryExtra) {
+                throw PdfException(PdfErrorCode::MalformedXref,
+                                   "Malformed xref entry: " + line);
+            }
+            if (entryOffset >= bytes_.size() && state == 'n') {
+                if (readerOptions_.strictParsing || !readerOptions_.repairDamagedXref) {
+                    throw PdfException(PdfErrorCode::MalformedXref,
+                                       "Xref entry points outside the file: " + line);
+                }
+                continue;
             }
 
             // The PDF generation field is formally limited to uint16. In
@@ -1476,7 +1616,15 @@ void PdfDocument::parseClassicXref(std::uint64_t offset64) {
         }
         if (const PdfObject* prev = trailer->Find(PdfName("Prev"))) {
             if (const auto previous = prev->AsInteger(); previous.has_value() && *previous >= 0) {
-                parseXrefSection(static_cast<std::uint64_t>(*previous));
+                const auto previousOffset = static_cast<std::uint64_t>(*previous);
+                if (previousOffset >= bytes_.size()) {
+                    throw PdfException(PdfErrorCode::MalformedXref,
+                                       "XRef trailer /Prev points outside the file.");
+                }
+                parseXrefSection(previousOffset);
+            } else if (prev->type() != PdfObjectType::Null) {
+                throw PdfException(PdfErrorCode::MalformedXref,
+                                   "XRef trailer /Prev is invalid.");
             }
         }
     }
@@ -2624,6 +2772,7 @@ std::vector<PdfTextChunk> PdfDocument::ExtractTextChunks(
     const std::size_t pageIndex,
     const PdfTextExtractionRequest& inputRequest) const {
     auto request = inputRequest;
+    request.pageIndex = pageIndex;
     const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) {
         throw PdfException(PdfErrorCode::InvalidPageTree,
@@ -2631,6 +2780,25 @@ std::vector<PdfTextChunk> PdfDocument::ExtractTextChunks(
     }
     const std::string pageObject = readIndirectObject(pages[pageIndex].objectNumber);
     const auto* resources = inheritedPageResources(*this, pages[pageIndex]);
+    std::unordered_map<std::string, std::shared_ptr<const PdfFontResource>> resolvedFonts;
+    if (!request.fontResolver) {
+        request.fontResolver = [this, pageIndex, &resolvedFonts](const std::uint32_t resourceObjectNumber,
+                                                                  std::string_view name) -> const PdfFontResource* {
+            const std::string key = std::to_string(resourceObjectNumber) + ":" + std::string(name);
+            const auto found = resolvedFonts.find(key);
+            if (found != resolvedFonts.end()) return found->second.get();
+            auto font = ResolveFont(pageIndex, resourceObjectNumber, name);
+            const auto* result = font.get();
+            resolvedFonts.emplace(key, std::move(font));
+            return result;
+        };
+    }
+    if (!request.extGStateResolver) {
+        request.extGStateResolver = [this, pageIndex](const std::uint32_t resourceObjectNumber,
+                                                       std::string_view name) {
+            return ResolveExtGStateAlpha(pageIndex, resourceObjectNumber, name);
+        };
+    }
     std::vector<PdfTextChunk> chunks;
     std::unordered_set<std::uint64_t> activeForms;
     const StreamDecoder decoder = [this](const PdfReference& reference) {
@@ -2642,6 +2810,235 @@ std::vector<PdfTextChunk> PdfDocument::ExtractTextChunks(
             *this, content, resources, request, decoder, activeForms, 0U, chunks);
     }
     return chunks;
+}
+
+std::shared_ptr<const PdfFontResource> PdfDocument::ResolvePageFont(
+    const std::size_t pageIndex, const std::string_view resourceName) const {
+    const auto& pages = pageReferences();
+    if (pageIndex >= pages.size()) {
+        throw PdfException(PdfErrorCode::InvalidPageTree,
+                           "Page index " + std::to_string(pageIndex) + " is outside the document.");
+    }
+    const auto* resources = inheritedPageResources(*this, pages[pageIndex]);
+    if (!resources) return {};
+    const PdfObject* fontsObject = resources->Find(PdfName("Font"));
+    if (fontsObject && fontsObject->AsReference()) {
+        const auto reference = fontsObject->AsReference();
+        fontsObject = &GetObject({reference->first, reference->second});
+    }
+    const auto* fonts = fontsObject ? fontsObject->AsDictionary() : nullptr;
+    if (!fonts) return {};
+    const PdfObject* fontObject = fonts->Find(PdfName(std::string(resourceName)));
+    if (fontObject && fontObject->AsReference()) {
+        const auto reference = fontObject->AsReference();
+        fontObject = &GetObject({reference->first, reference->second});
+    }
+    const auto* dictionary = fontObject ? fontObject->AsDictionary() : nullptr;
+    if (!dictionary) return {};
+    const PdfFontResource::Resolver resolver = [this](const PdfReference& reference) -> const PdfObject& {
+        return GetObject(reference);
+    };
+    return std::make_shared<const PdfFontResource>(PdfFontResource::Create(*dictionary, resolver));
+}
+
+std::shared_ptr<const PdfFontResource> PdfDocument::ResolveFont(
+    const std::size_t pageIndex, const std::uint32_t resourceObjectNumber,
+    const std::string_view resourceName) const {
+    if (resourceObjectNumber == 0U) return ResolvePageFont(pageIndex, resourceName);
+    const auto* form = objectDictionary(*this, &GetObject({resourceObjectNumber, 0U}));
+    const auto* resources = form ? objectDictionary(*this, form->Find(PdfName("Resources"))) : nullptr;
+    const auto* fonts = resources ? objectDictionary(*this, resources->Find(PdfName("Font"))) : nullptr;
+    const auto* fontObject = fonts ? fonts->Find(PdfName(std::string(resourceName))) : nullptr;
+    const auto* dictionary = fontObject ? objectDictionary(*this, fontObject) : nullptr;
+    if (!dictionary) return ResolvePageFont(pageIndex, resourceName);
+    const PdfFontResource::Resolver resolver = [this](const PdfReference& reference) -> const PdfObject& {
+        return GetObject(reference);
+    };
+    return std::make_shared<const PdfFontResource>(PdfFontResource::Create(*dictionary, resolver));
+}
+
+std::array<double, 2> PdfDocument::ResolvePageExtGStateAlpha(
+    const std::size_t pageIndex, const std::string_view resourceName) const {
+    const auto& pages = pageReferences();
+    if (pageIndex >= pages.size()) return {1.0, 1.0};
+    const auto* resources = inheritedPageResources(*this, pages[pageIndex]);
+    const auto* states = resources ? objectDictionary(*this, resources->Find(PdfName("ExtGState"))) : nullptr;
+    const auto* entry = states ? states->Find(PdfName(std::string(resourceName))) : nullptr;
+    const auto* state = entry ? objectDictionary(*this, entry) : nullptr;
+    if (!state) return {1.0, 1.0};
+    const auto read = [&](const char* key) {
+        const auto* value = state->Find(PdfName(key));
+        if (!value) return 1.0;
+        if (const auto real = value->AsReal()) return std::clamp(*real, 0.0, 1.0);
+        if (const auto integer = value->AsInteger()) return std::clamp(static_cast<double>(*integer), 0.0, 1.0);
+        return 1.0;
+    };
+    return {read("CA"), read("ca")};
+}
+
+std::array<double, 2> PdfDocument::ResolveExtGStateAlpha(
+    const std::size_t pageIndex, const std::uint32_t resourceObjectNumber,
+    const std::string_view resourceName) const {
+    if (resourceObjectNumber == 0U) return ResolvePageExtGStateAlpha(pageIndex, resourceName);
+    const auto* form = objectDictionary(*this, &GetObject({resourceObjectNumber, 0U}));
+    if (form == nullptr) return ResolvePageExtGStateAlpha(pageIndex, resourceName);
+    const auto* resources = objectDictionary(*this, form->Find(PdfName("Resources")));
+    if (resources == nullptr) return ResolvePageExtGStateAlpha(pageIndex, resourceName);
+    const auto* states = objectDictionary(*this, resources->Find(PdfName("ExtGState")));
+    const auto* entry = states ? states->Find(PdfName(std::string(resourceName))) : nullptr;
+    const auto* state = entry ? objectDictionary(*this, entry) : nullptr;
+    if (state == nullptr) return ResolvePageExtGStateAlpha(pageIndex, resourceName);
+    const auto read = [&](const char* key) {
+        const auto* value = state->Find(PdfName(key));
+        return value && value->AsReal().has_value()
+            ? std::clamp(*value->AsReal(), 0.0, 1.0) : 1.0;
+    };
+    return {read("CA"), read("ca")};
+}
+
+std::pair<std::array<double, 2>, PdfBlendMode> PdfDocument::ResolveExtGState(
+    const std::size_t pageIndex, const std::uint32_t resourceObjectNumber,
+    const std::string_view resourceName) const {
+    const auto alpha = ResolveExtGStateAlpha(pageIndex, resourceObjectNumber, resourceName);
+    const auto* form = resourceObjectNumber == 0U ? nullptr : objectDictionary(*this, &GetObject({resourceObjectNumber, 0U}));
+    const auto* resources = form ? objectDictionary(*this, form->Find(PdfName("Resources"))) : nullptr;
+    const auto* states = resources ? objectDictionary(*this, resources->Find(PdfName("ExtGState"))) : nullptr;
+    const auto& page = GetPage(pageIndex);
+    PdfObject parsed;
+    if (resourceObjectNumber == 0U && !page.GetResourcesDictionary().empty())
+        parsed = Internal::PdfObjectParser::Parse(page.GetResourcesDictionary(), 256U);
+    const auto* pageResources = parsed.AsDictionary();
+    if (!resources) resources = pageResources;
+    if (!states) states = resources ? objectDictionary(*this, resources->Find(PdfName("ExtGState"))) : nullptr;
+    const auto* entry = states ? states->Find(PdfName(std::string(resourceName))) : nullptr;
+    const auto* state = entry ? objectDictionary(*this, entry) : nullptr;
+    const auto blend = state ? state->GetAsName(PdfName("BM")) : std::nullopt;
+    if (!blend) return {alpha, PdfBlendMode::SourceOver};
+    if (blend->value() == "Multiply") return {alpha, PdfBlendMode::Multiply};
+    if (blend->value() == "Screen") return {alpha, PdfBlendMode::Screen};
+    if (blend->value() == "Darken") return {alpha, PdfBlendMode::Darken};
+    if (blend->value() == "Lighten") return {alpha, PdfBlendMode::Lighten};
+    if (blend->value() == "Overlay") return {alpha, PdfBlendMode::Overlay};
+    if (blend->value() == "Difference") return {alpha, PdfBlendMode::Difference};
+    if (blend->value() == "Exclusion") return {alpha, PdfBlendMode::Exclusion};
+    return {alpha, PdfBlendMode::SourceOver};
+}
+
+std::pair<bool, bool> PdfDocument::ResolveTransparencyFlags(
+    const std::size_t pageIndex, const std::uint32_t resourceObjectNumber,
+    const std::string_view resourceName) const {
+    const auto* form = resourceObjectNumber == 0U ? nullptr : objectDictionary(*this, &GetObject({resourceObjectNumber, 0U}));
+    const auto* resources = form ? objectDictionary(*this, form->Find(PdfName("Resources"))) : nullptr;
+    const auto page = GetPage(pageIndex);
+    PdfObject parsed;
+    if (!resources && !page.GetResourcesDictionary().empty()) parsed = Internal::PdfObjectParser::Parse(page.GetResourcesDictionary(), 256U);
+    if (!resources) resources = parsed.AsDictionary();
+    const auto* states = resources ? objectDictionary(*this, resources->Find(PdfName("ExtGState"))) : nullptr;
+    const auto* entry = states ? states->Find(PdfName(std::string(resourceName))) : nullptr;
+    const auto* state = entry ? objectDictionary(*this, entry) : nullptr;
+    if (!state) return {false, false};
+    const auto read = [&](const char* key) {
+        const auto* value = state->Find(PdfName(key));
+        return value && value->AsBoolean().value_or(false);
+    };
+    return {read("I"), read("K")};
+}
+
+std::optional<PdfDictionary> PdfDocument::ResolveShading(
+    const std::size_t pageIndex, const std::uint32_t resourceObjectNumber,
+    const std::string_view resourceName) const {
+    const auto* form = resourceObjectNumber == 0U ? nullptr :
+        objectDictionary(*this, &GetObject({resourceObjectNumber, 0U}));
+    const auto* resources = form ? objectDictionary(*this, form->Find(PdfName("Resources"))) : nullptr;
+    if (resources == nullptr) resources = inheritedPageResources(*this, pageReferences().at(pageIndex));
+    const auto* shadings = resources ? objectDictionary(*this, resources->Find(PdfName("Shading"))) : nullptr;
+    const auto* entry = shadings ? shadings->Find(PdfName(std::string(resourceName))) : nullptr;
+    if (entry == nullptr) return std::nullopt;
+    if (const auto reference = entry->AsReference()) {
+        const auto* stream = GetObject({reference->first, reference->second}).AsStream();
+        return stream ? std::optional<PdfDictionary>(stream->dictionary()) : std::nullopt;
+    }
+    if (const auto* dictionary = entry->AsDictionary()) return *dictionary;
+    return std::nullopt;
+}
+
+std::optional<PdfResolvedShading> PdfDocument::ResolveAxialShading(
+    const std::size_t pageIndex, const std::uint32_t resourceObjectNumber,
+    const std::string_view resourceName) const {
+    const auto dictionary = ResolveShading(pageIndex, resourceObjectNumber, resourceName);
+    if (!dictionary) return std::nullopt;
+    const auto type = dictionary->Find(PdfName("ShadingType"));
+    if (type == nullptr || type->AsInteger().value_or(0) != 2) return std::nullopt;
+    const auto* coords = dictionary->GetAsArray(PdfName("Coords"));
+    const auto* functionObject = dictionary->Find(PdfName("Function"));
+    if (coords == nullptr || coords->size() < 4U || functionObject == nullptr) return std::nullopt;
+    const PdfObject* functionValue = functionObject;
+    if (const auto reference = functionValue->AsReference()) {
+        functionValue = &GetObject({reference->first, reference->second});
+    }
+    const auto* function = functionValue->AsDictionary();
+    if (function == nullptr || function->Find(PdfName("FunctionType")) == nullptr ||
+        function->Find(PdfName("FunctionType"))->AsInteger().value_or(0) != 2) return std::nullopt;
+    const auto* c0 = function->GetAsArray(PdfName("C0"));
+    const auto* c1 = function->GetAsArray(PdfName("C1"));
+    const auto* exponent = function->Find(PdfName("N"));
+    if (c0 == nullptr || c1 == nullptr || c0->size() != c1->size() || c0->empty() || exponent == nullptr) return std::nullopt;
+    std::array<double, 4> coordinates{};
+    for (std::size_t index = 0; index < coordinates.size(); ++index) coordinates[index] = objectNumberValue(coords->at(index), 0.0);
+    std::vector<double> c0Values, c1Values;
+    for (std::size_t index = 0; index < c0->size(); ++index) {
+        c0Values.push_back(objectNumberValue(c0->at(index), 0.0));
+        c1Values.push_back(objectNumberValue(c1->at(index), 1.0));
+    }
+    PdfResolvedShading result;
+    result.type = 2U;
+    result.axial.coordinates = coordinates;
+    result.axial.function.emplace(std::move(c0Values), std::move(c1Values), objectNumberValue(*exponent, 1.0));
+    if (const auto* domain = dictionary->GetAsArray(PdfName("Domain")); domain && domain->size() >= 2U) {
+        result.axial.domain = {objectNumberValue(domain->at(0), 0.0), objectNumberValue(domain->at(1), 1.0)};
+    }
+    if (const auto* extend = dictionary->GetAsArray(PdfName("Extend")); extend && extend->size() >= 2U) {
+        result.axial.extendStart = extend->at(0).AsBoolean().value_or(false);
+        result.axial.extendEnd = extend->at(1).AsBoolean().value_or(false);
+    }
+    return result;
+}
+
+std::optional<PdfResolvedShading> PdfDocument::ResolveRadialShading(
+    const std::size_t pageIndex, const std::uint32_t resourceObjectNumber,
+    const std::string_view resourceName) const {
+    const auto dictionary = ResolveShading(pageIndex, resourceObjectNumber, resourceName);
+    if (!dictionary) return std::nullopt;
+    const auto type = dictionary->Find(PdfName("ShadingType"));
+    const auto* coordinates = dictionary->GetAsArray(PdfName("Coords"));
+    const auto* functionObject = dictionary->Find(PdfName("Function"));
+    if (type == nullptr || type->AsInteger().value_or(0) != 3 || coordinates == nullptr ||
+        coordinates->size() < 6U || functionObject == nullptr) return std::nullopt;
+    const PdfObject* functionValue = functionObject;
+    if (const auto reference = functionValue->AsReference()) functionValue = &GetObject({reference->first, reference->second});
+    const auto* function = functionValue->AsDictionary();
+    if (function == nullptr || function->Find(PdfName("FunctionType")) == nullptr ||
+        function->Find(PdfName("FunctionType"))->AsInteger().value_or(0) != 2) return std::nullopt;
+    const auto* c0 = function->GetAsArray(PdfName("C0"));
+    const auto* c1 = function->GetAsArray(PdfName("C1"));
+    const auto* exponent = function->Find(PdfName("N"));
+    if (c0 == nullptr || c1 == nullptr || c0->size() != c1->size() || c0->empty() || exponent == nullptr) return std::nullopt;
+    std::vector<double> c0Values, c1Values;
+    for (std::size_t index = 0; index < c0->size(); ++index) {
+        c0Values.push_back(objectNumberValue(c0->at(index), 0.0));
+        c1Values.push_back(objectNumberValue(c1->at(index), 1.0));
+    }
+    PdfResolvedShading result;
+    result.type = 3U;
+    for (std::size_t index = 0; index < 6U; ++index) result.radial.coordinates[index] = objectNumberValue(coordinates->at(index), 0.0);
+    result.radial.function.emplace(std::move(c0Values), std::move(c1Values), objectNumberValue(*exponent, 1.0));
+    if (const auto* domain = dictionary->GetAsArray(PdfName("Domain")); domain && domain->size() >= 2U)
+        result.radial.domain = {objectNumberValue(domain->at(0), 0.0), objectNumberValue(domain->at(1), 1.0)};
+    if (const auto* extend = dictionary->GetAsArray(PdfName("Extend")); extend && extend->size() >= 2U) {
+        result.radial.extendStart = extend->at(0).AsBoolean().value_or(false);
+        result.radial.extendEnd = extend->at(1).AsBoolean().value_or(false);
+    }
+    return result;
 }
 
 void PdfDocument::ForEachPageContentEvent(
@@ -2661,7 +3058,63 @@ void PdfDocument::ForEachPageContentEvent(
     const std::string content = joinDecodedStreams(contentReferences(pageObject), decoder);
     std::unordered_set<std::uint64_t> activeForms;
     processPageContentRecursively(*this, content, resources, {}, decoder,
-                                  activeForms, 0U, handler);
+                                  activeForms, 0U, 0U, handler);
+}
+
+PdfDisplayList PdfDocument::BuildPageDisplayList(const std::size_t pageIndex) const {
+    PdfDisplayList list;
+    ForEachPageContentEvent(pageIndex, [&](const PdfContentEvent& event) { list.Add(event); });
+    list.SetImageResolver([this, pageIndex](const std::uint32_t resourceObjectNumber,
+                                            const std::string_view resourceName,
+                                            const PdfContentEvent& event)
+        -> std::optional<PdfExtractedImage> {
+        if (event.type == PdfContentEventType::RenderInlineImage) {
+            PdfDictionary dictionary;
+            for (const auto& property : event.inlineImageDictionary) {
+                dictionary.Put(PdfName(property.name), PdfObject(property.value));
+            }
+            PdfStream stream(std::move(dictionary), event.bytes);
+            PdfImageExtractionOptions options;
+            options.keepEncodedBytes = false;
+            options.decodeSupportedFilters = true;
+            auto image = makeExtractedImage(*this, stream, {}, {},
+                                            event.textState.currentTransformationMatrix,
+                                            options, readerOptions_.limits.maxDecodedStreamSize);
+            image.info.inlineImage = true;
+            image.info.fillAlpha = event.textState.fillAlpha;
+            image.info.strokeAlpha = event.textState.strokeAlpha;
+            return image;
+        }
+        const auto page = GetPage(pageIndex);
+        const auto resourcesText = page.GetResourcesDictionary();
+        if (resourcesText.empty()) return std::nullopt;
+        const auto resourcesObject = Internal::PdfObjectParser::Parse(resourcesText, 256U);
+        const auto* resources = resourcesObject.AsDictionary();
+        if (!resources) return std::nullopt;
+        const auto* xObjects = objectDictionary(*this, resources->Find(PdfName("XObject")));
+        if (!xObjects) return std::nullopt;
+        const auto* entry = xObjects->Find(PdfName(std::string(resourceName)));
+        if (!entry) return std::nullopt;
+        PdfReference reference{};
+        const PdfStream* stream{};
+        if (const auto indirect = entry->AsReference()) {
+            reference = {indirect->first, indirect->second};
+            stream = GetObject(reference).AsStream();
+        } else stream = entry->AsStream();
+        if (!stream || !stream->dictionary().GetAsName(PdfName("Subtype")) ||
+            stream->dictionary().GetAsName(PdfName("Subtype"))->value() != "Image") return std::nullopt;
+        PdfImageExtractionOptions options;
+        options.keepEncodedBytes = false;
+        options.decodeSupportedFilters = true;
+        auto image = makeExtractedImage(*this, *stream, reference, std::string(resourceName),
+                                        event.textState.currentTransformationMatrix,
+                                        options, readerOptions_.limits.maxDecodedStreamSize);
+        image.info.fillAlpha = event.textState.fillAlpha;
+        image.info.strokeAlpha = event.textState.strokeAlpha;
+        image.info.sourceObjectNumber = resourceObjectNumber;
+        return image;
+    });
+    return list;
 }
 
 std::string PdfDocument::ExtractText(

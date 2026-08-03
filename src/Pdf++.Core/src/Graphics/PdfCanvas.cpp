@@ -78,7 +78,7 @@ std::string PdfCanvas::RegisterOpacity(double strokeOpacity, double fillOpacity)
     }
     const std::size_t index=state_->extGStates.size();
     const std::string name="GS"+std::to_string(index+1U);
-    state_->extGStates.push_back({strokeOpacity,fillOpacity,name});
+    state_->extGStates.push_back({strokeOpacity,fillOpacity,PdfBlendMode::SourceOver,name});
     state_->pages[pageIndex_].extGStateIndices.push_back(index);
     return name;
 }
@@ -88,6 +88,17 @@ PdfCanvas& PdfCanvas::SetFillColor(PdfColor c){Append(number(c.r)+" "+number(c.g
 PdfCanvas& PdfCanvas::SetStrokeOpacity(double opacity){Append("/"+RegisterOpacity(opacity,1.0)+" gs\n");return *this;}
 PdfCanvas& PdfCanvas::SetFillOpacity(double opacity){Append("/"+RegisterOpacity(1.0,opacity)+" gs\n");return *this;}
 PdfCanvas& PdfCanvas::SetOpacity(double opacity){Append("/"+RegisterOpacity(opacity,opacity)+" gs\n");return *this;}
+PdfCanvas& PdfCanvas::SetBlendMode(PdfBlendMode mode){
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& page = state_->pages[pageIndex_];
+    const auto name = mode == PdfBlendMode::Multiply ? "Multiply" : mode == PdfBlendMode::Screen ? "Screen" : mode == PdfBlendMode::Darken ? "Darken" : mode == PdfBlendMode::Lighten ? "Lighten" : mode == PdfBlendMode::Overlay ? "Overlay" : mode == PdfBlendMode::Difference ? "Difference" : mode == PdfBlendMode::Exclusion ? "Exclusion" : "Normal";
+    const auto resource = RegisterOpacity(1.0, 1.0);
+    state_->extGStates.back().blendMode = mode;
+    page.extGStateIndices.push_back(state_->extGStates.size() - 1U);
+    Append("/" + resource + " gs\n");
+    (void)name;
+    return *this;
+}
 PdfCanvas& PdfCanvas::SetLineWidth(double w){if(w<0||!std::isfinite(w))throw std::invalid_argument("Line width must be finite and non-negative.");Append(number(w)+" w\n");return *this;}
 PdfCanvas& PdfCanvas::SetLineCap(PdfLineCap cap){Append(std::to_string(static_cast<int>(cap))+" J\n");return *this;}
 PdfCanvas& PdfCanvas::SetLineJoin(PdfLineJoin join){Append(std::to_string(static_cast<int>(join))+" j\n");return *this;}
@@ -144,6 +155,20 @@ PdfCanvas& PdfCanvas::DrawTextUtf8(const PdfTrueTypeFont& font, std::string text
         baseline -= lineHeight;
     }
     return EndText();
+}
+
+PdfTextLayoutResult PdfCanvas::MeasureTextLayout(
+    const PdfTrueTypeFont& font, const std::string_view text,
+    const PdfTextLayoutOptions& options) {
+    if (options.box.width() <= 0.0 || options.box.height() <= 0.0 || options.fontSize <= 0.0)
+        throw std::invalid_argument("Text layout options must be positive and non-empty.");
+    const auto lines = wrapUtf8(font, std::string(text), options.fontSize,
+                                options.box.width(), options.wrap);
+    PdfTextLayoutResult result;
+    result.lineCount = lines.size();
+    for (const auto& line : lines) result.width = std::max(result.width, font.MeasureTextUtf8(line, options.fontSize));
+    result.height = result.lineCount * font.GetLineHeight(options.fontSize, options.lineSpacing);
+    return result;
 }
 
 PdfCanvas& PdfCanvas::DrawImage(const PdfImage& image, const PdfRectangle& rectangle){

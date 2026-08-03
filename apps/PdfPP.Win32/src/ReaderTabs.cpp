@@ -204,8 +204,9 @@ void paintTabItem(HWND, HDC dc, const int index, const RECT& item) {
         : PdfPP::ModernWin32::Theme::toolbar;
     const COLORREF fill = hover ? PdfPP::ModernWin32::Theme::controlHover : base;
 
-    const int radius = scaleDip(5);
-    fillRoundedTop(dc, item, fill, radius);
+    const HBRUSH brush = CreateSolidBrush(fill);
+    FillRect(dc, &item, brush);
+    DeleteObject(brush);
 
     // A subtle bottom border for inactive tabs keeps them sitting on the
     // strip line like Chrome; the active tab drops the border so it blends
@@ -235,9 +236,7 @@ void paintTabItem(HWND, HDC dc, const int index, const RECT& item) {
     const RECT close = tabCloseRectFor(item);
     if (hover) {
         const HBRUSH closeBrush = CreateSolidBrush(RGB(232, 110, 90));
-        const auto oldBrush = SelectObject(dc, closeBrush);
-        Ellipse(dc, close.left, close.top, close.right, close.bottom);
-        SelectObject(dc, oldBrush);
+        FillRect(dc, &close, closeBrush);
         DeleteObject(closeBrush);
         SetTextColor(dc, RGB(255, 255, 255));
     } else {

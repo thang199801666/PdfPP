@@ -47,6 +47,7 @@ void TestCanvasGraphicsStateAndPaths() {
         .SetFillColor(PdfColor::Blue())
         .SetStrokeOpacity(0.5)
         .SetFillOpacity(0.25)
+        .SetBlendMode(PdfBlendMode::Multiply)
         .SetLineWidth(2.0)
         .SetLineCap(PdfLineCap::Round)
         .SetLineJoin(PdfLineJoin::Bevel)
@@ -69,6 +70,7 @@ void TestCanvasGraphicsStateAndPaths() {
     PDFPP_TEST_CHECK(pdf.find("1 J") != std::string::npos);
     PDFPP_TEST_CHECK(pdf.find("2 j") != std::string::npos);
     PDFPP_TEST_CHECK(pdf.find("[3 2 ] 1 d") != std::string::npos);
+    PDFPP_TEST_CHECK(pdf.find("/BM /Multiply") != std::string::npos);
     PDFPP_TEST_CHECK(pdf.find(" W") != std::string::npos || pdf.find("W\n") != std::string::npos);
     PDFPP_TEST_CHECK(PdfDocument::Open(output).GetPageCount() == 1);
     std::filesystem::remove(output);

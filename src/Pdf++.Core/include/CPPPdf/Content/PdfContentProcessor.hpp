@@ -31,6 +31,7 @@ enum class PdfContentEventType {
     RenderPath,
     InvokeXObject,
     RenderInlineImage,
+    PaintShading,
     UnknownOperator
 };
 
@@ -44,6 +45,13 @@ struct PdfTextStateSnapshot {
     int renderingMode{};
     double rise{};
     double lineWidth{1.0};
+    int lineCap{};
+    int lineJoin{};
+    double miterLimit{10.0};
+    double strokeAlpha{1.0};
+    double fillAlpha{1.0};
+    bool transparencyIsolated{};
+    bool transparencyKnockout{};
     std::array<double, 3> strokeColor{0.0, 0.0, 0.0};
     std::array<double, 3> fillColor{0.0, 0.0, 0.0};
     std::array<double, 6> textMatrix{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
@@ -59,6 +67,8 @@ struct PdfContentEvent {
     PdfContentEventType type{};
     std::string text;
     std::string operation;
+    std::string resourceScope;
+    std::uint32_t resourceObjectNumber{};
     std::vector<double> numbers;
     std::vector<std::string> textSegments;
     std::vector<double> textSegmentAdjustments;
