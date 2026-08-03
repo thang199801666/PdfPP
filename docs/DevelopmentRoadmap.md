@@ -96,8 +96,10 @@ secondary scope.
 - Add display-list, glyph and image caches.
 - Glyph outline and advance caches now use bounded LRU storage with hit/miss counters.
 - Add parallel rendering and memory budgets for large files.
+- `PdfPageRenderer::RenderAllPagesParallel` renders pages concurrently (independent document per worker), and `PdfReaderOptions::limits` provide memory/count budgets.
 - Stabilize C++, C ABI, CMake packaging and cross-platform support.
 - Publish API documentation, examples, versioning and contribution policy.
+- `examples/report.cpp` demonstrates the writer, layout, portfolios, and parallel rendering.
 
 ## Immediate Execution Order
 

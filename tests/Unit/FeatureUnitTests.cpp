@@ -762,6 +762,40 @@ void TestRedaction() {
     std::filesystem::remove(output);
 }
 
+void TestParallelRendering() {
+    const auto output = TempPath("pdfpp_feature_parallel.pdf");
+    PdfWriter writer;
+    for (int p = 0; p < 3; ++p) {
+        const auto page = writer.AddPage({0, 0, 120, 120});
+        writer.GetCanvas(page).SaveState()
+            .SetFillColor(PdfColor::FromRgb(0.2 + 0.2 * p, 0.1, 0.1))
+            .FillRectangle(10, 10, 40, 40).RestoreState()
+            .BeginText().SetFontAndSize("Helvetica", 10).MoveText(10, 100)
+            .ShowText("P" + std::to_string(p + 1)).EndText();
+    }
+    writer.Save(output);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto parallel = PdfPageRenderer::RenderAllPagesParallel(output, options, 0U);
+    PDFPP_TEST_CHECK(parallel.size() == 3U);
+    for (std::size_t i = 0U; i < parallel.size(); ++i) {
+        PDFPP_TEST_CHECK(parallel[i].pageIndex == i);
+        PDFPP_TEST_CHECK(parallel[i].bitmap.GetWidth() == 120U);
+        PDFPP_TEST_CHECK(parallel[i].bitmap.GetHeight() == 120U);
+    }
+    // The parallel result must match a sequential render pixel-for-pixel.
+    const auto document = PdfDocument::Open(output);
+    for (std::size_t i = 0U; i < parallel.size(); ++i) {
+        const auto sequential = PdfPageRenderer::Render(document, i, options);
+        PDFPP_TEST_CHECK(sequential.GetWidth() == parallel[i].bitmap.GetWidth());
+        PDFPP_TEST_CHECK(sequential.GetHeight() == parallel[i].bitmap.GetHeight());
+        const auto& a = sequential.GetPixel(20U, 20U);
+        const auto& b = parallel[i].bitmap.GetPixel(20U, 20U);
+        PDFPP_TEST_CHECK(a.red == b.red && a.green == b.green && a.blue == b.blue);
+    }
+    std::filesystem::remove(output);
+}
+
 void TestPortfolio() {
     const auto output = TempPath("pdfpp_feature_portfolio.pdf");
     PdfWriter writer;
@@ -1265,6 +1299,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.DocumentLayoutPrimitives", TestDocumentLayoutPrimitives);
     runner.Run("Feature.Portfolio", TestPortfolio);
     runner.Run("Feature.Redaction", TestRedaction);
+    runner.Run("Feature.ParallelRendering", TestParallelRendering);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

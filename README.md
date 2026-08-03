@@ -312,6 +312,17 @@ python tools/validation/compare_text.py tests/corpus/generated/corpus-multipage.
   --pdfpp build/x64/Release/PdfPP.Inspect.exe
 ```
 
+## Examples
+
+`examples/report.cpp` shows the high-level writer: page headers/footers, a
+bulleted list, two-column text via `PdfDocumentLayout`, a PDF portfolio with an
+embedded file, and parallel rendering to PPM.
+
+```text
+cl /std:c++20 /EHsc /I src\Pdf++.Core\include examples\report.cpp \
+  build/x64/Release/Pdf++.Core.lib build/x64/Release/zlibstatic.lib
+```
+
 ## Contributing and security
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security-sensitive defects through the private process described in [SECURITY.md](SECURITY.md).

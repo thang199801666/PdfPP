@@ -1,3 +1,17 @@
+## 0.65.0
+
+- Parallel rendering: `PdfPageRenderer::RenderAllPagesParallel` renders every
+  page concurrently, opening an independent `PdfDocument` per worker to avoid
+  shared mutable cache state; falls back to sequential rendering for single
+  pages and rethrows the first worker error.
+- Added `examples/report.cpp` demonstrating headers/footers, lists, columns,
+  portfolios, and parallel rendering, plus a README "Examples" section.
+- Memory budgets were already available via `PdfReaderOptions::limits`
+  (object/stream/page/cache caps and memory-map threshold); CMake configuration
+  is verified with tests + validation tools enabled.
+- Tests: `Feature.ParallelRendering` checks parallel output matches sequential
+  rendering pixel-for-pixel. All suites green (29 feature subtests).
+
 ## 0.64.0
 
 - ECDSA (NIST P-256) signature support in `PdfCms`: `EcDsaSign`/`EcDsaVerify`

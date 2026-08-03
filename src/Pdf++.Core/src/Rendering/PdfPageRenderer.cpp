@@ -13,10 +13,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <cstdint>
 #include <memory>
@@ -1522,6 +1525,56 @@ PdfBitmap PdfPageRenderer::Render(
         }
     }
     return Downsample(bitmap, options.antiAliasSamples, options.background);
+}
+
+std::vector<PdfRenderResult> PdfPageRenderer::RenderAllPagesParallel(
+    const std::filesystem::path& path,
+    const PdfRenderOptions& options,
+    const std::size_t maxConcurrency) {
+    PdfDocument document = PdfDocument::Open(path);
+    const std::size_t count = document.GetPageCount();
+    if (count == 0U) return {};
+    std::vector<PdfRenderResult> results(count);
+    if (count == 1U || maxConcurrency == 1U) {
+        for (std::size_t i = 0U; i < count; ++i) {
+            results[i].pageIndex = i;
+            results[i].bitmap = Render(document, i, options);
+        }
+        return results;
+    }
+
+    std::size_t concurrency = maxConcurrency;
+    if (concurrency == 0U) {
+        concurrency = static_cast<std::size_t>(std::thread::hardware_concurrency());
+        if (concurrency == 0U) concurrency = 2U;
+    }
+
+    std::atomic<std::size_t> next{0U};
+    std::vector<std::thread> workers;
+    std::mutex errorMutex;
+    std::exception_ptr firstError;
+    for (std::size_t t = 0U; t < concurrency; ++t) {
+        workers.emplace_back([&, t] {
+            (void)t;
+            for (;;) {
+                const std::size_t index = next.fetch_add(1U);
+                if (index >= count) break;
+                try {
+                    // Independent document instance per render avoids sharing
+                    // mutable resolver/cache state across workers.
+                    PdfDocument workerDocument = PdfDocument::Open(path);
+                    results[index].pageIndex = index;
+                    results[index].bitmap = Render(workerDocument, index, options);
+                } catch (...) {
+                    std::lock_guard<std::mutex> guard(errorMutex);
+                    if (!firstError) firstError = std::current_exception();
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    if (firstError) std::rethrow_exception(firstError);
+    return results;
 }
 
 } // namespace CPPPdf
