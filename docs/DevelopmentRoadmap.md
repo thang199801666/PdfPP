@@ -36,6 +36,7 @@ secondary scope.
 - Added embedded Type1/CFF/OpenType program subtype detection and explicit conformance diagnostics for unsupported native rasterization.
 - Add DeviceGray, DeviceRGB, DeviceCMYK and ICCBased color spaces.
 - Add Indexed, Separation and DeviceN color spaces.
+- Separation and DeviceN images render through a tint-transform function into Gray/RGB/CMYK alternate spaces; array-encoded color spaces are detected correctly (not misread as Indexed).
 - Implement tiling patterns, shadings and output intents.
 - Tiling patterns are parsed (`/Pattern cs` + `scn/SCN`) and rendered: the tile content stream is replayed for every tile intersecting the filled region, honoring `/BBox`, `/XStep`, `/YStep`, and `/Matrix`.
 - Improve image masks, interpolation, downsampling and caching.

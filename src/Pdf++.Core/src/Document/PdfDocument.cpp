@@ -751,14 +751,20 @@ void imageColorSpaceMetadata(const PdfDocument& document, const PdfDictionary& d
     if (array == nullptr || array->size() < 2U) return;
     const auto* name = array->at(0).AsName();
     if (name == nullptr) return;
-    if (name->value() == "Indexed" || name->value() == "I") {
+    // A color space encoded as an array ([ /Separation ... ], [ /ICCBased ... ],
+    // [ /Indexed ... ], [ /DeviceN ... ]) must update the resolved enum, not
+    // default to Indexed.
+    const auto& spaceName = name->value();
+    if (spaceName == "Indexed" || spaceName == "I") {
+        info.colorSpace = PdfImageColorSpace::Indexed;
         info.colorSpaceHighValue = static_cast<std::uint32_t>(array->at(2).AsInteger().value_or(255));
         if (const auto* lookup = array->at(3).AsString()) {
             const auto& bytes = *lookup;
             info.colorSpaceData.assign(reinterpret_cast<const std::byte*>(bytes.data()),
                                        reinterpret_cast<const std::byte*>(bytes.data() + bytes.size()));
         }
-    } else if (name->value() == "Separation" && array->size() >= 4U) {
+    } else if (spaceName == "Separation" && array->size() >= 4U) {
+        info.colorSpace = PdfImageColorSpace::Separation;
         info.colorSpaceComponents = 1U;
         if (const auto* alternate = array->at(2).AsName()) {
             info.hasSeparationAlternate = alternate->value() == "DeviceGray" ||
@@ -786,7 +792,8 @@ void imageColorSpaceMetadata(const PdfDocument& document, const PdfDictionary& d
                 }
             }
         }
-    } else if (name->value() == "ICCBased") {
+    } else if (spaceName == "ICCBased") {
+        info.colorSpace = PdfImageColorSpace::ICCBased;
         const PdfObject* profile = &array->at(1);
         if (const auto reference = profile->AsReference()) profile = &document.GetObject({reference->first, reference->second});
         if (const auto* stream = profile->AsStream()) {
@@ -796,9 +803,44 @@ void imageColorSpaceMetadata(const PdfDocument& document, const PdfDictionary& d
             const auto bytes = stream->bytes();
             info.iccProfileBytes.assign(bytes.begin(), bytes.end());
         }
-    } else if (name->value() == "DeviceN" && array->size() >= 2U) {
+    } else if (spaceName == "DeviceN" && array->size() >= 3U) {
+        info.colorSpace = PdfImageColorSpace::DeviceN;
         if (const auto* names = array->at(1).AsArray()) info.deviceNComponentCount = static_cast<std::uint32_t>(names->size());
         info.colorSpaceComponents = static_cast<std::uint8_t>(std::min<std::uint32_t>(255U, info.deviceNComponentCount));
+        // Alternate space (index 2) and a tint transform function (index 3)
+        // are shared with the Separation path so the renderer can fall back to
+        // the alternate color when no DeviceN function array is present.
+        if (const auto* alternate = array->at(2).AsName()) {
+            info.hasSeparationAlternate = alternate->value() == "DeviceGray" ||
+                alternate->value() == "DeviceRGB" || alternate->value() == "DeviceCMYK";
+            info.separationAlternate[0] = alternate->value() == "DeviceGray" ? 1U :
+                (alternate->value() == "DeviceCMYK" ? 4U : 3U);
+        }
+        if (array->size() >= 4U) {
+            const PdfObject* functionObject = &array->at(3);
+            if (const auto reference = functionObject->AsReference()) {
+                functionObject = &document.GetObject({reference->first, reference->second});
+            }
+            // A single shared function applies to every component.
+            const auto* function = functionObject->AsDictionary();
+            if (function != nullptr && function->Find(PdfName("FunctionType")) != nullptr &&
+                function->Find(PdfName("FunctionType"))->AsInteger().value_or(0) == 2) {
+                const auto* c0 = function->GetAsArray(PdfName("C0"));
+                const auto* c1 = function->GetAsArray(PdfName("C1"));
+                if (c0 != nullptr && c1 != nullptr && c0->size() == c1->size() && !c0->empty()) {
+                    info.separationC0.clear();
+                    info.separationC1.clear();
+                    for (std::size_t index = 0; index < c0->size(); ++index) {
+                        info.separationC0.push_back(objectNumberValue(c0->at(index), 0.0));
+                        info.separationC1.push_back(objectNumberValue(c1->at(index), 1.0));
+                    }
+                    if (const auto* exponent = function->Find(PdfName("N"))) {
+                        info.separationExponent = objectNumberValue(*exponent, 1.0);
+                        info.hasSeparationFunction = true;
+                    }
+                }
+            }
+        }
     }
 }
 

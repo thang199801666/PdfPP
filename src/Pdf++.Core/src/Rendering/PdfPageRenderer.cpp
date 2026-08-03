@@ -819,25 +819,47 @@ PdfRgbaColor ImagePixel(const PdfExtractedImage& image, const std::size_t x, con
         };
         color = {channel((1.0 - c) * (1.0 - k)), channel((1.0 - m) * (1.0 - k)),
                  channel((1.0 - yv) * (1.0 - k)), 255U};
-    } else if (image.info.colorSpace == PdfImageColorSpace::Separation &&
+    } else if ((image.info.colorSpace == PdfImageColorSpace::Separation ||
+                image.info.colorSpace == PdfImageColorSpace::DeviceN) &&
                image.info.hasSeparationAlternate) {
-        if (pixelIndex >= image.decodedBytes.size()) return {};
-        const double tint = std::to_integer<std::uint8_t>(image.decodedBytes[pixelIndex]) / 255.0;
+        // Both Separation and DeviceN paint through a tint transform into an
+        // alternate (Gray/RGB/CMYK) space. The first component value drives the
+        // shared exponential function; DeviceN with a per-component function
+        // array falls back to the alternate color at the first tint.
+        const auto alternate = image.info.separationAlternate[0];
+        const double tint = pixelIndex < image.decodedBytes.size()
+            ? std::to_integer<std::uint8_t>(image.decodedBytes[pixelIndex]) / 255.0
+            : 1.0;
         std::vector<double> transformed;
         if (image.info.hasSeparationFunction) {
             transformed = PdfExponentialFunction(image.info.separationC0,
                 image.info.separationC1, image.info.separationExponent).Evaluate(tint);
         }
-        const auto channel = [tint](const double value) {
-            return static_cast<std::uint8_t>(std::lround(std::clamp(value * tint, 0.0, 1.0) * 255.0));
+        const auto channel = [](const double value) {
+            return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
         };
-        const auto components = image.info.separationAlternate[0];
-        if (components == 1U) color = {channel(transformed.empty() ? 1.0 : transformed[0]), channel(transformed.empty() ? 1.0 : transformed[0]), channel(transformed.empty() ? 1.0 : transformed[0]), 255U};
-        else if (components == 3U && transformed.size() >= 3U) color = {channel(transformed[0]), channel(transformed[1]), channel(transformed[2]), 255U};
-        else if (components == 4U && transformed.size() >= 4U) color = {channel(transformed[0]), channel(transformed[1]), channel(transformed[2]), 255U};
-        else if (components == 3U) color = {channel(1.0), channel(0.0), channel(0.0), 255U};
-        else if (components == 4U) color = {channel(0.0), channel(0.0), channel(0.0), 255U};
-        else return {};
+        if (alternate == 1U) {
+            // DeviceGray alternate: gray = transformed value (or tint fallback).
+            const double gray = transformed.empty() ? tint : transformed[0];
+            color = {channel(gray), channel(gray), channel(gray), 255U};
+        } else if (alternate == 3U) {
+            if (transformed.size() >= 3U) {
+                color = {channel(transformed[0]), channel(transformed[1]), channel(transformed[2]), 255U};
+            } else {
+                color = {channel(1.0 - tint), channel(1.0 - tint), channel(1.0 - tint), 255U};
+            }
+        } else if (alternate == 4U) {
+            // DeviceCMYK alternate: convert using the transformed (or tint)
+            // values as CMYK.
+            const double c = transformed.size() >= 4U ? transformed[0] : 0.0;
+            const double m = transformed.size() >= 4U ? transformed[1] : 0.0;
+            const double yv = transformed.size() >= 4U ? transformed[2] : 0.0;
+            const double k = transformed.size() >= 4U ? transformed[3] : (1.0 - tint);
+            color = {channel((1.0 - c) * (1.0 - k)), channel((1.0 - m) * (1.0 - k)),
+                     channel((1.0 - yv) * (1.0 - k)), 255U};
+        } else {
+            return {};
+        }
     } else {
         return {};
     }

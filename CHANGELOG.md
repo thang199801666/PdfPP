@@ -1,3 +1,18 @@
+## 0.58.0
+
+- Fixed color-space detection for array-encoded image color spaces: `[ /Separation
+  ... ]`, `[ /ICCBased ... ]`, `[ /DeviceN ... ]` and `[ /Indexed ... ]` all
+  defaulted to `Indexed`; the resolved enum is now set correctly during image
+  extraction.
+- Fixed Separation rendering: the tint transform function result was multiplied
+  by the tint again (double-scaling), and DeviceCMYK alternates dropped the
+  black channel. Both are corrected.
+- DeviceN images now parse their alternate space and shared tint function, and
+  render through the same tint-transform path as Separation (Gray/RGB/CMYK
+  alternates supported).
+- Tests: `Feature.SeparationAndDeviceNRendering` renders a Separation image whose
+  Type 2 function maps tint 0 to blue and tint 1 to red. All suites green.
+
 ## 0.57.0
 
 - Added tiling pattern support:

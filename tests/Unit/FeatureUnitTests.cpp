@@ -461,6 +461,56 @@ void TestTilingPatternRendering() {
     std::filesystem::remove(output);
 }
 
+void TestSeparationAndDeviceNRendering() {
+    // Separation image: a 2x1 image whose single tint is transformed by a
+    // Type 2 function into DeviceRGB alternate. tint 0 -> C0 [0 0 1] (blue),
+    // tint 1 -> C1 [1 0 0] (red). The renderer must apply the function (not
+    // multiply the transformed value by tint again).
+    std::ostringstream pdf;
+    pdf << "%PDF-1.4\n";
+    std::array<std::size_t, 8> offsets{};
+    const auto object = [&](const std::size_t number, const std::string& body) {
+        offsets[number] = static_cast<std::size_t>(pdf.tellp());
+        pdf << number << " 0 obj\n" << body << "\nendobj\n";
+    };
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+              "/Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>");
+    const std::string imageBytes = "\x10\xFF";
+    object(4, "<< /Type /XObject /Subtype /Image /Width 2 /Height 1 "
+              "/ColorSpace [ /Separation /Spot /DeviceRGB 6 0 R ] "
+              "/BitsPerComponent 8 /Length " + std::to_string(imageBytes.size()) + " >>\nstream\n"
+              + imageBytes + "\nendstream");
+    const std::string content = "q 0 0 100 100 cm /Im1 Do Q";
+    object(5, "<< /Length " + std::to_string(content.size()) + " >>\nstream\n"
+              + content + "endstream");
+    object(6, "<< /FunctionType 2 /C0 [0 0 1] /C1 [1 0 0] /N 1 >>");
+    const std::size_t xrefOffset = static_cast<std::size_t>(pdf.tellp());
+    pdf << "xref\n0 7\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i <= 6U; ++i) {
+        pdf << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    pdf << "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    const auto output = TempPath("pdfpp_feature_separation.pdf");
+    {
+        std::ofstream file(output, std::ios::binary);
+        file << pdf.str();
+    }
+    const auto document = PdfDocument::Open(output);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 100U);
+    PDFPP_TEST_CHECK(bitmap.GetHeight() == 100U);
+    // tint 0 -> blue, tint 1 -> red.
+    const auto bluePixel = bitmap.GetPixel(10U, 25U);
+    PDFPP_TEST_CHECK(bluePixel.blue > bluePixel.red && bluePixel.blue > 200U);
+    const auto redPixel = bitmap.GetPixel(90U, 25U);
+    PDFPP_TEST_CHECK(redPixel.red > redPixel.blue && redPixel.red > 200U);
+    std::filesystem::remove(output);
+}
+
 void TestOptionalContentLayers() {
     const auto output = TempPath("pdfpp_feature_layers.pdf");
     PdfWriter writer;
@@ -1043,6 +1093,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.DashPatternRendering", TestDashPatternRendering);
     runner.Run("Feature.ShadingRenderingAndSoftMask", TestShadingRenderingAndSoftMask);
     runner.Run("Feature.TilingPatternRendering", TestTilingPatternRendering);
+    runner.Run("Feature.SeparationAndDeviceNRendering", TestSeparationAndDeviceNRendering);
     runner.Run("Feature.OptionalContentLayers", TestOptionalContentLayers);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);

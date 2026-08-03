@@ -45,6 +45,7 @@ sub-suites. Strict builds compile the same suite with warnings treated as errors
 | Line dash patterns | `Content.DashPatternParsing`, `Feature.DashPatternRendering` | Content `d` parsing and pixel-level dash on/off alternation |
 | Shading rendering + soft masks | `Feature.ShadingRenderingAndSoftMask` | Axial gradient render (blue→red) through a clip path, dictionary shading resource resolution, differing-size soft-mask sampling, and blended gradient compositing |
 | Tiling patterns | `Feature.TilingPatternRendering` | `/Pattern cs` + `scn/SCN` fill with repeated tile content (BBox/XStep/YStep/Matrix), alternating color squares |
+| Separation/DeviceN color spaces | `Feature.SeparationAndDeviceNRendering` | Tint-transform rendering into DeviceRGB alternate (blue→red), array-encoded color-space detection |
 | Password and permission management | `Security.PasswordManagerLifecycle`, `Security.EncryptedPageEditing`, `Security.EncryptedForms` | Encrypt/change/remove passwords, permission-denied edits, and encrypted form updates |
 | Differential rendering vs MuPDF | `tools/validation/compare_render.py` | `PdfPP.Inspect` render summary compared against `mutool`/PyMuPDF dimensions and dark-pixel coverage |
 | Differential text vs MuPDF | `tools/validation/compare_text.py` | Per-page token overlap between Pdf++ and MuPDF extraction |
