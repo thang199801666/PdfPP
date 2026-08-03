@@ -25,6 +25,7 @@ This document maps the current public feature set to its automated unit or integ
 | Open action | `Feature.OpenActionLifecycleAndRemapping` |
 | Text/image stamps and watermarks | `Feature.TextImageStampsAndWatermarks` |
 | Embedded files and attachment annotations | `API.WriterEmbeddedFiles`, `Feature.EmbeddedFileLifecycleAndValidation` |
+| PDF portfolios | `Feature.Portfolio` | Catalog `/Collection` entry (view mode + title) grouping embedded files |
 | Annotations and keyword highlighting | `API.AnnotationsAndHighlight`, `Reader.AnnotationEditor` |
 | Advanced annotations (FreeText/Ink/Polygon/Polyline/Square/Circle/Stamp) | `API.AdvancedAnnotationsAndXfdf` | Add, remove (filtered and full), update contents, appearance generation, XFDF export/import round trip, flattening (full + filtered), reply threads (`/IRT`/`/RT`), and `/Popup` linkage |
 | AcroForm operations and flattening | `Writer.CanvasCatalogAndPageOrganizer`, `Writer.PageEditingFormsIntegration` |

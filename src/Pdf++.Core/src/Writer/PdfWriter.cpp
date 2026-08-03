@@ -511,6 +511,14 @@ std::size_t PdfWriter::GetFileAttachmentCount(std::size_t pageIndex) const {
     return state_->pages[pageIndex].fileAttachments.size();
 }
 
+void PdfWriter::SetPortfolio(const PdfPortfolioOptions& options) {
+    state_->portfolio = options;
+}
+
+void PdfWriter::ClearPortfolio() noexcept { state_->portfolio.reset(); }
+
+bool PdfWriter::HasPortfolio() const noexcept { return state_->portfolio.has_value(); }
+
 void PdfWriter::AddTextStamp(std::size_t pageIndex, const PdfTextStampOptions& options) {
     if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
     if (options.text.empty()) return;
@@ -710,6 +718,14 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     }
     if (pageLabelsObject != 0) objects[catalog] += " /PageLabels " + std::to_string(pageLabelsObject) + " 0 R";
     if (ocPropertiesObject != 0) objects[catalog] += " /OCProperties " + std::to_string(ocPropertiesObject) + " 0 R";
+    if (state_->portfolio) {
+        objects[catalog] += " /Collection << /Type /Collection /View /" +
+            (state_->portfolio->view.empty() ? std::string("D") : state_->portfolio->view);
+        if (!state_->portfolio->title.empty()) {
+            objects[catalog] += " /Title (" + escapePdfString(state_->portfolio->title) + ")";
+        }
+        objects[catalog] += " >>";
+    }
     if (state_->openAction) {
         Internal::PdfWriterNamedDestination action;
         action.pageIndex = state_->openAction->pageIndex;

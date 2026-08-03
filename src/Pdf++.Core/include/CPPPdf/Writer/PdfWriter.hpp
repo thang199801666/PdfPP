@@ -163,6 +163,13 @@ struct PdfBookmarkOptions final {
 enum class PdfAssociatedFileRelationship { Unspecified, Source, Data, Alternative, Supplement, EncryptedPayload, FormData, Schema };
 enum class PdfFileAttachmentIcon { Graph, Paperclip, PushPin, Tag };
 
+// A PDF portfolio (collection) groups embedded files into a browsable shell.
+struct PdfPortfolioOptions final {
+    std::string title;
+    // Initial view mode: /D (detail), /T (tiles), /H (hidden), /L (left).
+    std::string view{"D"};
+};
+
 struct PdfEmbeddedFileOptions final {
     std::string description;
     std::string mimeType{"application/octet-stream"};
@@ -251,6 +258,11 @@ public:
                            const PdfFileAttachmentOptions& options);
     void ClearFileAttachments(std::size_t pageIndex);
     [[nodiscard]] std::size_t GetFileAttachmentCount(std::size_t pageIndex) const;
+
+    // Marks the document as a portfolio with a /Collection entry in the catalog.
+    void SetPortfolio(const PdfPortfolioOptions& options = {});
+    void ClearPortfolio() noexcept;
+    [[nodiscard]] bool HasPortfolio() const noexcept;
 
     // Optional content (layers): register a named layer and set layer defaults.
     [[nodiscard]] std::size_t AddOptionalContentGroup(const PdfOcgOptions& options);

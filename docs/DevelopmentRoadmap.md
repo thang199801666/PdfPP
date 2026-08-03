@@ -70,6 +70,7 @@ secondary scope.
 - Complete outlines, destinations, actions, page labels and optional content.
 - Optional content (layers) is supported end-to-end: `PdfWriter::AddOptionalContentGroup` registers named `/OCG` groups, `PdfCanvas::BeginLayer`/`EndLayer` mark content, and the catalog carries `/OCProperties` with default visibility.
 - Improve attachments, portfolios and embedded-file relationships.
+- `PdfWriter::SetPortfolio` writes a catalog `/Collection` entry (view mode + title) grouping embedded files into a portfolio shell.
 
 ## Phase 5: Compliance and Security
 

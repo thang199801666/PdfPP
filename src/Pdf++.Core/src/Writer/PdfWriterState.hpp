@@ -96,6 +96,7 @@ struct PdfWriterState {
     std::vector<PdfWriterBookmark> bookmarks;
     std::vector<PdfWriterNamedDestination> namedDestinations;
     std::vector<PdfWriterEmbeddedFile> embeddedFiles;
+    std::optional<PdfPortfolioOptions> portfolio;
     std::vector<PdfWriterImage> images;
     std::vector<PdfWriterExtGState> extGStates;
     std::vector<PdfWriterEmbeddedFont> embeddedFonts;

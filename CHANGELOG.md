@@ -1,3 +1,11 @@
+## 0.63.0
+
+- PDF portfolios: `PdfWriter::SetPortfolio`/`ClearPortfolio`/`HasPortfolio`
+  mark the document as a collection with a catalog `/Collection` entry (view
+  mode + optional title), grouping embedded files into a browsable shell.
+- Tests: `Feature.Portfolio` verifies the `/Collection` catalog entry, view
+  mode, and title round trip. All suites green (27 feature subtests).
+
 ## 0.62.0
 
 - AcroForm field calculations: `PdfAcroForm::CalculateFields` reads `/AA /C`

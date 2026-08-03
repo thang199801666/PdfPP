@@ -741,6 +741,31 @@ void TestDocumentLayoutPrimitives() {
 }
 
 
+void TestPortfolio() {
+    const auto output = TempPath("pdfpp_feature_portfolio.pdf");
+    PdfWriter writer;
+    writer.AddPage({0, 0, 200, 200});
+    const std::array<std::byte, 4> fileBytes{std::byte{'A'}, std::byte{'B'}, std::byte{'C'}, std::byte{'D'}};
+    writer.AddEmbeddedFile("report.txt", fileBytes);
+    PdfPortfolioOptions portfolio;
+    portfolio.title = "Project Documents";
+    portfolio.view = "T";
+    writer.SetPortfolio(portfolio);
+    PDFPP_TEST_CHECK(writer.HasPortfolio());
+    writer.Save(output);
+    const std::string bytes = ReadText(output);
+    PDFPP_TEST_CHECK(bytes.find("/Collection") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/View /T") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Title (Project Documents)") != std::string::npos);
+    auto document = PdfDocument::Open(output);
+    const PdfDictionary* catalog = document.GetObject(document.GetCatalogReference()).AsDictionary();
+    PDFPP_TEST_CHECK(catalog != nullptr);
+    PDFPP_TEST_CHECK(catalog->Contains(PdfName("Collection")));
+    writer.ClearPortfolio();
+    PDFPP_TEST_CHECK(!writer.HasPortfolio());
+    std::filesystem::remove(output);
+}
+
 void TestDocumentTextIndexMappedInputAndStreamWriter() {
     const auto output = TempPath("pdfpp_feature_document_text_index.pdf");
     PdfWriter writer;
@@ -1217,6 +1242,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.OptionalContentLayers", TestOptionalContentLayers);
     runner.Run("Feature.TextLayoutAndFallback", TestTextLayoutAndFallback);
     runner.Run("Feature.DocumentLayoutPrimitives", TestDocumentLayoutPrimitives);
+    runner.Run("Feature.Portfolio", TestPortfolio);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");
