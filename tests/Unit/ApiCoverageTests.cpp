@@ -635,6 +635,63 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     std::filesystem::remove(threaded);
 }
 
+void TestAcroFormCalculations() {
+    // Build a PDF with an AcroForm: two numeric input fields (A=10, B=5) and a
+    // calculated field `total` whose /AA /C script is `total = A + B`.
+    std::ostringstream pdf;
+    pdf << "%PDF-1.7\n";
+    std::array<std::size_t, 11> offsets{};
+    const auto object = [&](const std::size_t number, const std::string& body) {
+        offsets[number] = static_cast<std::size_t>(pdf.tellp());
+        pdf << number << " 0 obj\n" << body << "\nendobj\n";
+    };
+    object(1, "<< /Type /Catalog /Pages 2 0 R /AcroForm 7 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] "
+              "/Resources << /Font << /F1 6 0 R >> >> /Contents 5 0 R >>");
+    const std::string content = "BT /F1 12 Tf 20 350 Td (calc) Tj ET";
+    object(5, "<< /Length " + std::to_string(content.size()) + " >>\nstream\n"
+              + content + "endstream");
+    object(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    object(7, "<< /Fields [8 0 R 9 0 R 10 0 R] /DA (/Helv 0 Tf 0 g) "
+              "/DR << /Font << /Helv 6 0 R >> >> >>");
+    object(8, "<< /Type /Annot /Subtype /Widget /FT /Tx /T (A) /V (10) /Rect [20 20 80 30] /P 3 0 R >>");
+    object(10, "<< /Type /Annot /Subtype /Widget /FT /Tx /T (B) /V (5) /Rect [20 40 80 50] /P 3 0 R >>");
+    const std::string calcJs = "total = A + B";
+    object(9, "<< /Type /Annot /Subtype /Widget /FT /Tx /T (total) /V () /Rect [100 20 200 30] /P 3 0 R "
+              "/AA << /C << /Type /Action /S /JavaScript /JS (" + calcJs + ") >> >> >>");
+    const std::size_t xrefOffset = static_cast<std::size_t>(pdf.tellp());
+    pdf << "xref\n0 11\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i <= 10U; ++i) {
+        pdf << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    pdf << "trailer\n<< /Size 11 /Root 1 0 R >>\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    const auto input = TempPath("pdfpp_api_calc_input.pdf");
+    {
+        std::ofstream file(input, std::ios::binary);
+        file << pdf.str();
+    }
+    // Set A=10 and B=5.
+    const auto updated = TempPath("pdfpp_api_calc_updated.pdf");
+    const auto updateResult = PdfAcroForm::SetFieldValues(input, updated, {{"A", "10"}, {"B", "5"}});
+    PDFPP_TEST_CHECK(updateResult.updatedFieldCount == 2U);
+    const auto calcOutput = TempPath("pdfpp_api_calc_output.pdf");
+    const auto calcResult = PdfAcroForm::CalculateFields(updated, calcOutput);
+    PDFPP_TEST_CHECK(calcResult.calculatedFieldCount == 1U);
+    const auto fields = PdfAcroForm::GetFields(calcOutput);
+    bool foundTotal = false;
+    for (const auto& field : fields) {
+        if (field.name == "total") {
+            foundTotal = true;
+            PDFPP_TEST_CHECK(field.value == "15"); // A(10) + B(5)
+        }
+    }
+    PDFPP_TEST_CHECK(foundTotal);
+    std::filesystem::remove(input);
+    std::filesystem::remove(updated);
+    std::filesystem::remove(calcOutput);
+}
+
 } // namespace
 
 
@@ -854,7 +911,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 61U);
+    static_assert(CPPPdf::VersionMinor == 62U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -864,7 +921,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.61.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.62.0");
 }
 
 int RunApiCoverageTests() {
@@ -888,6 +945,7 @@ int RunApiCoverageTests() {
     runner.Run("API.PageImport", [&] { TestImport(base); });
     runner.Run("API.AnnotationsAndHighlight", [&] { TestAnnotationsAndHighlight(base); });
     runner.Run("API.AdvancedAnnotationsAndXfdf", [&] { TestAdvancedAnnotationsAndXfdf(base); });
+    runner.Run("API.AcroFormCalculations", TestAcroFormCalculations);
 
     std::filesystem::remove(base);
     return runner.PrintSummary("Public API coverage");

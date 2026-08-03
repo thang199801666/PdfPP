@@ -1,3 +1,15 @@
+## 0.62.0
+
+- AcroForm field calculations: `PdfAcroForm::CalculateFields` reads `/AA /C`
+  JavaScript calculation scripts and evaluates the common `+ - * /`
+  arithmetic (with parentheses, literals, and field-name references) via a
+  restricted evaluator, then writes the recalculated `/V` values.
+- `GetFields` now reports numeric (integer/real) field values correctly via
+  `objectTextValue` (previously only strings and names were read).
+- Added `PdfFormActionType`/`PdfFormAction` placeholders for field actions.
+- Tests: `API.AcroFormCalculations` verifies `total = A + B` recalculates to
+  15. All suites green.
+
 ## 0.61.0
 
 - TrueType kerning: the `kern` table is parsed and `PdfTrueTypeFont` exposes

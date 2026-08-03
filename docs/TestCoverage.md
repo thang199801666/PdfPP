@@ -28,6 +28,7 @@ This document maps the current public feature set to its automated unit or integ
 | Annotations and keyword highlighting | `API.AnnotationsAndHighlight`, `Reader.AnnotationEditor` |
 | Advanced annotations (FreeText/Ink/Polygon/Polyline/Square/Circle/Stamp) | `API.AdvancedAnnotationsAndXfdf` | Add, remove (filtered and full), update contents, appearance generation, XFDF export/import round trip, flattening (full + filtered), reply threads (`/IRT`/`/RT`), and `/Popup` linkage |
 | AcroForm operations and flattening | `Writer.CanvasCatalogAndPageOrganizer`, `Writer.PageEditingFormsIntegration` |
+| AcroForm calculations | `API.AcroFormCalculations` | `/AA /C` arithmetic evaluation (`total = A + B`) recalculates `/V` values |
 | Save and read-back validation | `Feature.SaveValidationAndRoundTrip`, `Writer.ObjectStreamRoundTrip`, `Writer.XrefStreamAndClassic` |
 | Optional content (layers) | `Feature.OptionalContentLayers` | Register OCG groups, `/OC` BDC/EMC marking, `/OCProperties` catalog output, and missing-layer rejection |
 | Incremental updates and resave | `Writer.IncrementalObjectStream`, `Writer.IncrementalEncryptedObjectStream`, `Writer.ResaveCollapsesIncremental`, `Writer.ResaveDeduplicatesStreams`, `Writer.ResaveEncryptedPreservesPasswords` |

@@ -60,6 +60,7 @@ secondary scope.
 ## Phase 4: Document Features
 
 - Complete AcroForm widgets, appearances, flags and calculations.
+- AcroForm calculation scripts (`/AA /C`) are evaluated with a restricted arithmetic parser and the recalculated `/V` values are written back.
 - Add XFDF import/export and reliable flattening.
 - `PdfXfdf` exports page annotations to the Adobe XFDF XML schema and imports an XFDF file back into a PDF through `PdfAnnotationEditor`.
 - Add FreeText, Stamp, Ink, Polygon and Polyline annotations.

@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <optional>
 #include <set>
@@ -115,6 +116,12 @@ std::string objectTextValue(const PdfObject* value) {
     if (!value) return {};
     if (const std::string* text = value->AsString()) return *text;
     if (const PdfName* name = value->AsName()) return name->value();
+    if (const auto integer = value->AsInteger()) return std::to_string(*integer);
+    if (const auto real = value->AsReal()) {
+        std::ostringstream output;
+        output << std::setprecision(12) << *real;
+        return output.str();
+    }
     return {};
 }
 
@@ -767,6 +774,207 @@ PdfFormAppearanceResult PdfAcroForm::FlattenFields(
     }
 
     if (!revisions.empty()) writeIncrementalObjects(inputPath, outputPath, document, revisions);
+    else {
+        std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
+        const std::string source = readFile(inputPath);
+        output.write(source.data(), static_cast<std::streamsize>(source.size()));
+    }
+    return result;
+}
+
+namespace {
+
+std::string trimWhitespace(std::string_view value) {
+    const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    });
+    const auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    }).base();
+    if (begin >= end) return {};
+    return std::string(begin, end);
+}
+
+// Minimal arithmetic evaluator for AcroForm calculation scripts. Supports the
+// common `+ - * /` operators, parentheses, numeric literals, and references to
+// other fields by name (resolved to their numeric value). Returns std::nullopt
+// when the expression cannot be parsed.
+class CalcEvaluator final {
+public:
+    explicit CalcEvaluator(const std::map<std::string, double>& values) : values_(values) {}
+
+    std::optional<double> Evaluate(std::string_view expression) {
+        pos_ = 0;
+        expression_ = expression;
+        const auto result = ParseAddSub();
+        if (result && pos_ == expression_.size()) return result;
+        return std::nullopt;
+    }
+
+private:
+    std::string_view expression_;
+    std::size_t pos_{};
+    const std::map<std::string, double>& values_;
+
+    void SkipSpace() { while (pos_ < expression_.size() && expression_[pos_] == ' ') ++pos_; }
+
+    std::optional<double> ParseAddSub() {
+        auto left = ParseMulDiv();
+        if (!left) return std::nullopt;
+        while (true) {
+            SkipSpace();
+            if (pos_ >= expression_.size()) return left;
+            const char op = expression_[pos_];
+            if (op != '+' && op != '-') return left;
+            ++pos_;
+            auto right = ParseMulDiv();
+            if (!right) return std::nullopt;
+            if (op == '+') *left += *right;
+            else *left -= *right;
+        }
+    }
+
+    std::optional<double> ParseMulDiv() {
+        auto left = ParseUnary();
+        if (!left) return std::nullopt;
+        while (true) {
+            SkipSpace();
+            if (pos_ >= expression_.size()) return left;
+            const char op = expression_[pos_];
+            if (op != '*' && op != '/') return left;
+            ++pos_;
+            auto right = ParseUnary();
+            if (!right) return std::nullopt;
+            if (op == '*') *left *= *right;
+            else {
+                if (*right == 0.0) return std::nullopt;
+                *left /= *right;
+            }
+        }
+    }
+
+    std::optional<double> ParseUnary() {
+        SkipSpace();
+        if (pos_ < expression_.size() && (expression_[pos_] == '-' || expression_[pos_] == '+')) {
+            const bool negate = expression_[pos_] == '-';
+            ++pos_;
+            auto value = ParseUnary();
+            if (!value) return std::nullopt;
+            return negate ? -*value : *value;
+        }
+        return ParsePrimary();
+    }
+
+    std::optional<double> ParsePrimary() {
+        SkipSpace();
+        if (pos_ >= expression_.size()) return std::nullopt;
+        const char ch = expression_[pos_];
+        if (ch == '(') {
+            ++pos_;
+            auto inner = ParseAddSub();
+            SkipSpace();
+            if (!inner || pos_ >= expression_.size() || expression_[pos_] != ')') return std::nullopt;
+            ++pos_;
+            return inner;
+        }
+        if (ch >= '0' && ch <= '9') {
+            const auto begin = pos_;
+            while (pos_ < expression_.size() && ((expression_[pos_] >= '0' && expression_[pos_] <= '9') ||
+                   expression_[pos_] == '.')) ++pos_;
+            const std::string token(expression_.substr(begin, pos_ - begin));
+            try {
+                return std::stod(token);
+            } catch (...) {
+                return std::nullopt;
+            }
+        }
+        // Field reference: [A-Za-z_.]+ resolved to a numeric value.
+        const auto begin = pos_;
+        while (pos_ < expression_.size() &&
+               (std::isalnum(static_cast<unsigned char>(expression_[pos_])) || expression_[pos_] == '_' ||
+                expression_[pos_] == '.')) ++pos_;
+        if (pos_ == begin) return std::nullopt;
+        const std::string name(expression_.substr(begin, pos_ - begin));
+        const auto found = values_.find(name);
+        if (found == values_.end()) return std::nullopt;
+        return found->second;
+    }
+};
+
+double numericFieldValue(const PdfObject& value) {
+    if (const auto real = value.AsReal()) return *real;
+    if (const auto integer = value.AsInteger()) return static_cast<double>(*integer);
+    if (const std::string* text = value.AsString()) {
+        try { return std::stod(*text); } catch (...) { return 0.0; }
+    }
+    return 0.0;
+}
+
+// Extracts the calculation script (`/AA /C`, a JavaScript string) from a field.
+std::string fieldCalcScript(const PdfDocument& document, const FieldNode& node) {
+    const PdfObject& raw = document.GetObject(node.reference);
+    const PdfDictionary* dictionary = raw.AsDictionary();
+    if (!dictionary) dictionary = &node.dictionary;
+    const PdfObject* aaObject = dictionary->Find(PdfName("AA"));
+    const PdfDictionary* aa = aaObject ? resolveDictionary(document, *aaObject) : nullptr;
+    if (!aa) return {};
+    const PdfObject* calcObject = aa->Find(PdfName("C"));
+    if (const PdfDictionary* calc = calcObject ? resolveDictionary(document, *calcObject) : nullptr) {
+        if (const std::string* js = calc->Find(PdfName("JS")) ?
+            calc->Find(PdfName("JS"))->AsString() : nullptr) {
+            return *js;
+        }
+    }
+    if (const std::string* js = calcObject ? calcObject->AsString() : nullptr) return *js;
+    return {};
+}
+
+} // namespace
+
+PdfFormCalcResult PdfAcroForm::CalculateFields(
+    const std::filesystem::path& inputPath,
+    const std::filesystem::path& outputPath,
+    const PdfReaderOptions& readerOptions) {
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    const auto nodes = readFieldNodes(document);
+
+    // Collect current numeric values by full field name.
+    std::map<std::string, double> currentValues;
+    for (const auto& node : nodes) {
+        currentValues[node.fullName] = numericFieldValue(node.inheritedValue);
+    }
+
+    PdfFormCalcResult result{outputPath, 0U, {}};
+    // Fields with a `/AA /C` script are computed fields; their names are the
+    // ones listed in the script (simplified: the script's leftmost identifier
+    // that matches no other field is the target). Evaluate each script.
+    std::vector<FieldNode> computed;
+    for (const auto& node : nodes) {
+        const std::string script = fieldCalcScript(document, node);
+        if (!script.empty()) {
+            computed.push_back(node);
+        }
+    }
+
+    Internal::PdfIncrementalWriter writer(inputPath, outputPath, document);
+    std::uint32_t nextObject = Internal::PdfIncrementalWriter::NextObjectNumber(document);
+    for (const auto& node : computed) {
+        const std::string script = fieldCalcScript(document, node);
+        // The target field name is the script text before the first `=`.
+        const auto eq = script.find('=');
+        const std::string targetName = eq == std::string::npos ? node.fullName : trimWhitespace(script.substr(0, eq));
+        const std::string expression = eq == std::string::npos ? script : script.substr(eq + 1U);
+        CalcEvaluator evaluator(currentValues);
+        const auto value = evaluator.Evaluate(expression);
+        if (!value) continue;
+        PdfDictionary updated = deepCloneDictionary(node.dictionary);
+        updated.Put(PdfName("V"), PdfObject(*value));
+        writer.WriteDictionary(node.reference, updated);
+        ++result.calculatedFieldCount;
+        result.updatedFields.push_back(targetName);
+        currentValues[targetName] = *value;
+    }
+    if (!computed.empty()) writer.Finish(nextObject);
     else {
         std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
         const std::string source = readFile(inputPath);
