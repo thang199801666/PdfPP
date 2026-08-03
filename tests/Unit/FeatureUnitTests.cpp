@@ -681,6 +681,12 @@ void TestTextLayoutAndFallback() {
     PDFPP_TEST_CHECK(latin == "ABC");
     const auto hebrew = PdfTextLayout::ReorderBidi("\xD7\x90\xD7\x91"); // alef bet (RTL)
     PDFPP_TEST_CHECK(hebrew == "\xD7\x91\xD7\x90"); // visual order reversed
+    // Mixed: "ab<hebrew>" -> Hebrew reversed but Latin prefix order kept.
+    const auto mixed = PdfTextLayout::ReorderBidi("ab\xD7\x90\xD7\x91");
+    PDFPP_TEST_CHECK(mixed.find("ab") == 0U);
+    // Grapheme clusters with an emoji + combining mark.
+    const auto emoji = PdfTextLayout::GraphemeClusters("a\xF0\x9F\x98\x80" "b");
+    PDFPP_TEST_CHECK(emoji.size() == 3U);
 
     // Kerning: fonts with a `kern` table expose pair adjustments; Helvetica-less
     // test avoids font-file dependence, so exercise the API shape via the
