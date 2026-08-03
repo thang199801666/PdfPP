@@ -725,6 +725,8 @@ void TestDocumentLayoutPrimitives() {
         PdfDocumentLayout::ListOptions{PdfDocumentLayout::ListStyle::Decimal});
     layout.DrawColumns(0U, {"Column A text", "Column B text"},
         PdfRectangle{40, 40, 360, 400}, 16.0);
+    layout.DrawTable(0U, {"Name", "Value"},
+        {{"Alpha", "1"}, {"Beta", "2"}}, PdfRectangle{40, 300, 300, 380});
     layout.DrawHeader(0U, 0U, PdfRectangle{0, 0, 400, 500},
         PdfDocumentLayout::HeaderFooterOptions{"", "", "Report"});
     layout.DrawFooter(0U, 0U, PdfRectangle{0, 0, 400, 500},

@@ -87,6 +87,26 @@ public:
         double x, double y,
         const ListOptions& options = {});
 
+    struct TableOptions final {
+        double fontSize{10.0};
+        double padding{3.0};
+        double headerRowHeight{18.0};
+        double rowHeight{16.0};
+        bool drawGrid{true};
+        bool boldHeader{false};
+    };
+
+    // Draws a table with a header row and data rows. `columnWidths` gives the
+    // relative widths (scaled to fit `box`). Returns the y position after the
+    // last row.
+    [[nodiscard]] double DrawTable(
+        std::size_t pageIndex,
+        const std::vector<std::string>& headers,
+        const std::vector<std::vector<std::string>>& rows,
+        const PdfRectangle& box,
+        const std::vector<double>& columnWidths = {},
+        const TableOptions& options = {});
+
     // Draws text in two or more columns. `gap` is the horizontal gap between
     // columns. Returns the number of columns used.
     [[nodiscard]] std::size_t DrawColumns(

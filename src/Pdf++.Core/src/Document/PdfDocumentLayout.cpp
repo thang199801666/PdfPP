@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <string>
 
 namespace CPPPdf {
@@ -222,6 +223,71 @@ std::size_t PdfDocumentLayout::DrawFooter(
         ++drawn;
     }
     return drawn;
+}
+
+double PdfDocumentLayout::DrawTable(
+    const std::size_t pageIndex,
+    const std::vector<std::string>& headers,
+    const std::vector<std::vector<std::string>>& rows,
+    const PdfRectangle& box,
+    const std::vector<double>& columnWidths,
+    const TableOptions& options) {
+    const std::size_t columns = headers.size();
+    if (columns == 0U) return box.top;
+    // Normalize relative column widths.
+    std::vector<double> widths(columns, 1.0);
+    if (columnWidths.size() == columns) {
+        double total = 0.0;
+        for (const double w : columnWidths) total += w;
+        if (total > 0.0) {
+            for (std::size_t c = 0; c < columns; ++c) widths[c] = columnWidths[c] / total * box.width();
+        }
+    } else {
+        const double colWidth = box.width() / static_cast<double>(columns);
+        for (auto& w : widths) w = colWidth;
+    }
+
+    auto canvas = writer_.GetCanvas(pageIndex);
+    double y = box.top;
+    // Header row.
+    for (std::size_t c = 0; c < columns; ++c) {
+        const double left = box.left + std::accumulate(widths.begin(), widths.begin() + static_cast<std::ptrdiff_t>(c), 0.0);
+        canvas.BeginText().SetFontAndSize("Helvetica", options.fontSize)
+            .MoveText(left + options.padding, y - options.fontSize)
+            .ShowText(headers[c]).EndText();
+    }
+    y -= options.headerRowHeight;
+    if (options.drawGrid) {
+        canvas.SaveState().SetStrokeColor(PdfColor::Gray(0.7)).SetLineWidth(0.5);
+        for (std::size_t c = 0; c <= columns; ++c) {
+            const double x = box.left + std::accumulate(widths.begin(), widths.begin() + static_cast<std::ptrdiff_t>(c), 0.0);
+            canvas.DrawLine(x, box.top, x, y);
+        }
+        canvas.DrawLine(box.left, box.top, box.right, box.top);
+        canvas.DrawLine(box.left, y, box.right, y);
+        canvas.RestoreState();
+    }
+    // Data rows.
+    for (const auto& row : rows) {
+        for (std::size_t c = 0; c < columns && c < row.size(); ++c) {
+            const double left = box.left + std::accumulate(widths.begin(), widths.begin() + static_cast<std::ptrdiff_t>(c), 0.0);
+            canvas.BeginText().SetFontAndSize("Helvetica", options.fontSize)
+                .MoveText(left + options.padding, y - options.fontSize)
+                .ShowText(row[c]).EndText();
+        }
+        if (options.drawGrid) {
+            canvas.SaveState().SetStrokeColor(PdfColor::Gray(0.7)).SetLineWidth(0.5);
+            canvas.DrawLine(box.left, y, box.right, y);
+            canvas.RestoreState();
+        }
+        y -= options.rowHeight;
+    }
+    if (options.drawGrid) {
+        canvas.SaveState().SetStrokeColor(PdfColor::Gray(0.7)).SetLineWidth(0.5);
+        canvas.DrawLine(box.left, y, box.right, y);
+        canvas.RestoreState();
+    }
+    return y;
 }
 
 } // namespace CPPPdf
