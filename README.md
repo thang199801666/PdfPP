@@ -232,6 +232,62 @@ value into the `/Contents` placeholder in place, and `GetSignatures` inspects fi
 ByteRange, and applied contents. CMS/PKCS#7 parsing, key management, and validation
 remain external.
 
+## Pdf++ 0.47 PDF/A conformance validation
+
+Version 0.47 adds practical PDF/A validation for parts 1, 2, 3, and 4 across the
+A/B/U conformance levels:
+
+```cpp
+const auto document = CPPPdf::PdfDocument::Open("archive.pdf");
+const auto result = CPPPdf::PdfConformanceValidator::Validate(
+    document, CPPPdf::PdfConformanceProfile::PdfA2B);
+if (!result.IsValid()) {
+    for (const auto& issue : result.issues) {
+        // Report issue.code / issue.message, skipping non-fatal warnings.
+    }
+}
+```
+
+The validator checks the file version header, forbids encryption, verifies the XMP
+metadata `pdfaid:part`/`conformance`, requires a `/GTS_PDFA1` output intent, validates
+embedded TrueType/CFF fonts, enforces ToUnicode (level U) and tagged structure
+(level A), rejects transparency for PDF/A-1, and flags forbidden annotation subtypes.
+
+## Pdf++ 0.48 fuzzing
+
+Version 0.48 adds Clang libFuzzer targets for the parser, content processing, stream
+filters, and embedded fonts:
+
+```text
+cmake -S . -B build-fuzz -DPDFPP_BUILD_FUZZERS=ON -DPDFPP_BUILD_TESTS=OFF
+cmake --build build-fuzz --config Release
+PdfPP.FuzzReader.exe corpus\pdf -artifact_prefix=artifacts\fuzz\
+PdfPP.FuzzContent.exe corpus\content -artifact_prefix=artifacts\fuzz\
+PdfPP.FuzzFilter.exe corpus\streams -artifact_prefix=artifacts\fuzz\
+PdfPP.FuzzCffFont.exe corpus\fonts -artifact_prefix=artifacts\fuzz\
+PdfPP.FuzzTrueTypeFont.exe corpus\fonts -artifact_prefix=artifacts\fuzz\
+```
+
+All harnesses run under AddressSanitizer/UndefinedBehaviorSanitizer. Normal parser
+exceptions are expected; sanitizer findings and non-termination are actionable bugs.
+
+## Pdf++ 0.49 line dash patterns
+
+Version 0.49 adds line dash pattern support to the CPU renderer. The content
+processor parses the `d` operator into a `SetDashPattern` event, and the renderer
+applies the on/off alternation across subpaths with phase offset:
+
+```cpp
+writer.GetCanvas(page)
+    .SetStrokeColor(CPPPdf::PdfColor::Black())
+    .SetLineWidth(3.0)
+    .SetDashPattern({8.0, 4.0}, 0.0)   // 8 on, 4 off
+    .MoveTo(10, 50).LineTo(150, 50).Stroke();
+```
+
+Dashes participate in graphics-state save/restore and transparency-group scoping,
+completing the roadmap's line cap/join/miter behavior milestone.
+
 ## Contributing and security
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security-sensitive defects through the private process described in [SECURITY.md](SECURITY.md).

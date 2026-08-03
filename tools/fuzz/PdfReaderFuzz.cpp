@@ -1,4 +1,5 @@
 #include <CPPPdf/PdfDocument.hpp>
+#include <CPPPdf/PdfError.hpp>
 
 #include <cstddef>
 #include <cstdint>

@@ -48,6 +48,7 @@
     <ClInclude Include="include\CPPPdf\Forms.hpp" />
     <ClInclude Include="include\CPPPdf\Security\PdfSecurity.hpp" />
     <ClInclude Include="include\CPPPdf\Security\PdfSignature.hpp" />
+    <ClInclude Include="include\CPPPdf\Validation\PdfConformance.hpp" />
     <ClInclude Include="src\Internal\Security\PdfStandardSecurity.hpp" />
     <ClInclude Include="src\Internal\Writer\PdfIncrementalWriter.hpp" />
     <ClInclude Include="include\CPPPdf\Graphics\PdfFunction.hpp" />
@@ -84,6 +85,7 @@
     <ClCompile Include="src\Forms\PdfAcroForm.cpp" />
     <ClCompile Include="src\Security\PdfPasswordManager.cpp" />
     <ClCompile Include="src\Security\PdfSignature.cpp" />
+    <ClCompile Include="src\Validation\PdfConformance.cpp" />
     <ClCompile Include="src\Writer\PdfIncrementalWriter.cpp" />
     <ClCompile Include="src\Graphics\PdfFunction.cpp" />
     <ClCompile Include="src\Rendering\PdfShading.cpp" />

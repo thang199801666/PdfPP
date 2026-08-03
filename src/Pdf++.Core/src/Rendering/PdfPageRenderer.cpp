@@ -171,6 +171,108 @@ void StrokePath(PdfBitmap& bitmap, const std::vector<Subpath>& paths,
     }
 }
 
+// Draws a single polyline subpath with a PDF dash pattern. The pattern is
+// [d1 d2 ... dn] alternating on/off, starting at dashPhase. Each on-segment
+// is drawn as an independent line so gaps remain transparent.
+void StrokeDashedPath(PdfBitmap& bitmap, const Subpath& path,
+                      const double width, const PdfRgbaColor color,
+                      const int lineCap,
+                      const std::vector<double>& pattern,
+                      const double phase) {
+    if (path.size() < 2U) return;
+    if (pattern.empty()) {
+        for (std::size_t i = 1; i < path.size(); ++i) {
+            DrawLine(bitmap, path[i - 1U], path[i], width, color, lineCap);
+        }
+        return;
+    }
+    double patternTotal = 0.0;
+    for (const double value : pattern) patternTotal += value;
+    if (patternTotal <= 0.0) {
+        for (std::size_t i = 1; i < path.size(); ++i) {
+            DrawLine(bitmap, path[i - 1U], path[i], width, color, lineCap);
+        }
+        return;
+    }
+
+    std::size_t patternIndex = 0U;
+    double patternRemaining = phase;
+    if (patternRemaining > 0.0) {
+        while (patternRemaining >= pattern[patternIndex] + 1.0e-9) {
+            patternRemaining -= pattern[patternIndex];
+            patternIndex = (patternIndex + 1U) % pattern.size();
+        }
+    }
+    bool drawing = (patternIndex % 2U) == 0U;
+    double dashRemaining = pattern[patternIndex] - patternRemaining;
+    double strokeStartX = 0.0;
+    double strokeStartY = 0.0;
+    bool strokeOpen = false;
+
+    const auto emitSegment = [&](const double x, const double y) {
+        if (strokeOpen) DrawLine(bitmap, {strokeStartX, strokeStartY}, {x, y}, width, color, lineCap);
+    };
+
+    for (std::size_t i = 1; i < path.size(); ++i) {
+        const auto& from = path[i - 1U];
+        const auto& to = path[i];
+        const double dx = to.x - from.x;
+        const double dy = to.y - from.y;
+        const double length = std::hypot(dx, dy);
+        if (length <= 1.0e-9) continue;
+        double remaining = length;
+        double px = from.x;
+        double py = from.y;
+        while (remaining > 0.0) {
+            const double step = std::min(remaining, dashRemaining);
+            const double nx = px + dx / length * step;
+            const double ny = py + dy / length * step;
+            if (drawing) {
+                if (!strokeOpen) {
+                    strokeStartX = px;
+                    strokeStartY = py;
+                    strokeOpen = true;
+                }
+                emitSegment(nx, ny);
+            } else if (strokeOpen) {
+                emitSegment(px, py);
+                strokeOpen = false;
+            }
+            px = nx;
+            py = ny;
+            remaining -= step;
+            dashRemaining -= step;
+            if (dashRemaining <= 1.0e-9) {
+                patternIndex = (patternIndex + 1U) % pattern.size();
+                drawing = (patternIndex % 2U) == 0U;
+                dashRemaining = pattern[patternIndex];
+                if (strokeOpen) {
+                    emitSegment(px, py);
+                    strokeOpen = false;
+                }
+            }
+        }
+    }
+    if (strokeOpen) emitSegment(path.back().x, path.back().y);
+}
+
+// Strokes paths honoring the PDF dash pattern. When the pattern is empty the
+// path is drawn solid with the usual cap/join handling.
+void StrokePathWithDash(PdfBitmap& bitmap, const std::vector<Subpath>& paths,
+                        const double width, const PdfRgbaColor color,
+                        const int lineCap, const int lineJoin,
+                        const double miterLimit,
+                        const std::vector<double>& pattern,
+                        const double phase) {
+    if (pattern.empty()) {
+        StrokePath(bitmap, paths, width, color, lineCap, lineJoin, miterLimit);
+        return;
+    }
+    for (const auto& path : paths) {
+        StrokeDashedPath(bitmap, path, width, color, lineCap, pattern, phase);
+    }
+}
+
 void FillPath(PdfBitmap& bitmap, const std::vector<Subpath>& paths,
               const PdfRgbaColor color, const bool evenOdd) {
     struct Crossing final { double x{}; int winding{}; };
@@ -308,6 +410,8 @@ struct GroupLayer final {
     PdfBlendMode innerBlend{PdfBlendMode::SourceOver};
     bool innerIsolated{};
     bool innerKnockout{};
+    std::vector<double> dashPattern;
+    double dashPhase{};
 };
 
 ClipRegion CreatePathMask(const std::size_t width, const std::size_t height,
@@ -938,6 +1042,8 @@ PdfBitmap PdfPageRenderer::Render(
         PdfBlendMode blendMode = PdfBlendMode::SourceOver;
         bool transparencyIsolated = false;
         bool transparencyKnockout = false;
+        std::vector<double> dashPattern;
+        double dashPhase = 0.0;
         ClipRegion clip;
         clip.mask.assign(CheckedPixelCount(width, height), 1U);
         clip.maxX = width - 1U;
@@ -950,17 +1056,20 @@ PdfBitmap PdfPageRenderer::Render(
             PdfBlendMode blendMode{PdfBlendMode::SourceOver};
             bool transparencyIsolated{};
             bool transparencyKnockout{};
+            std::vector<double> dashPattern;
+            double dashPhase{};
         };
         std::vector<ClipState> clipStack;
         std::vector<GroupLayer> groupStack;
         PdfBitmap* target = &bitmap;
         const auto paintPaths = [&](const PdfContentEvent& event, const bool fill, const bool stroke, const bool evenOdd) {
             if (fill) FillPath(*target, paths, WithAlpha(ToColor(event.textState.fillColor), fillAlpha), evenOdd);
-            if (stroke) StrokePath(*target, paths,
+            if (stroke) StrokePathWithDash(*target, paths,
                                    std::max(1.0, event.textState.lineWidth * scale),
                                    WithAlpha(ToColor(event.textState.strokeColor), strokeAlpha),
                                    event.textState.lineCap, event.textState.lineJoin,
-                                   event.textState.miterLimit);
+                                   event.textState.miterLimit,
+                                   dashPattern, dashPhase);
         };
         const PdfDocument::PdfContentEventHandler pathHandler = [&](const PdfContentEvent& event) {
             if (event.type == PdfContentEventType::BeginTransparencyGroup) {
@@ -978,6 +1087,8 @@ PdfBitmap PdfPageRenderer::Render(
                 layer.innerBlend = blendMode;
                 layer.innerIsolated = transparencyIsolated;
                 layer.innerKnockout = transparencyKnockout;
+                layer.dashPattern = dashPattern;
+                layer.dashPhase = dashPhase;
                 groupStack.push_back(std::move(layer));
                 target = &groupStack.back().bitmap;
                 return;
@@ -994,12 +1105,14 @@ PdfBitmap PdfPageRenderer::Render(
                 blendMode = layer.innerBlend;
                 transparencyIsolated = layer.innerIsolated;
                 transparencyKnockout = layer.innerKnockout;
+                dashPattern = layer.dashPattern;
+                dashPhase = layer.dashPhase;
                 CompositeGroupLayer(*target, layer.bitmap, layer.clip,
                                     layer.blendMode, layer.alpha, layer.knockout);
                 return;
             }
             if (event.type == PdfContentEventType::SaveState) {
-                clipStack.push_back({clip, strokeAlpha, fillAlpha, blendMode, transparencyIsolated, transparencyKnockout});
+                clipStack.push_back({clip, strokeAlpha, fillAlpha, blendMode, transparencyIsolated, transparencyKnockout, dashPattern, dashPhase});
                 return;
             }
             if (event.type == PdfContentEventType::RestoreState) {
@@ -1011,8 +1124,15 @@ PdfBitmap PdfPageRenderer::Render(
                     blendMode = clipStack.back().blendMode;
                     transparencyIsolated = clipStack.back().transparencyIsolated;
                     transparencyKnockout = clipStack.back().transparencyKnockout;
+                    dashPattern = clipStack.back().dashPattern;
+                    dashPhase = clipStack.back().dashPhase;
                     clipStack.pop_back();
                 }
+                return;
+            }
+            if (event.type == PdfContentEventType::SetDashPattern) {
+                dashPattern = event.numbers;
+                dashPhase = event.textState.dashPhase;
                 return;
             }
             if (event.operation == "gs" && event.type == PdfContentEventType::UnknownOperator) {

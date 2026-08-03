@@ -35,3 +35,5 @@ The executable currently reports 29 named subtests across the core, reader, writ
 | Transparency-group compositing | `Feature.TransparencyGroupRendering`, `Feature.MarkedContentTransparencyGroupRendering` | Form XObject `/Group /S /Transparency` and BDC/EMC group discovery with blend-mode/alpha compositing |
 | Embedded CFF font parsing and rendering | `Core.ParserFiltersFontsContentText`, `Feature.EmbeddedCffFontRendering` | Hand-built CFF font, Type 2 charstring interpreter, and rasterized embedded glyph pixels |
 | Digital-signature foundation | `Security.PasswordEncryptionRoundTrips` | Prepare/sign/apply/inspect round trip with ByteRange digest-input validation |
+| PDF/A conformance validation | `Validation.PdfA` | Conforming metadata/output-intent pass; missing metadata/output intent, part mismatch, and PDF/UA structure failures |
+| Line dash patterns | `Feature.DashPatternRendering` | Content `d` parsing and pixel-level dash on/off alternation |

@@ -1,3 +1,26 @@
+## 0.49.0
+
+- Added line dash pattern support to the CPU renderer.
+- The content processor now parses the `d` operator into a `SetDashPattern` event carrying the pattern array and phase.
+- The renderer applies dash on/off alternation across subpaths with phase offset, including within transparency groups and graphics-state save/restore.
+- Added `PdfContentEventType::SetDashPattern` and `dashPattern`/`dashPhase` graphics-state fields.
+- Added content-parse and pixel-level rendering coverage for dash patterns.
+
+## 0.48.0
+
+- Added four additional Clang libFuzzer targets alongside the existing reader harness.
+- `PdfPP.FuzzContent` exercises content-stream and graphics/text operator parsing.
+- `PdfPP.FuzzFilter` decodes Flate, ASCIIHex, ASCII85, RunLength, and LZW streams.
+- `PdfPP.FuzzCffFont` and `PdfPP.FuzzTrueTypeFont` parse embedded font programs and walk glyph outlines.
+- All harnesses run under AddressSanitizer/UndefinedBehaviorSanitizer and accept normal parser exceptions as expected input.
+
+## 0.47.0
+
+- Added practical PDF/A-1/2/3/4 conformance validation.
+- `PdfConformanceProfile` now covers A-1/2/3 conformance levels (A, B, U) plus PDF/A-4.
+- The validator checks the file version header, forbids encryption, verifies the XMP metadata stream's `pdfaid:part`/`conformance`, requires a `/GTS_PDFA1` output intent, validates embedded TrueType/CFF fonts, enforces ToUnicode for level U and tagged structure for level A, rejects transparency for PDF/A-1, and flags forbidden annotation subtypes.
+- Added regression coverage for PDF/A pass/fail scenarios.
+
 ## 0.46.0
 
 - Added an external digital-signature foundation (`PdfSignatureManager`).

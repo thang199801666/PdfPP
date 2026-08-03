@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.46.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.49.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -167,11 +167,23 @@ if(PDFPP_BUILD_TESTS)
 endif()
 
 if(PDFPP_BUILD_FUZZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(PDFPP_FUZZ_TARGETS
+        PdfPP.FuzzReader
+        PdfPP.FuzzContent
+        PdfPP.FuzzFilter
+        PdfPP.FuzzCffFont
+        PdfPP.FuzzTrueTypeFont)
     add_executable(PdfPP.FuzzReader tools/fuzz/PdfReaderFuzz.cpp)
-    target_link_libraries(PdfPP.FuzzReader PRIVATE CPPPdf::Core)
-    target_compile_options(PdfPP.FuzzReader PRIVATE -fsanitize=fuzzer,address,undefined)
-    target_link_options(PdfPP.FuzzReader PRIVATE -fsanitize=fuzzer,address,undefined)
-    target_compile_features(PdfPP.FuzzReader PRIVATE cxx_std_20)
+    add_executable(PdfPP.FuzzContent tools/fuzz/PdfContentFuzz.cpp)
+    add_executable(PdfPP.FuzzFilter tools/fuzz/PdfFilterFuzz.cpp)
+    add_executable(PdfPP.FuzzCffFont tools/fuzz/PdfCffFontFuzz.cpp)
+    add_executable(PdfPP.FuzzTrueTypeFont tools/fuzz/PdfTrueTypeFontFuzz.cpp)
+    foreach(target ${PDFPP_FUZZ_TARGETS})
+        target_link_libraries(${target} PRIVATE CPPPdf::Core)
+        target_compile_options(${target} PRIVATE -fsanitize=fuzzer,address,undefined)
+        target_link_options(${target} PRIVATE -fsanitize=fuzzer,address,undefined)
+        target_compile_features(${target} PRIVATE cxx_std_20)
+    endforeach()
 endif()
 
 if(PDFPP_BUILD_VALIDATION_TOOLS)

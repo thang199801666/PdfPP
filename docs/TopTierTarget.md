@@ -16,6 +16,7 @@ Pdf++ keeps the public version fixed at `1.0.0` while development continues. A r
 - Strict GCC, Clang, and MSVC builds with warnings as errors.
 - ASan, UBSan, and platform memory diagnostics pass.
 - Fuzz targets for object parsing, xref parsing, stream filters, content parsing, fonts, and images.
+- Clang libFuzzer targets (`PdfPP.FuzzReader`, `FuzzContent`, `FuzzFilter`, `FuzzCffFont`, `FuzzTrueTypeFont`) run under ASan/UBSan; object parsing, stream filters, content processing, and embedded fonts are covered.
 - External validation using qpdf and independent reader smoke tests.
 - Public test corpus with licenses suitable for redistribution.
 - No known crash on untrusted input within configured limits.

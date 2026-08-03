@@ -17,10 +17,12 @@ secondary scope.
 - Improve malformed-file recovery and error policy.
 - Preserve references when copying, merging, splitting and reordering pages.
 - Add parser, writer and recovery fuzzing.
+- Clang libFuzzer targets cover reader (xref/object/stream parsing), content-stream processing, stream filters, and embedded CFF/TrueType font parsing with ASan/UBSan.
 
 ## Phase 2: Graphics and Rendering
 
 - Complete line dash, cap, join and miter behavior.
+- Line dash patterns are parsed (`d` operator) and applied by the CPU renderer, including phase offset and dash on/off alternation across subpaths; line cap, join, and miter behavior are implemented.
 - Implement blend modes, transparency groups, soft masks and knockout.
 - Bitmap batch blending and additional blend-mode coverage are implemented.
 - Transparency group bitmap compositing supports isolated clearing, knockout replacement, and Form boundary discovery. The CPU renderer detects `/Group /S /Transparency` on Form XObjects and BDC/EMC marked content, renders group content into an offscreen layer, and composites with the group's blend mode, alpha, isolated, and knockout flags.
@@ -63,6 +65,7 @@ secondary scope.
 - Add CMS/PKCS#7, RSA/ECDSA, certificate chains and signature validation.
 - Add PAdES, timestamping, DSS and long-term validation foundations.
 - Implement PDF/A-1 through PDF/A-4 creation and validation.
+- Practical PDF/A validation: `PdfConformanceValidator` checks the file version header, forbids encryption, verifies the XMP metadata stream's `pdfaid:part`/`conformance`, requires a `/GTS_PDFA1` output intent, validates embedded TrueType/CFF fonts (plus ToUnicode for level U and tagged structure for level A), rejects transparency for PDF/A-1, and flags forbidden annotation subtypes.
 - Implement PDF/UA structure trees, role maps, language and alt text.
 - Add redaction and metadata/attachment sanitization.
 
@@ -71,6 +74,7 @@ secondary scope.
 - Build a broad PDF, font and image compatibility corpus.
 - Run differential rendering and extraction tests against MuPDF and iText outputs.
 - Fuzz object parsing, streams, content, fonts and images.
+- Clang libFuzzer targets (`PdfPP.FuzzReader`, `FuzzContent`, `FuzzFilter`, `FuzzCffFont`, `FuzzTrueTypeFont`) exercise object parsing, stream filters, content processing, and embedded fonts under ASan/UBSan.
 - Add display-list, glyph and image caches.
 - Glyph outline and advance caches now use bounded LRU storage with hit/miss counters.
 - Add parallel rendering and memory budgets for large files.

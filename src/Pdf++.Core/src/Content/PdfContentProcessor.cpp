@@ -460,6 +460,21 @@ void PdfContentProcessor::Process(
         else if (token == "M") {
             textState.miterLimit = std::max(1.0, NumberAt(operands, 0, 10.0));
         }
+        else if (token == "d") {
+            textState.dashPattern.clear();
+            if (!operands.empty()) {
+                if (const auto* array = std::get_if<ArrayOperand>(&operands.front())) {
+                    for (const auto& item : array->values) {
+                        if (const auto* value = std::get_if<double>(&item)) {
+                            if (*value > 0.0) textState.dashPattern.push_back(*value);
+                        }
+                    }
+                }
+            }
+            textState.dashPhase = std::max(0.0, NumberAt(operands, 1, 0.0));
+            Emit(handler_, PdfContentEventType::SetDashPattern, std::string(token), textState,
+                 {}, textState.dashPattern);
+        }
         else if (token == "gs") {
             Emit(handler_, PdfContentEventType::UnknownOperator, std::string(token), textState,
                  NameAt(operands, 0));

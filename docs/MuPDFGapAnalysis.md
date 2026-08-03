@@ -33,8 +33,8 @@ a mature multi-format engine; Pdf++ remains a PDF-focused public beta.
    (`PdfSignatureManager`): it creates /Sig fields, computes `/ByteRange`, exposes the
    exact digest input for an external signer, and writes the produced signature back
    into the placeholder. CMS/PKCS#7 parsing, certificate chains, signing-key
-   management, and validation are still external. PDF/A, PDF/X, and PDF/UA
-   validation remain unimplemented beyond the initial conformance checks.
+   management, and validation are still external. Practical PDF/A-1/2/3/4 conformance
+   validation is implemented; PDF/A creation and PDF/X/PDF/UA validation remain.
 
 ## Secondary gaps
 

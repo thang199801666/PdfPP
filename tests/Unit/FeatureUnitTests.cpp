@@ -816,6 +816,53 @@ void TestEmbeddedCffFontRendering() {
     std::filesystem::remove(output);
 }
 
+void TestDashPatternRendering() {
+    const auto output = TempPath("pdfpp_feature_dash.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 200, 100});
+    auto canvas = writer.GetCanvas(page);
+    canvas.SetStrokeColor(PdfColor::Black());
+    canvas.SetLineWidth(3.0);
+    // Dashed horizontal line from (10, 50) to (150, 50): 8 on, 8 off.
+    const std::array<double, 2> dash{8.0, 8.0};
+    canvas.SetDashPattern(dash, 0.0)
+        .MoveTo(10, 50)
+        .LineTo(150, 50)
+        .Stroke();
+    writer.Save(output);
+
+    const auto document = PdfDocument::Open(output);
+    const auto list = document.BuildPageDisplayList(0U);
+    PDFPP_TEST_CHECK(list.Count(PdfContentEventType::SetDashPattern) == 1U);
+
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 200U);
+    PDFPP_TEST_CHECK(bitmap.GetHeight() == 100U);
+
+    // The dash pattern must produce alternating on/off runs along the row.
+    std::size_t darkPixels = 0;
+    bool sawGap = false;
+    bool sawDash = false;
+    for (std::size_t x = 10; x < 150; ++x) {
+        const auto pixel = bitmap.GetPixel(x, 50U);
+        if (pixel.red < 100U) {
+            ++darkPixels;
+            sawDash = true;
+        } else {
+            sawGap = true;
+        }
+    }
+    PDFPP_TEST_CHECK(sawDash);
+    PDFPP_TEST_CHECK(sawGap);
+    // Roughly half of the 140pt line is painted by a 8/8 pattern; allow slack
+    // for round caps bleeding into gaps.
+    PDFPP_TEST_CHECK(darkPixels > 40U && darkPixels < 110U);
+
+    std::filesystem::remove(output);
+}
+
 } // namespace
 
 int RunFeatureUnitTests() {
@@ -836,6 +883,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.TransparencyGroupRendering", TestTransparencyGroupRendering);
     runner.Run("Feature.MarkedContentTransparencyGroupRendering", TestMarkedContentTransparencyGroupRendering);
     runner.Run("Feature.EmbeddedCffFontRendering", TestEmbeddedCffFontRendering);
+    runner.Run("Feature.DashPatternRendering", TestDashPatternRendering);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

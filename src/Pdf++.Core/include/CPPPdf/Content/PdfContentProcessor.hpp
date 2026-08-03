@@ -25,6 +25,7 @@ enum class PdfContentEventType {
     SetLineWidth,
     SetStrokeColor,
     SetFillColor,
+    SetDashPattern,
     SaveState,
     RestoreState,
     ConcatenateMatrix,
@@ -59,6 +60,8 @@ struct PdfTextStateSnapshot {
     int lineCap{};
     int lineJoin{};
     double miterLimit{10.0};
+    std::vector<double> dashPattern;
+    double dashPhase{};
     double strokeAlpha{1.0};
     double fillAlpha{1.0};
     bool transparencyIsolated{};

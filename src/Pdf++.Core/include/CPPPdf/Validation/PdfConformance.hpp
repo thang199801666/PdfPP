@@ -8,12 +8,21 @@ namespace CPPPdf {
 
 class PdfDocument;
 
+// Conformance profiles. The PDF/A parts encode the specification level
+// (ISO 19005-1/2/3/4) and the conformance level (A = tagged, B = basic,
+// U = Unicode-mapped text).
 enum class PdfConformanceProfile {
     Pdf17,
     Pdf20,
+    PdfA1A,
     PdfA1B,
+    PdfA2A,
     PdfA2B,
+    PdfA2U,
+    PdfA3A,
     PdfA3B,
+    PdfA3U,
+    PdfA4,
     PdfUA1
 };
 

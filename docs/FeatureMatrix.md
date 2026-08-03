@@ -19,7 +19,7 @@ Legend: **Yes** = supported, **Partial** = supported with documented limitations
 | AcroForm | Partial | Partial | Partial | Basic field update, appearance, and flattening |
 | Encryption | Yes | Yes | Partial | AES-128 (R4) and RC4-128 (R3); password/permission-aware incremental page, annotation, and AcroForm updates plus change/remove password. Page organizer/import/highlighter and AES-256 (R6) remain unsupported |
 | Digital signatures | Partial | Partial | No | External signing foundation: /Sig fields, ByteRange computation, digest-input exposure, and in-place signature application; CMS/PKCS#7, key material and validation are external |
-| PDF/A and PDF/UA | No | No | No | Compliance validation not implemented |
+| PDF/A and PDF/UA | Partial | Partial | No | PDF/A-1/2/3/4 conformance validation (metadata part/conformance, output intents, encryption, fonts, transparency, annotations); creation is not implemented |
 | High-level layout | N/A | No | No | Paragraph/table pagination is not implemented |
 
 ## Validation guidance
@@ -48,7 +48,7 @@ These safeguards reduce resource-exhaustion risk but are not a substitute for pr
 |---|---:|---|
 | RGBA bitmap raster target | Yes | CPU-backed `PdfBitmap` |
 | Page box, DPI and rotation mapping | Yes | MediaBox/CropBox and 0/90/180/270 rotation |
-| Vector path stroke/fill | Initial | Lines, rectangles and flattened cubic Beziers |
+| Vector path stroke/fill | Initial | Lines, rectangles, flattened cubic Beziers, line dash patterns, caps, joins, and miter limits |
 | RGB and grayscale paint state | Initial | Stroke/fill colors and line width |
 | Text rasterization | Initial | ASCII fallback from extracted text geometry |
 | Image XObject rendering | Partial | Raw decoded DeviceGray/RGB/CMYK and inline images; optional JPEG/JPX codecs remain planned |
