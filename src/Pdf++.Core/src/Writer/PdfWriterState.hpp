@@ -8,6 +8,7 @@
 #include <optional>
 #include <utility>
 #include <cstddef>
+#include <set>
 #include <CPPPdf/Rendering/PdfBitmap.hpp>
 
 namespace CPPPdf::Internal {
@@ -68,6 +69,10 @@ struct PdfWriterPageLabel {
     std::size_t pageIndex{};
     PdfPageLabelOptions options{};
 };
+struct PdfWriterOcg {
+    std::string name;
+    bool visible{true};
+};
 struct PdfWriterPage {
     PdfRectangle mediaBox{0,0,595,842};
     std::string content;
@@ -78,6 +83,7 @@ struct PdfWriterPage {
     std::optional<std::size_t> activeEmbeddedFontIndex;
     std::vector<PdfWriterLink> links;
     std::vector<PdfWriterFileAttachment> fileAttachments;
+    std::set<std::string> ocgResources;
 };
 struct PdfWriterState {
     PdfDocumentInfo documentInfo{};
@@ -85,6 +91,7 @@ struct PdfWriterState {
     std::optional<PdfDestinationOptions> openAction{};
     std::vector<PdfWriterPageLabel> pageLabels;
     std::vector<PdfWriterPage> pages;
+    std::vector<PdfWriterOcg> ocgs;
     std::vector<PdfWriterBookmark> bookmarks;
     std::vector<PdfWriterNamedDestination> namedDestinations;
     std::vector<PdfWriterEmbeddedFile> embeddedFiles;

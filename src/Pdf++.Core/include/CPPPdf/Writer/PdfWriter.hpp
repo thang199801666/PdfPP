@@ -35,6 +35,29 @@ struct PdfSaveOptions final {
 
 using PdfStampPoint = PdfPoint;
 
+enum class PdfLayerVisibility { Visible, Hidden, VisibleIfScreen, HiddenIfScreen };
+
+// Optional content group (PDF layer): a named group whose visibility can be
+// toggled by viewers. Content streams mark drawing operations with the group
+// via the /OC property in the page resources' /Properties dictionary.
+struct PdfOcgOptions final {
+    std::string name;
+    // Initial visibility when no viewer preference is set (defaults to on).
+    bool visible{true};
+};
+
+struct PdfLayerOptions final {
+    // The layer (by name) this drawing belongs to. When non-empty the writer
+    // wraps the drawing in /OC /PropertiesList marking and attaches the OCG to
+    // the page resources.
+    std::string layerName;
+    // Visibility policy for the layer (PDF 32000-1 §8.11.3.2).
+    PdfLayerVisibility visibility{PdfLayerVisibility::Visible};
+    // When true the drawing is always emitted outside any /OC marking even if
+    // a layer name is present (used for content that must never be hidden).
+    bool alwaysVisible{false};
+};
+
 enum class PdfStampLayer { Background, Foreground };
 
 enum class PdfStampHorizontalAlignment { Left, Center, Right };
@@ -228,6 +251,11 @@ public:
                            const PdfFileAttachmentOptions& options);
     void ClearFileAttachments(std::size_t pageIndex);
     [[nodiscard]] std::size_t GetFileAttachmentCount(std::size_t pageIndex) const;
+
+    // Optional content (layers): register a named layer and set layer defaults.
+    [[nodiscard]] std::size_t AddOptionalContentGroup(const PdfOcgOptions& options);
+    void ClearOptionalContentGroups() noexcept;
+    [[nodiscard]] std::size_t GetOptionalContentGroupCount() const noexcept;
 
     void AddTextStamp(std::size_t pageIndex, const PdfTextStampOptions& options);
     void AddTextStampToAllPages(const PdfTextStampOptions& options);

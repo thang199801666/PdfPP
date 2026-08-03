@@ -182,4 +182,23 @@ PdfCanvas& PdfCanvas::DrawImage(const PdfImage& image, const PdfRectangle& recta
     Append("q\n"+number(width)+" 0 0 "+number(height)+" "+number(rectangle.left)+" "+number(rectangle.bottom)+" cm\n/"+resourceName+" Do\nQ\n");
     return *this;
 }
+
+PdfCanvas& PdfCanvas::BeginLayer(std::string layerName) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    const auto layer = std::find_if(state_->ocgs.begin(), state_->ocgs.end(),
+        [&](const auto& item) { return item.name == layerName; });
+    if (layer == state_->ocgs.end()) {
+        throw std::invalid_argument("Layer is not registered: " + layerName);
+    }
+    const std::string resourceName = "OC" + std::to_string(
+        static_cast<std::size_t>(std::distance(state_->ocgs.begin(), layer)) + 1U);
+    state_->pages[pageIndex_].ocgResources.insert(resourceName);
+    Append("/"+resourceName+" BDC\n");
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::EndLayer() {
+    Append("EMC\n");
+    return *this;
+}
 } // namespace CPPPdf

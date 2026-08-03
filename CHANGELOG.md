@@ -1,3 +1,14 @@
+## 0.55.0
+
+- Added optional content groups (PDF layers): `PdfWriter::AddOptionalContentGroup`
+  registers named layers with initial visibility, and `PdfCanvas::BeginLayer`/
+  `EndLayer` wrap drawing in `/OC <name> BDC ... EMC` marking.
+- The writer now emits `/OCProperties` on the catalog (with `/OCGs`, `/D`,
+  `/Order`, and `/Default`), per-page `/Resources /Properties` dictionaries, and
+  validates that layers referenced by the canvas are registered.
+- Tests: `Feature.OptionalContentLayers` covers registration, reuse, missing-layer
+  rejection, and the saved PDF's OCG structure. All suites green.
+
 ## 0.54.0
 
 - `PdfAnnotationEditor::FlattenAnnotations` burns annotations into the page

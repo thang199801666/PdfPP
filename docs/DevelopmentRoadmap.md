@@ -59,6 +59,7 @@ secondary scope.
 - Add annotation appearances, replies, popups and flattening.
 - `PdfAnnotationEditor` flattens annotations into the page content stream (full or filtered), links replies via `/IRT`/`/RT`, emits `/Popup` annotations with `/Parent` back-references, and generates `/AP /N` appearance streams.
 - Complete outlines, destinations, actions, page labels and optional content.
+- Optional content (layers) is supported end-to-end: `PdfWriter::AddOptionalContentGroup` registers named `/OCG` groups, `PdfCanvas::BeginLayer`/`EndLayer` mark content, and the catalog carries `/OCProperties` with default visibility.
 - Improve attachments, portfolios and embedded-file relationships.
 
 ## Phase 5: Compliance and Security

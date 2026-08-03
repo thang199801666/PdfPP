@@ -85,6 +85,11 @@ public:
         const PdfTextLayoutOptions& options);
     PdfCanvas& EndText();
     PdfCanvas& DrawImage(const PdfImage& image, const PdfRectangle& rectangle);
+    // Optional content: wraps subsequent drawing in /OC <name> BDC ... EMC so
+    // the content belongs to the named layer. The layer must be registered on
+    // the writer with AddOptionalContentGroup first.
+    PdfCanvas& BeginLayer(std::string layerName);
+    PdfCanvas& EndLayer();
 private:
     friend class PdfWriter;
     PdfCanvas(std::shared_ptr<Internal::PdfWriterState> state, std::size_t pageIndex);

@@ -351,6 +351,53 @@ void TestEmbeddedFileLifecycleAndValidation() {
     std::filesystem::remove(filePath);
 }
 
+void TestOptionalContentLayers() {
+    const auto output = TempPath("pdfpp_feature_layers.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 400, 400});
+
+    const std::size_t index = writer.AddOptionalContentGroup(PdfOcgOptions{"Background map"});
+    PDFPP_TEST_CHECK(index == 0U);
+    PDFPP_TEST_CHECK(writer.GetOptionalContentGroupCount() == 1U);
+    writer.AddOptionalContentGroup(PdfOcgOptions{"Annotations", false});
+    PDFPP_TEST_CHECK(writer.GetOptionalContentGroupCount() == 2U);
+    // Registering the same name reuses the existing group.
+    PDFPP_TEST_CHECK(writer.AddOptionalContentGroup(PdfOcgOptions{"Background map"}) == 0U);
+    PDFPP_TEST_CHECK(writer.GetOptionalContentGroupCount() == 2U);
+
+    writer.GetCanvas(page).BeginLayer("Background map")
+        .SaveState().SetFillColor(PdfColor::Gray(0.9))
+        .FillRectangle(10, 10, 380, 380).RestoreState()
+        .EndLayer();
+    ExpectThrows([&] {
+        writer.GetCanvas(page).BeginLayer("missing-layer");
+    });
+    writer.ClearOptionalContentGroups();
+    PDFPP_TEST_CHECK(writer.GetOptionalContentGroupCount() == 0U);
+
+    // Rebuild with a layer so the saved PDF carries the OCG structure.
+    writer.AddOptionalContentGroup(PdfOcgOptions{"Visible layer"});
+    writer.AddOptionalContentGroup(PdfOcgOptions{"Hidden layer", false});
+    writer.GetCanvas(page).BeginLayer("Visible layer")
+        .BeginText().SetFontAndSize("Helvetica", 12).MoveText(30, 360)
+        .ShowText("Layer one content").EndText()
+        .EndLayer();
+    writer.Save(output);
+    const std::string bytes = ReadText(output);
+    PDFPP_TEST_CHECK(bytes.find("/OCProperties") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Type /OCG") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Properties") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/OC1 BDC") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("EMC") != std::string::npos);
+
+    auto document = PdfDocument::Open(output);
+    PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+    const PdfDictionary* catalog = document.GetObject(document.GetCatalogReference()).AsDictionary();
+    PDFPP_TEST_CHECK(catalog != nullptr);
+    PDFPP_TEST_CHECK(catalog->Contains(PdfName("OCProperties")));
+    std::filesystem::remove(output);
+}
+
 void TestPageMutationRemapsDependentFeatures() {
     PdfWriter writer;
     (void)writer.AddPage();
@@ -884,6 +931,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.MarkedContentTransparencyGroupRendering", TestMarkedContentTransparencyGroupRendering);
     runner.Run("Feature.EmbeddedCffFontRendering", TestEmbeddedCffFontRendering);
     runner.Run("Feature.DashPatternRendering", TestDashPatternRendering);
+    runner.Run("Feature.OptionalContentLayers", TestOptionalContentLayers);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

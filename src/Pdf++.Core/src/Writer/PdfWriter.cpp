@@ -476,6 +476,22 @@ void PdfWriter::ClearEmbeddedFiles() noexcept {
 
 std::size_t PdfWriter::GetEmbeddedFileCount() const noexcept { return state_->embeddedFiles.size(); }
 
+std::size_t PdfWriter::AddOptionalContentGroup(const PdfOcgOptions& options) {
+    if (options.name.empty()) throw std::invalid_argument("Optional content group name cannot be empty.");
+    const auto existing = std::find_if(state_->ocgs.begin(), state_->ocgs.end(),
+        [&](const auto& item) { return item.name == options.name; });
+    if (existing != state_->ocgs.end()) {
+        existing->visible = options.visible;
+        return static_cast<std::size_t>(std::distance(state_->ocgs.begin(), existing));
+    }
+    state_->ocgs.push_back(Internal::PdfWriterOcg{options.name, options.visible});
+    return state_->ocgs.size() - 1U;
+}
+
+void PdfWriter::ClearOptionalContentGroups() noexcept { state_->ocgs.clear(); }
+
+std::size_t PdfWriter::GetOptionalContentGroupCount() const noexcept { return state_->ocgs.size(); }
+
 void PdfWriter::AddFileAttachment(std::size_t pageIndex, std::string embeddedFileName,
                                   const PdfFileAttachmentOptions& options) {
     if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
@@ -662,6 +678,8 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     for (auto& ids : embeddedFileIds) { ids.stream = allocate(); ids.fileSpec = allocate(); }
     std::vector<int> imageIds(state_->images.size()); for(auto& id:imageIds) id=allocate();
     std::vector<int> extGStateIds(state_->extGStates.size()); for(auto& id:extGStateIds) id=allocate();
+    std::vector<int> ocgIds(state_->ocgs.size()); for(auto& id:ocgIds) id=allocate();
+    const int ocPropertiesObject = state_->ocgs.empty() ? 0 : allocate();
     struct EmbeddedIds { int file{}, descriptor{}, cid{}, toUnicode{}, type0{}; };
     std::vector<EmbeddedIds> fontIds(state_->embeddedFonts.size());
     for(auto& ids:fontIds){ ids.file=allocate(); ids.descriptor=allocate(); ids.cid=allocate(); ids.toUnicode=allocate(); ids.type0=allocate(); }
@@ -691,6 +709,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         objects[catalog] += "]";
     }
     if (pageLabelsObject != 0) objects[catalog] += " /PageLabels " + std::to_string(pageLabelsObject) + " 0 R";
+    if (ocPropertiesObject != 0) objects[catalog] += " /OCProperties " + std::to_string(ocPropertiesObject) + " 0 R";
     if (state_->openAction) {
         Internal::PdfWriterNamedDestination action;
         action.pageIndex = state_->openAction->pageIndex;
@@ -918,11 +937,28 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         cmap<<"endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"; const auto cm=cmap.str(); objects[ids.toUnicode]="<< /Length "+std::to_string(cm.size())+" >>\nstream\n"+cm+"endstream";
         objects[ids.type0]="<< /Type /Font /Subtype /Type0 /BaseFont /"+base+" /Encoding /Identity-H /DescendantFonts ["+std::to_string(ids.cid)+" 0 R] /ToUnicode "+std::to_string(ids.toUnicode)+" 0 R >>";
     }
+    for (std::size_t i = 0; i < state_->ocgs.size(); ++i) {
+        objects[ocgIds[i]] = "<< /Type /OCG /Name (" + escapePdfString(state_->ocgs[i].name) + ") /Usage << >> >>";
+    }
+    if (ocPropertiesObject != 0) {
+        std::ostringstream properties;
+        properties << "<< /OCGs [";
+        for (const auto id : ocgIds) properties << id << " 0 R ";
+        properties << "] /D << /Order [] /ListMode /AllPages ";
+        std::ostringstream defaultState;
+        defaultState << "<< /ON [";
+        for (std::size_t i = 0; i < state_->ocgs.size(); ++i) {
+            if (state_->ocgs[i].visible) defaultState << ocgIds[i] << " 0 R ";
+        }
+        defaultState << "] >>";
+        properties << "/Default " << defaultState.str() << " >> >>";
+        objects[ocPropertiesObject] = properties.str();
+    }
     for(std::size_t i=0;i<state_->pages.size();++i){
         const auto&p=state_->pages[i];std::ostringstream box;box<<p.mediaBox.left<<' '<<p.mediaBox.bottom<<' '<<p.mediaBox.right<<' '<<p.mediaBox.top;
         std::ostringstream fonts; fonts<<"/F1 "<<base14Font<<" 0 R "; for(const auto fi:p.embeddedFontIndices)fonts<<'/'<<state_->embeddedFonts.at(fi).resourceName<<' '<<fontIds.at(fi).type0<<" 0 R ";
         std::ostringstream xObjects;for(const auto ii:p.imageIndices)xObjects<<'/'<<state_->images.at(ii).resourceName<<' '<<imageIds.at(ii)<<" 0 R ";
-        std::string resources="<< /Font << "+fonts.str()+">>";if(!p.imageIndices.empty())resources+=" /XObject << "+xObjects.str()+">>";if(!p.extGStateIndices.empty()){std::ostringstream gs;for(const auto gi:p.extGStateIndices)gs<<'/'<<state_->extGStates.at(gi).resourceName<<' '<<extGStateIds.at(gi)<<" 0 R ";resources+=" /ExtGState << "+gs.str()+">>";}resources+=" >>";
+        std::string resources="<< /Font << "+fonts.str()+">>";if(!p.imageIndices.empty())resources+=" /XObject << "+xObjects.str()+">>";if(!p.extGStateIndices.empty()){std::ostringstream gs;for(const auto gi:p.extGStateIndices)gs<<'/'<<state_->extGStates.at(gi).resourceName<<' '<<extGStateIds.at(gi)<<" 0 R ";resources+=" /ExtGState << "+gs.str()+">>";}if(!p.ocgResources.empty()){std::ostringstream props;props<<" /Properties << ";for(const auto& name:p.ocgResources){const std::size_t index=name.size()>2?static_cast<std::size_t>(std::stoul(name.substr(2)))-1U:0U;if(index<state_->ocgs.size())props<<'/'<<name<<' '<<ocgIds[index]<<" 0 R ";}props<<">>";resources+=props.str();}resources+=" >>";
         std::string annotations;
         if (!linkIds[i].empty() || !attachmentIds[i].empty()) {
             annotations = " /Annots [";
