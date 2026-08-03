@@ -68,6 +68,10 @@ struct PdfTextStateSnapshot {
     bool transparencyKnockout{};
     std::array<double, 3> strokeColor{0.0, 0.0, 0.0};
     std::array<double, 3> fillColor{0.0, 0.0, 0.0};
+    // Non-empty when a tiling/coloring pattern is selected via `scn`/`SCN`
+    // with a pattern color space (`/Pattern cs` + `/P1 scn`).
+    std::string fillPatternName;
+    std::string strokePatternName;
     std::array<double, 6> textMatrix{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
     std::array<double, 6> currentTransformationMatrix{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
 };

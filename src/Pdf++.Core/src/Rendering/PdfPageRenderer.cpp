@@ -1007,6 +1007,136 @@ void PaintRadialShading(PdfBitmap& bitmap, const PdfRadialShading& shading,
     }
 }
 
+// Computes the device-space bounding box that a set of subpaths covers.
+void PathBounds(const std::vector<Subpath>& paths, double& minX, double& minY,
+                double& maxX, double& maxY) {
+    minX = std::numeric_limits<double>::max();
+    minY = std::numeric_limits<double>::max();
+    maxX = -std::numeric_limits<double>::max();
+    maxY = -std::numeric_limits<double>::max();
+    bool any = false;
+    for (const auto& path : paths) {
+        for (const auto& point : path) {
+            minX = std::min(minX, point.x); minY = std::min(minY, point.y);
+            maxX = std::max(maxX, point.x); maxY = std::max(maxY, point.y);
+            any = true;
+        }
+    }
+    if (!any) { minX = 0.0; minY = 0.0; maxX = 0.0; maxY = 0.0; }
+}
+
+// Renders a tiling pattern by replaying the tile content stream for every tile
+// that intersects the filled region. The tile's /Matrix and the pattern color
+// space transform map pattern coordinates into user space, then the region's
+// CTM (already folded into `paths` by the caller) positions them on the page.
+void PaintTilingPattern(PdfBitmap& bitmap, const PdfResolvedPattern& pattern,
+                        const std::vector<Subpath>& paths, const CoordinateMapper& mapper,
+                        const ClipRegion& clip, const std::array<double, 6>& ctm,
+                        const double alpha, const bool renderPaths) {
+    if (!renderPaths) return;
+    if (pattern.patternType != 1U) return;
+    double minX, minY, maxX, maxY;
+    PathBounds(paths, minX, minY, maxX, maxY);
+    // Shrink to the visible bitmap region.
+    minX = std::max(minX, 0.0); minY = std::max(minY, 0.0);
+    maxX = std::min(maxX, static_cast<double>(bitmap.GetWidth()) - 1.0);
+    maxY = std::min(maxY, static_cast<double>(bitmap.GetHeight()) - 1.0);
+    if (minX > maxX || minY > maxY) return;
+
+    // Parse the tile content once into a display list.
+    PdfContentProcessor processor;
+    PdfDisplayList tile;
+    processor.SetHandler([&](const PdfContentEvent& event) { tile.Add(event); });
+    try {
+        processor.Process(pattern.tiling.content);
+    } catch (const PdfException&) {
+        return;
+    }
+    if (tile.Empty()) return;
+
+    const PdfRectangle& bbox = pattern.tiling.boundingBox;
+    const double tileWidth = std::max(0.01, bbox.width());
+    const double tileHeight = std::max(0.01, bbox.height());
+    const double xStep = pattern.tiling.xStep > 0.0 ? pattern.tiling.xStep : tileWidth;
+    const double yStep = pattern.tiling.yStep > 0.0 ? pattern.tiling.yStep : tileHeight;
+
+    // Pattern-to-device transform: device = ctm * patternMatrix * tilePoint.
+    const std::array<double, 6>& p = pattern.tiling.matrix;
+    const double originUserX = ctm[0] * p[4] + ctm[2] * p[5] + ctm[4];
+    const double originUserY = ctm[1] * p[4] + ctm[3] * p[5] + ctm[5];
+    const auto originDevice = mapper.Map(originUserX, originUserY);
+
+    const double stepXDevice = std::hypot(ctm[0] * p[0] * xStep, ctm[1] * p[0] * xStep);
+    const double stepYDevice = std::hypot(ctm[2] * p[3] * yStep, ctm[3] * p[3] * yStep);
+
+    // Determine the tile range that covers the region.
+    const double spanX = maxX - minX;
+    const double spanY = maxY - minY;
+    const std::int32_t startTileX = static_cast<std::int32_t>(
+        std::floor((minX - originDevice.x) / std::max(stepXDevice, 1.0)));
+    const std::int32_t startTileY = static_cast<std::int32_t>(
+        std::floor((minY - originDevice.y) / std::max(stepYDevice, 1.0)));
+    const std::int32_t tileCountX = static_cast<std::int32_t>(
+        std::ceil(spanX / std::max(stepXDevice, 1.0))) + 2;
+    const std::int32_t tileCountY = static_cast<std::int32_t>(
+        std::ceil(spanY / std::max(stepYDevice, 1.0))) + 2;
+
+    for (std::int32_t ty = startTileY; ty < startTileY + tileCountY; ++ty) {
+        for (std::int32_t tx = startTileX; tx < startTileX + tileCountX; ++tx) {
+            const double tileOriginDeviceX = originDevice.x + static_cast<double>(tx) * stepXDevice;
+            const double tileOriginDeviceY = originDevice.y + static_cast<double>(ty) * stepYDevice;
+            // Skip tiles that miss the region entirely.
+            if (tileOriginDeviceX > maxX || tileOriginDeviceY > maxY ||
+                tileOriginDeviceX + stepXDevice < minX || tileOriginDeviceY + stepYDevice < minY) {
+                continue;
+            }
+            // Replay the tile drawing with the tile origin offset applied.
+            std::vector<Subpath> tilePaths;
+            PdfRgbaColor tileFill{0U, 0U, 0U, 255U};
+            tile.Replay([&](const PdfContentEvent& event) {
+                if (event.type == PdfContentEventType::SetFillColor) {
+                    const auto color = ToColor(event.textState.fillColor);
+                    tileFill = {color.red, color.green, color.blue, 255U};
+                }
+            });
+            tile.Replay([&](const PdfContentEvent& event) {
+                if (event.type != PdfContentEventType::RenderPath) return;
+                if (event.operation == "m" && event.numbers.size() >= 2U) {
+                    tilePaths.emplace_back();
+                    const auto point = Transform(event.textState.currentTransformationMatrix,
+                                                 event.numbers[0], event.numbers[1]);
+                    tilePaths.back().push_back({
+                        tileOriginDeviceX + point[0],
+                        tileOriginDeviceY + point[1]});
+                } else if ((event.operation == "l" || event.operation == "m") && event.numbers.size() >= 2U && !tilePaths.empty()) {
+                    const auto point = Transform(event.textState.currentTransformationMatrix,
+                                                 event.numbers[0], event.numbers[1]);
+                    tilePaths.back().push_back({
+                        tileOriginDeviceX + point[0],
+                        tileOriginDeviceY + point[1]});
+                } else if (event.operation == "re" && event.numbers.size() >= 4U) {
+                    tilePaths.emplace_back();
+                    const auto origin = Transform(event.textState.currentTransformationMatrix,
+                                                  event.numbers[0], event.numbers[1]);
+                    const double w = event.numbers[2];
+                    const double h = event.numbers[3];
+                    tilePaths.back().push_back({tileOriginDeviceX + origin[0], tileOriginDeviceY + origin[1]});
+                    tilePaths.back().push_back({tileOriginDeviceX + origin[0] + w, tileOriginDeviceY + origin[1]});
+                    tilePaths.back().push_back({tileOriginDeviceX + origin[0] + w, tileOriginDeviceY + origin[1] + h});
+                    tilePaths.back().push_back({tileOriginDeviceX + origin[0], tileOriginDeviceY + origin[1] + h});
+                    tilePaths.back().push_back(tilePaths.back().front());
+                }
+            });
+            if (!tilePaths.empty()) {
+                // Fill the tile with the color from the tile content, blended at
+                // the requested opacity.
+                FillPath(bitmap, tilePaths, {tileFill.red, tileFill.green, tileFill.blue,
+                    static_cast<std::uint8_t>(std::lround(std::clamp(alpha, 0.0, 1.0) * 255.0))}, false);
+            }
+        }
+    }
+}
+
 } // namespace
 
 PdfBitmap PdfPageRenderer::Render(
@@ -1059,6 +1189,8 @@ PdfBitmap PdfPageRenderer::Render(
         bool transparencyKnockout = false;
         std::vector<double> dashPattern;
         double dashPhase = 0.0;
+        std::string fillPatternName;
+        std::string strokePatternName;
         ClipRegion clip;
         clip.mask.assign(CheckedPixelCount(width, height), 1U);
         clip.maxX = width - 1U;
@@ -1073,18 +1205,42 @@ PdfBitmap PdfPageRenderer::Render(
             bool transparencyKnockout{};
             std::vector<double> dashPattern;
             double dashPhase{};
+            std::string fillPatternName;
+            std::string strokePatternName;
         };
         std::vector<ClipState> clipStack;
         std::vector<GroupLayer> groupStack;
         PdfBitmap* target = &bitmap;
         const auto paintPaths = [&](const PdfContentEvent& event, const bool fill, const bool stroke, const bool evenOdd) {
-            if (fill) FillPath(*target, paths, WithAlpha(ToColor(event.textState.fillColor), fillAlpha), evenOdd);
-            if (stroke) StrokePathWithDash(*target, paths,
+            if (fill) {
+                if (!event.textState.fillPatternName.empty()) {
+                    const auto pattern = document.ResolveTilingPattern(
+                        pageIndex, event.resourceObjectNumber, event.textState.fillPatternName);
+                    if (pattern) {
+                        PaintTilingPattern(*target, *pattern, paths, mapper, clipActive ? clip : ClipRegion{},
+                                           event.textState.currentTransformationMatrix, fillAlpha, options.renderPaths);
+                    }
+                } else {
+                    FillPath(*target, paths, WithAlpha(ToColor(event.textState.fillColor), fillAlpha), evenOdd);
+                }
+            }
+            if (stroke) {
+                if (!event.textState.strokePatternName.empty()) {
+                    const auto pattern = document.ResolveTilingPattern(
+                        pageIndex, event.resourceObjectNumber, event.textState.strokePatternName);
+                    if (pattern) {
+                        PaintTilingPattern(*target, *pattern, paths, mapper, clipActive ? clip : ClipRegion{},
+                                           event.textState.currentTransformationMatrix, strokeAlpha, options.renderPaths);
+                    }
+                } else {
+                    StrokePathWithDash(*target, paths,
                                    std::max(1.0, event.textState.lineWidth * scale),
                                    WithAlpha(ToColor(event.textState.strokeColor), strokeAlpha),
                                    event.textState.lineCap, event.textState.lineJoin,
                                    event.textState.miterLimit,
                                    dashPattern, dashPhase);
+                }
+            }
         };
         const PdfDocument::PdfContentEventHandler pathHandler = [&](const PdfContentEvent& event) {
             if (event.type == PdfContentEventType::BeginTransparencyGroup) {

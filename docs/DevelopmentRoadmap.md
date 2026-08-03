@@ -37,6 +37,7 @@ secondary scope.
 - Add DeviceGray, DeviceRGB, DeviceCMYK and ICCBased color spaces.
 - Add Indexed, Separation and DeviceN color spaces.
 - Implement tiling patterns, shadings and output intents.
+- Tiling patterns are parsed (`/Pattern cs` + `scn/SCN`) and rendered: the tile content stream is replayed for every tile intersecting the filled region, honoring `/BBox`, `/XStep`, `/YStep`, and `/Matrix`.
 - Improve image masks, interpolation, downsampling and caching.
 - Add rendering comparison tests against independent reference renderers.
 

@@ -1,3 +1,17 @@
+## 0.57.0
+
+- Added tiling pattern support:
+  - Content processor parses `/Pattern cs/CS` and `scn/SCN` with a pattern
+    name, tracking `fillPatternName`/`strokePatternName` in the text state.
+  - `PdfDocument::ResolveTilingPattern` reads a `/Pattern` resource (type 1)
+    and extracts `/BBox`, `/XStep`, `/YStep`, `/PaintType`, `/TilingType`,
+    `/Matrix`, resources, and the tile content stream.
+  - The renderer replays the tile content for every tile intersecting the
+    filled region (`/Pattern cs /P1 scn ... re f` now fills with the repeated
+    tile instead of a solid color).
+- Tests: `Feature.TilingPatternRendering` verifies alternating red squares on
+  white for a 20x20 tile with a 10x10 red fill. All suites green.
+
 ## 0.56.0
 
 - Fixed shading resource resolution: `ResolveShading` now accepts a shading

@@ -492,6 +492,44 @@ void PdfContentProcessor::Process(
             Emit(handler_, token == "G" ? PdfContentEventType::SetStrokeColor : PdfContentEventType::SetFillColor,
                  std::string(token), textState, {}, {gray, gray, gray});
         }
+        else if (token == "CS" || token == "cs") {
+            // Pattern color space: later scn/SCN operands select a pattern.
+            const std::string space = NameAt(operands, 0);
+            auto& pattern = token == "CS" ? textState.strokePatternName : textState.fillPatternName;
+            if (space == "Pattern") {
+                // Keep the previous pattern name until a new scn selects one.
+            } else {
+                pattern.clear();
+            }
+        }
+        else if (token == "SCN" || token == "scn") {
+            // With a /Pattern color space, the last operand is the pattern name
+            // and any leading operands are the tint to the alternate space.
+            if (!operands.empty()) {
+                if (const auto* name = std::get_if<NameOperand>(&operands.back())) {
+                    auto& pattern = token == "SCN" ? textState.strokePatternName : textState.fillPatternName;
+                    pattern = name->value;
+                    std::vector<double> tint;
+                    for (std::size_t i = 0; i + 1U < operands.size(); ++i) {
+                        if (const auto* number = std::get_if<double>(&operands[i])) tint.push_back(*number);
+                    }
+                    if (tint.empty()) tint = {1.0};
+                    Emit(handler_, token == "SCN" ? PdfContentEventType::SetStrokeColor : PdfContentEventType::SetFillColor,
+                         std::string(token), textState, name->value, tint);
+                    continue;
+                }
+            }
+            // Non-pattern scn: treat as set-color with numeric operands.
+            std::vector<double> values;
+            for (const auto& operand : operands) {
+                if (const auto* number = std::get_if<double>(&operand)) values.push_back(std::clamp(*number, 0.0, 1.0));
+            }
+            auto& color = token == "SCN" ? textState.strokeColor : textState.fillColor;
+            if (values.size() >= 3U) color = {values[0], values[1], values[2]};
+            else if (values.size() == 1U) color = {values[0], values[0], values[0]};
+            Emit(handler_, token == "SCN" ? PdfContentEventType::SetStrokeColor : PdfContentEventType::SetFillColor,
+                 std::string(token), textState, {}, values);
+        }
         else if (token == "Tm") {
             for (std::size_t i = 0; i < 6; ++i) textState.textMatrix[i] = NumberAt(operands, i, i == 0 || i == 3 ? 1.0 : 0.0);
             Emit(handler_, PdfContentEventType::SetTextMatrix, std::string(token), textState,

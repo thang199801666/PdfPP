@@ -410,6 +410,57 @@ void TestShadingRenderingAndSoftMask() {
     std::filesystem::remove(output);
 }
 
+void TestTilingPatternRendering() {
+    // A page filled with a tiling pattern: the pattern is a 20x20 tile whose
+    // content fills a 10x10 square at its top-left with red, so the page shows
+    // alternating red squares on white.
+    std::ostringstream pdf;
+    pdf << "%PDF-1.4\n";
+    std::array<std::size_t, 6> offsets{};
+    const auto object = [&](const std::size_t number, const std::string& body) {
+        offsets[number] = static_cast<std::size_t>(pdf.tellp());
+        pdf << number << " 0 obj\n" << body << "\nendobj\n";
+    };
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+              "/Resources << /Pattern << /P1 4 0 R >> >> /Contents 5 0 R >>");
+    const std::string tileContent = "1 0 0 rg 0 0 10 10 re f";
+    object(4, "<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 "
+              "/BBox [0 0 20 20] /XStep 20 /YStep 20 /Resources << >> /Length "
+              + std::to_string(tileContent.size()) + " >>\nstream\n"
+              + tileContent + "endstream");
+    const std::string content = "/Pattern cs /P1 scn 0 0 100 100 re f";
+    object(5, "<< /Length " + std::to_string(content.size()) + " >>\nstream\n"
+              + content + "endstream");
+    const std::size_t xrefOffset = static_cast<std::size_t>(pdf.tellp());
+    pdf << "xref\n0 6\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i <= 5U; ++i) {
+        pdf << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    pdf << "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    const auto output = TempPath("pdfpp_feature_tiling.pdf");
+    {
+        std::ofstream file(output, std::ios::binary);
+        file << pdf.str();
+    }
+    const auto document = PdfDocument::Open(output);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 100U);
+    PDFPP_TEST_CHECK(bitmap.GetHeight() == 100U);
+    // Tile 0,0 covers [0,0]-[10,10] with red; tile 0,1 covers [10,0]-[20,10]
+    // (offset by 20 in x) so [10,10] area is white.
+    const auto redPixel = bitmap.GetPixel(5U, 5U);
+    PDFPP_TEST_CHECK(redPixel.red > 200U && redPixel.green < 60U);
+    const auto whitePixel = bitmap.GetPixel(15U, 5U);
+    PDFPP_TEST_CHECK(whitePixel.red > 200U && whitePixel.green > 200U);
+    const auto redFar = bitmap.GetPixel(25U, 25U);
+    PDFPP_TEST_CHECK(redFar.red > 200U && redFar.green < 60U);
+    std::filesystem::remove(output);
+}
+
 void TestOptionalContentLayers() {
     const auto output = TempPath("pdfpp_feature_layers.pdf");
     PdfWriter writer;
@@ -991,6 +1042,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.EmbeddedCffFontRendering", TestEmbeddedCffFontRendering);
     runner.Run("Feature.DashPatternRendering", TestDashPatternRendering);
     runner.Run("Feature.ShadingRenderingAndSoftMask", TestShadingRenderingAndSoftMask);
+    runner.Run("Feature.TilingPatternRendering", TestTilingPatternRendering);
     runner.Run("Feature.OptionalContentLayers", TestOptionalContentLayers);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);

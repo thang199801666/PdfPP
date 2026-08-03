@@ -152,6 +152,9 @@ public:
     [[nodiscard]] std::optional<PdfResolvedShading> ResolveRadialShading(
         std::size_t pageIndex, std::uint32_t resourceObjectNumber,
         std::string_view resourceName) const;
+    [[nodiscard]] std::optional<PdfResolvedPattern> ResolveTilingPattern(
+        std::size_t pageIndex, std::uint32_t resourceObjectNumber,
+        std::string_view resourceName) const;
     using PdfContentEventHandler = std::function<void(const PdfContentEvent&)>;
     void ForEachPageContentEvent(
         std::size_t pageIndex,

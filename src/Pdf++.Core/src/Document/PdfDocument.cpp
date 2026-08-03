@@ -3138,6 +3138,76 @@ std::optional<PdfResolvedShading> PdfDocument::ResolveRadialShading(
     return result;
 }
 
+std::optional<PdfResolvedPattern> PdfDocument::ResolveTilingPattern(
+    const std::size_t pageIndex, const std::uint32_t resourceObjectNumber,
+    const std::string_view resourceName) const {
+    const auto* form = resourceObjectNumber == 0U ? nullptr :
+        objectDictionary(*this, &GetObject({resourceObjectNumber, 0U}));
+    const auto* resources = form ? objectDictionary(*this, form->Find(PdfName("Resources"))) : nullptr;
+    if (resources == nullptr) resources = inheritedPageResources(*this, pageReferences().at(pageIndex));
+    const auto* patterns = resources ? objectDictionary(*this, resources->Find(PdfName("Pattern"))) : nullptr;
+    const auto* entry = patterns ? patterns->Find(PdfName(std::string(resourceName))) : nullptr;
+    if (entry == nullptr) return std::nullopt;
+    const auto* patternDictionary = [&]() -> const PdfDictionary* {
+        if (const auto reference = entry->AsReference()) {
+            return objectDictionary(*this, &GetObject({reference->first, reference->second}));
+        }
+        return entry->AsDictionary();
+    }();
+    if (patternDictionary == nullptr) return std::nullopt;
+    const auto patternType = patternDictionary->Find(PdfName("PatternType")) ?
+        patternDictionary->Find(PdfName("PatternType"))->AsInteger().value_or(0) : 0U;
+    if (patternType != 1U) return std::nullopt; // Coloring patterns unsupported.
+    PdfResolvedPattern result;
+    result.patternType = 1U;
+    const auto* bbox = patternDictionary->GetAsArray(PdfName("BBox"));
+    if (!bbox || bbox->size() < 4U) return std::nullopt;
+    result.tiling.boundingBox = PdfRectangle{
+        objectNumberValue(bbox->at(0U), 0.0), objectNumberValue(bbox->at(1U), 0.0),
+        objectNumberValue(bbox->at(2U), 0.0), objectNumberValue(bbox->at(3U), 0.0)};
+    result.tiling.xStep = objectNumberValue(patternDictionary->Find(PdfName("XStep"))
+        ? *patternDictionary->Find(PdfName("XStep")) : PdfObject(1.0), 1.0);
+    result.tiling.yStep = objectNumberValue(patternDictionary->Find(PdfName("YStep"))
+        ? *patternDictionary->Find(PdfName("YStep")) : PdfObject(1.0), 1.0);
+    result.tiling.paintType = patternDictionary->Find(PdfName("PaintType")) ?
+        patternDictionary->Find(PdfName("PaintType"))->AsInteger().value_or(1) : 1U;
+    result.tiling.tilingType = patternDictionary->Find(PdfName("TilingType")) ?
+        patternDictionary->Find(PdfName("TilingType"))->AsInteger().value_or(1) : 1U;
+    if (const auto* matrix = patternDictionary->GetAsArray(PdfName("Matrix")); matrix && matrix->size() >= 6U) {
+        for (std::size_t index = 0U; index < 6U; ++index) {
+            result.tiling.matrix[index] = objectNumberValue(matrix->at(index), index == 0U || index == 3U ? 1.0 : 0.0);
+        }
+    }
+    if (const PdfObject* resourcesObject = patternDictionary->Find(PdfName("Resources"))) {
+        if (const auto reference = resourcesObject->AsReference()) {
+            result.tiling.resourceObjectNumber = reference->first;
+            const PdfObject& resolved = GetObject({reference->first, reference->second});
+            if (const PdfStream* stream = resolved.AsStream()) {
+                result.tiling.resourcesDictionary.assign(
+                    reinterpret_cast<const char*>(stream->bytes().data()), stream->bytes().size());
+            } else if (const PdfDictionary* dictionary = resolved.AsDictionary()) {
+                std::ostringstream buffer;
+                Internal::PdfObjectSerializer::WriteDictionary(buffer, *dictionary);
+                result.tiling.resourcesDictionary = buffer.str();
+            }
+        } else if (const PdfDictionary* dictionary = resourcesObject->AsDictionary()) {
+            std::ostringstream buffer;
+            Internal::PdfObjectSerializer::WriteDictionary(buffer, *dictionary);
+            result.tiling.resourcesDictionary = buffer.str();
+        }
+    }
+    const PdfStream* patternStream = [&]() -> const PdfStream* {
+        if (const auto reference = entry->AsReference()) {
+            return GetObject({reference->first, reference->second}).AsStream();
+        }
+        return entry->AsStream();
+    }();
+    if (patternStream == nullptr) return std::nullopt;
+    const auto& bytes = patternStream->bytes();
+    result.tiling.content.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    return result;
+}
+
 void PdfDocument::ForEachPageContentEvent(
     const std::size_t pageIndex,
     const PdfContentEventHandler& handler) const {
