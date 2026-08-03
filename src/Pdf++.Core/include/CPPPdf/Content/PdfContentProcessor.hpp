@@ -32,7 +32,18 @@ enum class PdfContentEventType {
     InvokeXObject,
     RenderInlineImage,
     PaintShading,
+    BeginTransparencyGroup,
+    EndTransparencyGroup,
+    BeginMarkedContent,
+    EndMarkedContent,
     UnknownOperator
+};
+
+struct PdfTransparencyGroupProperties final {
+    std::string blendMode{"Normal"};
+    bool isolated{};
+    bool knockout{};
+    double alpha{1.0};
 };
 
 struct PdfTextStateSnapshot {
@@ -76,6 +87,8 @@ struct PdfContentEvent {
     PdfTextStateSnapshot textState;
     std::vector<PdfInlineImageProperty> inlineImageDictionary;
     std::vector<std::byte> bytes;
+    PdfTransparencyGroupProperties transparencyGroup;
+    std::string markedContentProperty;
 };
 
 class PdfContentProcessor final {

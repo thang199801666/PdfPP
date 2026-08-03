@@ -1,10 +1,12 @@
 #include <CPPPdf/Content/PdfContentProcessor.hpp>
 #include <CPPPdf/PdfError.hpp>
+#include "Internal/Parsing/PdfObjectParser.hpp"
 
 #include <algorithm>
 #include <charconv>
 #include <cctype>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -16,7 +18,8 @@ namespace {
 struct NameOperand { std::string value; };
 struct StringOperand { std::string value; };
 struct ArrayOperand { std::vector<std::variant<double, NameOperand, StringOperand>> values; };
-using Operand = std::variant<double, NameOperand, StringOperand, ArrayOperand>;
+struct DictOperand { std::string text; };
+using Operand = std::variant<double, NameOperand, StringOperand, ArrayOperand, DictOperand>;
 
 bool IsDelimiter(char c) {
     switch (c) {
@@ -295,6 +298,38 @@ void Emit(const PdfContentProcessor::Handler& handler,
     }
 }
 
+bool dictionaryBooleanLike(const PdfDictionary& dictionary, const char* key) {
+    const auto* value = dictionary.Find(PdfName(key));
+    if (value == nullptr) return false;
+    if (const auto boolean = value->AsBoolean()) return *boolean;
+    return false;
+}
+
+std::optional<PdfTransparencyGroupProperties> ParseTransparencyGroup(
+    std::string_view propertyList) {
+    try {
+        const auto object = Internal::PdfObjectParser::Parse(propertyList, 64U);
+        const auto* dictionary = object.AsDictionary();
+        if (dictionary == nullptr) return std::nullopt;
+        const auto* groupObject = dictionary->Find(PdfName("Group"));
+        if (groupObject == nullptr) return std::nullopt;
+        const auto* group = groupObject->AsDictionary();
+        if (group == nullptr) return std::nullopt;
+        const auto subtype = group->GetAsName(PdfName("S"));
+        if (!subtype || subtype->value() != "Transparency") return std::nullopt;
+        PdfTransparencyGroupProperties properties;
+        properties.isolated = dictionaryBooleanLike(*group, "I");
+        properties.knockout = dictionaryBooleanLike(*group, "K");
+        if (const auto blend = group->GetAsName(PdfName("BM"))) properties.blendMode = blend->value();
+        if (const auto alpha = group->Find(PdfName("CA"))) {
+            if (const auto real = alpha->AsReal()) properties.alpha = std::clamp(*real, 0.0, 1.0);
+        }
+        return properties;
+    } catch (const PdfException&) {
+        return std::nullopt;
+    }
+}
+
 } // namespace
 
 void PdfContentProcessor::Process(
@@ -319,6 +354,7 @@ void PdfContentProcessor::Process(
         double fillAlpha{1.0};
     };
     std::vector<GraphicsState> graphicsStack;
+    std::vector<bool> markedContentGroupStack;
     std::size_t offset{};
 
     while (offset < content.size()) {
@@ -333,10 +369,25 @@ void PdfContentProcessor::Process(
         if (c == '/') { operands.emplace_back(ParseName(content, offset)); continue; }
         if (c == '[') { operands.emplace_back(ParseArray(content, offset)); continue; }
         if (c == '<' && offset + 1 < content.size() && content[offset + 1] == '<') {
-            // Dictionaries are legal operands but uncommon for the currently supported operators.
-            const auto end = content.find(">>", offset + 2);
-            if (end == std::string_view::npos) throw PdfException(PdfErrorCode::MalformedObject, "Unterminated content dictionary.");
-            offset = end + 2;
+            // Dictionaries are legal operands (BDC property lists and inline
+            // transparency-group declarations). Capture the raw text so the
+            // document layer can resolve /Group metadata.
+            const auto dictStart = offset;
+            offset += 2;
+            int depth = 1;
+            while (offset < content.size() && depth > 0) {
+                if (offset + 1 < content.size() && content[offset] == '<' && content[offset + 1] == '<') {
+                    ++depth;
+                    offset += 2;
+                } else if (offset + 1 < content.size() && content[offset] == '>' && content[offset + 1] == '>') {
+                    --depth;
+                    offset += 2;
+                } else {
+                    ++offset;
+                }
+            }
+            if (depth != 0) throw PdfException(PdfErrorCode::MalformedObject, "Unterminated content dictionary.");
+            operands.emplace_back(DictOperand{std::string(content.substr(dictStart, offset - dictStart))});
             continue;
         }
 
@@ -498,6 +549,38 @@ void PdfContentProcessor::Process(
         }
         else if (token == "Do") Emit(handler_, PdfContentEventType::InvokeXObject, std::string(token), textState, NameAt(operands, 0));
         else if (token == "sh") Emit(handler_, PdfContentEventType::PaintShading, std::string(token), textState, NameAt(operands, 0));
+        else if (token == "BDC") {
+            bool isGroup = false;
+            PdfContentEvent event;
+            event.type = PdfContentEventType::BeginMarkedContent;
+            event.operation = std::string(token);
+            event.textState = textState;
+            event.text = NameAt(operands, 0);
+            if (operands.size() > 1U) {
+                if (const auto* name = std::get_if<NameOperand>(&operands[1])) {
+                    event.markedContentProperty = name->value;
+                } else if (const auto* dictionary = std::get_if<DictOperand>(&operands[1])) {
+                    event.markedContentProperty = dictionary->text;
+                    if (auto group = ParseTransparencyGroup(dictionary->text)) {
+                        event.type = PdfContentEventType::BeginTransparencyGroup;
+                        event.transparencyGroup = std::move(*group);
+                        isGroup = true;
+                    }
+                }
+            }
+            markedContentGroupStack.push_back(isGroup);
+            handler_(event);
+        }
+        else if (token == "EMC") {
+            const bool closesGroup = !markedContentGroupStack.empty() && markedContentGroupStack.back();
+            if (!markedContentGroupStack.empty()) markedContentGroupStack.pop_back();
+            PdfContentEvent event;
+            event.type = closesGroup ? PdfContentEventType::EndTransparencyGroup
+                                     : PdfContentEventType::EndMarkedContent;
+            event.operation = std::string(token);
+            event.textState = textState;
+            handler_(event);
+        }
         else if (token == "m" || token == "l" || token == "c" || token == "v" || token == "y" ||
                  token == "h" || token == "re" || token == "S" || token == "s" || token == "f" ||
                  token == "F" || token == "f*" || token == "B" || token == "B*" || token == "b" ||

@@ -260,6 +260,56 @@ void CompositeLayer(PdfBitmap& target, const PdfBitmap& layer, const ClipRegion&
     }
 }
 
+PdfBlendMode BlendModeFromName(const std::string_view name) {
+    if (name == "Multiply") return PdfBlendMode::Multiply;
+    if (name == "Screen") return PdfBlendMode::Screen;
+    if (name == "Darken") return PdfBlendMode::Darken;
+    if (name == "Lighten") return PdfBlendMode::Lighten;
+    if (name == "Overlay") return PdfBlendMode::Overlay;
+    if (name == "Difference") return PdfBlendMode::Difference;
+    if (name == "Exclusion") return PdfBlendMode::Exclusion;
+    return PdfBlendMode::SourceOver;
+}
+
+// Composites a transparency-group layer into its parent target. The group's
+// blend mode and alpha are applied per pixel within the saved clip region.
+// Knockout groups clear the destination before each source mark so overlapping
+// marks do not accumulate inside the group.
+void CompositeGroupLayer(PdfBitmap& target, const PdfBitmap& layer, const ClipRegion& clip,
+                         const PdfBlendMode blendMode, const double opacity, const bool knockout) {
+    if (clip.mask.empty() || !clip.visible) return;
+    for (std::size_t y = clip.minY; y <= clip.maxY; ++y) {
+        for (std::size_t x = clip.minX; x <= clip.maxX; ++x) {
+            const auto index = y * target.GetWidth() + x;
+            if (clip.mask[index] == 0U) continue;
+            auto pixel = layer.GetPixel(x, y);
+            if (pixel.alpha == 0U) continue;
+            if (knockout) target.SetPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), {0U, 0U, 0U, 0U});
+            pixel.alpha = static_cast<std::uint8_t>(std::lround(
+                static_cast<double>(pixel.alpha) * std::clamp(opacity, 0.0, 1.0)));
+            target.BlendPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), pixel, blendMode);
+        }
+    }
+}
+
+// A transparency-group paint layer. While a group is open, painting targets its
+// offscreen bitmap and the saved parent/clip/alpha state is restored on exit.
+struct GroupLayer final {
+    PdfBitmap bitmap;
+    PdfBitmap* parent{};
+    PdfBlendMode blendMode{PdfBlendMode::SourceOver};
+    double alpha{1.0};
+    bool isolated{};
+    bool knockout{};
+    ClipRegion clip;
+    bool clipActive{};
+    double strokeAlpha{1.0};
+    double fillAlpha{1.0};
+    PdfBlendMode innerBlend{PdfBlendMode::SourceOver};
+    bool innerIsolated{};
+    bool innerKnockout{};
+};
+
 ClipRegion CreatePathMask(const std::size_t width, const std::size_t height,
                           const std::vector<Subpath>& paths, const bool evenOdd) {
     PdfBitmap maskBitmap(width, height, {0U, 0U, 0U, 255U});
@@ -324,9 +374,13 @@ void AddTrueTypeGlyphPaths(std::vector<Subpath>&, const PdfTrueTypeGlyphOutline&
 void DrawTrueTypeGlyph(PdfBitmap&, const PdfTrueTypeGlyphOutline&, double, double,
                        double, double, PdfRgbaColor, int);
 
+void DrawCffGlyph(PdfBitmap&, const PdfCffGlyphOutline&, double, double,
+                  double, double, PdfRgbaColor, int);
+
 void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
                    const CoordinateMapper& mapper, const PdfRgbaColor color,
-                   const PdfTrueTypeFont* embeddedFont = nullptr) {
+                   const PdfTrueTypeFont* embeddedFont = nullptr,
+                   const PdfFontResource* cffResource = nullptr) {
     if (chunk.utf8Text.empty() || chunk.boundingBox.empty()) return;
     if (chunk.renderingMode == 3 || chunk.renderingMode == 7) return;
     const auto topLeft = mapper.Map(chunk.boundingBox.left, chunk.boundingBox.top);
@@ -369,6 +423,29 @@ void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
     double embeddedAdvance = 0.0;
     std::size_t byteIndex = 0;
     for (std::size_t characterIndex = 0; byteIndex < chunk.utf8Text.size(); ++characterIndex) {
+        if (cffResource && characterIndex < chunk.glyphIds.size() &&
+            chunk.glyphIds[characterIndex] != std::numeric_limits<std::uint16_t>::max()) {
+            const std::uint32_t glyphId = chunk.glyphIds[characterIndex];
+            bool outlineRendered = false;
+            try {
+                const auto outline = cffResource->GetCffGlyphOutline(glyphId);
+                if (!outline.IsEmpty()) {
+                    const double glyphAdvance = chunk.characterCodes.size() > 0U
+                        ? width / static_cast<double>(chunk.characterCodes.size()) : cellWidth;
+                    DrawCffGlyph(bitmap, outline, left + embeddedAdvance, top,
+                                 glyphAdvance, height, color, chunk.renderingMode);
+                    outlineRendered = true;
+                }
+            } catch (const std::exception&) {
+                // Fall back to the lightweight glyph below for malformed outlines.
+            }
+            embeddedAdvance += chunk.characterCodes.size() > 0U
+                ? width / static_cast<double>(chunk.characterCodes.size()) : cellWidth;
+            if (outlineRendered) {
+                byteIndex += codePointLength(byteIndex);
+                continue;
+            }
+        }
         if (embeddedFont && characterIndex < chunk.glyphIds.size() &&
             chunk.glyphIds[characterIndex] != std::numeric_limits<std::uint16_t>::max()) {
             const double glyphAdvance = totalEmbeddedAdvance > 0.0
@@ -392,7 +469,7 @@ void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
         const unsigned char raw = static_cast<unsigned char>(chunk.utf8Text[byteIndex]);
         const auto glyph = raw < 0x80U && raw >= 0x20U
             ? Glyph(static_cast<char>(raw)) : Glyph(' ');
-        const double originX = left + (embeddedFont ? embeddedAdvance :
+        const double originX = left + (embeddedFont || cffResource ? embeddedAdvance :
             static_cast<double>(characterIndex) * cellWidth);
         byteIndex += codePointLength(byteIndex);
         const double originY = top + (height - 7.0 * pixelScaleY) * 0.5;
@@ -491,6 +568,72 @@ void AddTrueTypeGlyphPaths(std::vector<Subpath>& paths,
             paths.push_back(std::move(path));
         }
     }
+}
+
+void AddCffGlyphPaths(std::vector<Subpath>& paths, const PdfCffGlyphOutline& outline,
+                      const double left, const double top,
+                      const double width, const double height) {
+    if (outline.IsEmpty() || outline.xMax <= outline.xMin || outline.yMax <= outline.yMin) return;
+    const double scaleX = width / (outline.xMax - outline.xMin);
+    const double scaleY = height / (outline.yMax - outline.yMin);
+    const auto map = [&](const double x, const double y) {
+        return DevicePoint{left + (x - outline.xMin) * scaleX,
+                           top + (outline.yMax - y) * scaleY};
+    };
+    Subpath path;
+    for (const auto& segment : outline.segments) {
+        if (segment.type == PdfCffOutlineSegment::Type::Move) {
+            if (!path.empty() && path.size() >= 3U) {
+                if (path.front().x != path.back().x || path.front().y != path.back().y) path.push_back(path.front());
+                paths.push_back(std::move(path));
+            }
+            path.clear();
+            path.push_back(map(segment.x1, segment.y1));
+            continue;
+        }
+        if (segment.type == PdfCffOutlineSegment::Type::Line) {
+            if (!path.empty()) path.push_back(map(segment.x1, segment.y1));
+            continue;
+        }
+        // Cubic Bezier flattening: start is the last point on the path.
+        if (path.empty()) continue;
+        const auto start = path.back();
+        const auto c1 = map(segment.x1, segment.y1);
+        const auto c2 = map(segment.x2, segment.y2);
+        const auto end = map(segment.x3, segment.y3);
+        const int steps = std::clamp(static_cast<int>(std::ceil(std::max(
+            std::hypot(c1.x - start.x, c1.y - start.y) +
+            std::hypot(c2.x - c1.x, c2.y - c1.y),
+            std::hypot(end.x - c2.x, end.y - c2.y)) / 3.0)), 4, 48);
+        for (int step = 1; step <= steps; ++step) {
+            const double t = static_cast<double>(step) / steps;
+            const double u = 1.0 - t;
+            path.push_back({u*u*u*start.x + 3*u*u*t*c1.x + 3*u*t*t*c2.x + t*t*t*end.x,
+                            u*u*u*start.y + 3*u*u*t*c1.y + 3*u*t*t*c2.y + t*t*t*end.y});
+        }
+    }
+    if (path.size() >= 3U) {
+        if (path.front().x != path.back().x || path.front().y != path.back().y) path.push_back(path.front());
+        paths.push_back(std::move(path));
+    }
+}
+
+void DrawCffGlyph(PdfBitmap& bitmap, const PdfCffGlyphOutline& outline,
+                  const double left, const double top, const double width,
+                  const double height, const PdfRgbaColor color,
+                  const int renderingMode) {
+    if (outline.IsEmpty() || outline.xMax <= outline.xMin || outline.yMax <= outline.yMin) return;
+    if (left + width < 0.0 || top + height < 0.0 ||
+        left >= static_cast<double>(bitmap.GetWidth()) ||
+        top >= static_cast<double>(bitmap.GetHeight())) return;
+    std::vector<Subpath> paths;
+    AddCffGlyphPaths(paths, outline, left, top, width, height);
+    const bool fill = renderingMode == 0 || renderingMode == 2 ||
+                      renderingMode == 4 || renderingMode == 6;
+    const bool stroke = renderingMode == 1 || renderingMode == 2 ||
+                        renderingMode == 5 || renderingMode == 6;
+    if (fill) FillPath(bitmap, paths, color, false);
+    if (stroke) StrokePath(bitmap, paths, std::max(1.0, height / 64.0), color, 2, 0);
 }
 
 void IntersectClip(PdfBitmap& bitmap, ClipRegion& clip,
@@ -781,7 +924,10 @@ PdfBitmap PdfPageRenderer::Render(
     const auto displayList = document.BuildPageDisplayList(pageIndex);
 
 
-    if (options.renderPaths) {
+    // Unified replay that keeps content order between vector paths and images
+    // and applies transparency-group compositing through an offscreen layer
+    // stack. Text remains a separate pass driven by extracted geometry.
+    if (options.renderPaths || options.renderImages) {
         std::vector<Subpath> paths;
         Subpath* current{};
         bool pendingClip{};
@@ -806,7 +952,52 @@ PdfBitmap PdfPageRenderer::Render(
             bool transparencyKnockout{};
         };
         std::vector<ClipState> clipStack;
+        std::vector<GroupLayer> groupStack;
+        PdfBitmap* target = &bitmap;
+        const auto paintPaths = [&](const PdfContentEvent& event, const bool fill, const bool stroke, const bool evenOdd) {
+            if (fill) FillPath(*target, paths, WithAlpha(ToColor(event.textState.fillColor), fillAlpha), evenOdd);
+            if (stroke) StrokePath(*target, paths,
+                                   std::max(1.0, event.textState.lineWidth * scale),
+                                   WithAlpha(ToColor(event.textState.strokeColor), strokeAlpha),
+                                   event.textState.lineCap, event.textState.lineJoin,
+                                   event.textState.miterLimit);
+        };
         const PdfDocument::PdfContentEventHandler pathHandler = [&](const PdfContentEvent& event) {
+            if (event.type == PdfContentEventType::BeginTransparencyGroup) {
+                GroupLayer layer;
+                layer.bitmap = PdfBitmap(width, height, {0U, 0U, 0U, 0U});
+                layer.parent = target;
+                layer.blendMode = BlendModeFromName(event.transparencyGroup.blendMode);
+                layer.alpha = std::clamp(event.transparencyGroup.alpha, 0.0, 1.0);
+                layer.isolated = event.transparencyGroup.isolated;
+                layer.knockout = event.transparencyGroup.knockout;
+                layer.clip = clip;
+                layer.clipActive = clipActive;
+                layer.strokeAlpha = strokeAlpha;
+                layer.fillAlpha = fillAlpha;
+                layer.innerBlend = blendMode;
+                layer.innerIsolated = transparencyIsolated;
+                layer.innerKnockout = transparencyKnockout;
+                groupStack.push_back(std::move(layer));
+                target = &groupStack.back().bitmap;
+                return;
+            }
+            if (event.type == PdfContentEventType::EndTransparencyGroup) {
+                if (groupStack.empty()) return;
+                GroupLayer layer = std::move(groupStack.back());
+                groupStack.pop_back();
+                target = layer.parent;
+                clip = layer.clip;
+                clipActive = layer.clipActive;
+                strokeAlpha = layer.strokeAlpha;
+                fillAlpha = layer.fillAlpha;
+                blendMode = layer.innerBlend;
+                transparencyIsolated = layer.innerIsolated;
+                transparencyKnockout = layer.innerKnockout;
+                CompositeGroupLayer(*target, layer.bitmap, layer.clip,
+                                    layer.blendMode, layer.alpha, layer.knockout);
+                return;
+            }
             if (event.type == PdfContentEventType::SaveState) {
                 clipStack.push_back({clip, strokeAlpha, fillAlpha, blendMode, transparencyIsolated, transparencyKnockout});
                 return;
@@ -839,14 +1030,26 @@ PdfBitmap PdfPageRenderer::Render(
                 const auto shading = document.ResolveAxialShading(
                     pageIndex, event.resourceObjectNumber, event.text);
                 if (shading) {
-                    PaintAxialShading(bitmap, shading->axial, mapper, fillAlpha);
+                    PaintAxialShading(*target, shading->axial, mapper, fillAlpha);
                 } else if (const auto radial = document.ResolveRadialShading(
                                pageIndex, event.resourceObjectNumber, event.text)) {
-                    PaintRadialShading(bitmap, radial->radial, mapper, fillAlpha);
+                    PaintRadialShading(*target, radial->radial, mapper, fillAlpha);
                 }
                 return;
             }
-            if (event.type != PdfContentEventType::RenderPath) return;
+            if ((event.type == PdfContentEventType::InvokeXObject ||
+                 event.type == PdfContentEventType::RenderInlineImage) && options.renderImages) {
+                try {
+                    if (const auto image = displayList.ResolveImage(event)) {
+                        DrawImage(*target, *image, mapper, options.interpolateImages, image->info.fillAlpha);
+                    }
+                } catch (const PdfException&) {
+                    // Continue with the next content event when one malformed
+                    // image stream is present in an otherwise readable page.
+                }
+                return;
+            }
+            if (event.type != PdfContentEventType::RenderPath || !options.renderPaths) return;
             const auto mapPoint = [&](const double x, const double y) {
                 const auto transformed = Transform(event.textState.currentTransformationMatrix, x, y);
                 return mapper.Map(transformed[0], transformed[1]);
@@ -906,31 +1109,24 @@ PdfBitmap PdfPageRenderer::Render(
                 const bool fill = op == "f" || op == "F" || op == "f*" || op == "B" || op == "B*" || op == "b" || op == "b*";
                 const bool stroke = op == "S" || op == "s" || op == "B" || op == "B*" || op == "b" || op == "b*";
                 if (pendingClip && (fill || stroke || op == "n")) {
-                    IntersectClip(bitmap, clip, paths, pendingClipEvenOdd);
+                    IntersectClip(*target, clip, paths, pendingClipEvenOdd);
                     const bool visible = clip.visible;
                     clipActive = visible;
                     pendingClip = false;
                 }
                 if (fill || stroke) {
                     if (!clipActive) {
-                        // The common case has no clipping path. Paint
-                        // directly into the page instead of allocating and
+                        // The common case has no clipping path. Paint directly
+                        // into the current target instead of allocating and
                         // compositing a full-page temporary bitmap per path.
-                         if (fill) FillPath(bitmap, paths, WithAlpha(ToColor(event.textState.fillColor), fillAlpha), op == "f*" || op == "B*" || op == "b*");
-                         if (stroke) StrokePath(bitmap, paths,
-                                                std::max(1.0, event.textState.lineWidth * scale),
-                                                WithAlpha(ToColor(event.textState.strokeColor), strokeAlpha),
-                                                event.textState.lineCap, event.textState.lineJoin,
-                                                event.textState.miterLimit);
+                        paintPaths(event, fill, stroke, op == "f*" || op == "B*" || op == "b*");
                     } else {
                         PdfBitmap layer(width, height, {0U, 0U, 0U, 0U});
-                         if (fill) FillPath(layer, paths, WithAlpha(ToColor(event.textState.fillColor), fillAlpha), op == "f*" || op == "B*" || op == "b*");
-                         if (stroke) StrokePath(layer, paths,
-                                                std::max(1.0, event.textState.lineWidth * scale),
-                                                WithAlpha(ToColor(event.textState.strokeColor), strokeAlpha),
-                                                event.textState.lineCap, event.textState.lineJoin,
-                                                event.textState.miterLimit);
-                        CompositeLayer(bitmap, layer, clip, blendMode);
+                        PdfBitmap* savedTarget = target;
+                        target = &layer;
+                        paintPaths(event, fill, stroke, op == "f*" || op == "B*" || op == "b*");
+                        target = savedTarget;
+                        CompositeLayer(*target, layer, clip, blendMode);
                     }
                 }
                 if (fill || stroke || op == "n") {
@@ -942,17 +1138,6 @@ PdfBitmap PdfPageRenderer::Render(
         // Process the page as one continuous content sequence and recurse
         // into Form XObjects so vector content is not silently omitted.
         displayList.Replay(pathHandler);
-    }
-
-    if (options.renderImages) {
-        try {
-            displayList.ReplayImages([&](const PdfContentEvent&, const PdfExtractedImage& image) {
-                DrawImage(bitmap, image, mapper, options.interpolateImages, image.info.fillAlpha);
-            });
-        } catch (const PdfException&) {
-            // Continue with paths/text when one malformed image stream is
-            // present in an otherwise readable page.
-        }
     }
 
     if (options.renderText) {
@@ -968,7 +1153,8 @@ PdfBitmap PdfPageRenderer::Render(
                 DrawTextChunk(bitmap, chunk,
                               mapper,
                               WithAlpha(PdfRgbaColor::Black(), chunk.fillAlpha),
-                              embedded);
+                              embedded,
+                              font.get());
             }
         } catch (const PdfException&) {
             // Text extraction is best-effort during rendering. A malformed

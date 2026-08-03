@@ -23,7 +23,7 @@ secondary scope.
 - Complete line dash, cap, join and miter behavior.
 - Implement blend modes, transparency groups, soft masks and knockout.
 - Bitmap batch blending and additional blend-mode coverage are implemented.
-- Transparency group bitmap compositing now supports isolated clearing and knockout replacement; Form boundary discovery remains.
+- Transparency group bitmap compositing supports isolated clearing, knockout replacement, and Form boundary discovery. The CPU renderer detects `/Group /S /Transparency` on Form XObjects and BDC/EMC marked content, renders group content into an offscreen layer, and composites with the group's blend mode, alpha, isolated, and knockout flags.
 - Indexed image color spaces now carry palette metadata and render 1/2/4/8-bit samples; Separation has a limited alternate-space fallback pending tint-transform evaluation.
 - Shading operator `sh` now emits a dedicated `PaintShading` event; axial/radial resource evaluation remains the next renderer step.
 - Added reusable Type 2 exponential PDF function evaluator for future shading and tint-transform evaluation.
@@ -40,6 +40,7 @@ secondary scope.
 ## Phase 3: Fonts, Text and Layout
 
 - Add Type1, CFF, CIDFont and OpenType support.
+- Embedded CFF fonts (Type1C, CIDFontType0C, OpenType with CFF outlines) are parsed through charset/CharStrings/Private DICTs, and a bounded Type 2 charstring interpreter produces glyph outlines that the CPU renderer rasterizes with cubic flattening. Identity-encoded CID fonts map character codes to glyphs directly.
 - Improve font fallback, kerning, vertical writing and subsetting.
 - Add Unicode grapheme handling, bidirectional text and complex shaping.
 - Add paragraph, table, list, column and page-flow layout primitives.
@@ -58,6 +59,7 @@ secondary scope.
 ## Phase 5: Compliance and Security
 
 - Implement external digital-signature callbacks and ByteRange handling.
+- External signing foundation: `PdfSignatureManager` creates a /Sig field and signature dictionary, prepares a file with a zero-filled `/Contents` placeholder, computes the `/ByteRange` over the exact bytes an external signer must digest, and writes the produced signature value back into the placeholder. `GetSignatures` inspects fields, ByteRange, and applied signature contents.
 - Add CMS/PKCS#7, RSA/ECDSA, certificate chains and signature validation.
 - Add PAdES, timestamping, DSS and long-term validation foundations.
 - Implement PDF/A-1 through PDF/A-4 creation and validation.

@@ -273,6 +273,102 @@ int RunCoreTests() {
     PDFPP_TEST_CHECK(cffDict[0].operands[0] == 0.0);
     PDFPP_TEST_CHECK(overlayBitmap.GetPixel(0U, 0U).alpha == 255U);
 
+    // A minimal CFF 1.0 font: header, name INDEX, top DICT INDEX, empty string
+    // INDEX, empty global subr INDEX, default charset, CharStrings, private.
+    // Top-dict offsets are absolute file positions; use fixed 3-byte (28)
+    // operand encodings so the top DICT size is known up front.
+    const auto cffFixedShort = [](const int value) {
+        std::vector<std::byte> out;
+        out.push_back(std::byte{28});
+        out.push_back(static_cast<std::byte>((value >> 8) & 0xFF));
+        out.push_back(static_cast<std::byte>(value & 0xFF));
+        return out;
+    };
+    const auto buildCffIndex = [](const std::vector<std::vector<std::byte>>& objects) {
+        std::vector<std::byte> out;
+        out.push_back(static_cast<std::byte>(objects.size() >> 8U));
+        out.push_back(static_cast<std::byte>(objects.size() & 0xFF));
+        if (objects.empty()) return out;
+        out.push_back(std::byte{1}); // offSize = 1
+        std::size_t running = 1U;
+        for (const auto& object : objects) {
+            out.push_back(static_cast<std::byte>(running & 0xFF));
+            running += object.size();
+        }
+        out.push_back(static_cast<std::byte>(running & 0xFF));
+        for (const auto& object : objects) out.insert(out.end(), object.begin(), object.end());
+        return out;
+    };
+
+    std::vector<std::byte> cffFont;
+    cffFont.push_back(std::byte{1}); cffFont.push_back(std::byte{0});
+    cffFont.push_back(std::byte{4}); cffFont.push_back(std::byte{4});
+    const auto nameIndex = buildCffIndex({{std::byte{'T'}, std::byte{'e'}, std::byte{'s'}, std::byte{'t'}}});
+    cffFont.insert(cffFont.end(), nameIndex.begin(), nameIndex.end());
+
+    // Top DICT: CharStrings (17) with one fixed-short operand, Private (18)
+    // with two fixed-short operands -> 3 + 3 + 3 + 2 = 11 bytes.
+    const std::size_t topDictDataSize = 3U + 1U + 3U + 3U + 1U;
+    cffFont.push_back(std::byte{0}); cffFont.push_back(std::byte{1}); // count = 1
+    cffFont.push_back(std::byte{2}); // offSize = 2 for the INDEX offsets
+    cffFont.push_back(std::byte{0}); cffFont.push_back(std::byte{1}); // INDEX offset[0]
+    const auto topDictIndexOffset1 = static_cast<std::uint16_t>(topDictDataSize + 1U);
+    cffFont.push_back(static_cast<std::byte>((topDictIndexOffset1 >> 8U) & 0xFF));
+    cffFont.push_back(static_cast<std::byte>(topDictIndexOffset1 & 0xFF));
+    const std::size_t topDictDataPos = cffFont.size();
+    cffFont.resize(topDictDataPos + topDictDataSize, std::byte{0});
+
+    const auto stringIndex = buildCffIndex({});
+    cffFont.insert(cffFont.end(), stringIndex.begin(), stringIndex.end());
+    const auto globalSubrIndex = buildCffIndex({});
+    cffFont.insert(cffFont.end(), globalSubrIndex.begin(), globalSubrIndex.end());
+
+    // CharStrings INDEX: .notdef (empty) + one glyph drawn as a 3x2 box.
+    const std::vector<std::byte> notdefCharstring{std::byte{14}};
+    const std::vector<std::byte> glyphCharstring{
+        std::byte{139}, std::byte{139}, std::byte{21}, // 0 0 rmoveto
+        std::byte{142}, std::byte{139}, std::byte{5},  // 3 0 rlineto
+        std::byte{139}, std::byte{141}, std::byte{5},  // 0 2 rlineto
+        std::byte{136}, std::byte{139}, std::byte{5},  // -3 0 rlineto
+        std::byte{139}, std::byte{137}, std::byte{5},  // 0 -2 rlineto
+        std::byte{14}                                  // endchar
+    };
+    const std::size_t charStringsPos = cffFont.size();
+    const auto charStrings = buildCffIndex({notdefCharstring, glyphCharstring});
+    cffFont.insert(cffFont.end(), charStrings.begin(), charStrings.end());
+
+    const std::size_t privatePos = cffFont.size();
+    const auto privateIndex = buildCffIndex({});
+    cffFont.insert(cffFont.end(), privateIndex.begin(), privateIndex.end());
+
+    // Build the top DICT with absolute offsets and patch it into place.
+    auto topDict = cffFixedShort(static_cast<int>(charStringsPos));
+    topDict.push_back(std::byte{17});
+    const auto privateEncoded = cffFixedShort(0);
+    topDict.insert(topDict.end(), privateEncoded.begin(), privateEncoded.end());
+    const auto privateOffsetEncoded = cffFixedShort(static_cast<int>(privatePos));
+    topDict.insert(topDict.end(), privateOffsetEncoded.begin(), privateOffsetEncoded.end());
+    topDict.push_back(std::byte{18});
+    PDFPP_TEST_CHECK(topDict.size() == topDictDataSize);
+    for (std::size_t i = 0; i < topDict.size(); ++i) cffFont[topDictDataPos + i] = topDict[i];
+
+    const auto parsedCff = PdfCffParser::ParseFont(std::span<const std::byte>(cffFont));
+    PDFPP_TEST_CHECK(parsedCff.name == "Test");
+    PDFPP_TEST_CHECK(parsedCff.glyphCount == 2U);
+    PDFPP_TEST_CHECK(parsedCff.charStrings.objects.size() == 2U);
+    const auto notdef = PdfCffParser::GetGlyphOutline(parsedCff, 0U);
+    PDFPP_TEST_CHECK(notdef.IsEmpty());
+    const auto box = PdfCffParser::GetGlyphOutline(parsedCff, 1U);
+    PDFPP_TEST_CHECK(!box.IsEmpty());
+    PDFPP_TEST_CHECK(box.segments.size() >= 5U);
+    PDFPP_TEST_CHECK(std::abs(box.xMax - 3.0) < 1.0e-9);
+    PDFPP_TEST_CHECK(std::abs(box.yMax - 2.0) < 1.0e-9);
+    bool foundLine = false;
+    for (const auto& segment : box.segments) {
+        if (segment.type == PdfCffOutlineSegment::Type::Line) foundLine = true;
+    }
+    PDFPP_TEST_CHECK(foundLine);
+
     const std::string asciiHex = "48656c6c6f>";
     const auto hex = PdfFilterPipeline::DecodeAsciiHex(std::span(
         reinterpret_cast<const std::byte*>(asciiHex.data()), asciiHex.size()));
@@ -376,6 +472,54 @@ int RunCoreTests() {
     int replayedEvents = 0;
     displayList.Replay([&](const PdfContentEvent&) { ++replayedEvents; });
     PDFPP_TEST_CHECK(replayedEvents == static_cast<int>(displayList.Events().size()));
+
+    PdfContentProcessor groupProcessor;
+    int groupBegin = 0;
+    int groupEnd = 0;
+    int markedBegin = 0;
+    int markedEnd = 0;
+    PdfTransparencyGroupProperties groupProperties;
+    std::string markedTag;
+    groupProcessor.SetHandler([&](const PdfContentEvent& event) {
+        if (event.type == PdfContentEventType::BeginTransparencyGroup) {
+            ++groupBegin;
+            groupProperties = event.transparencyGroup;
+        } else if (event.type == PdfContentEventType::EndTransparencyGroup) {
+            ++groupEnd;
+        } else if (event.type == PdfContentEventType::BeginMarkedContent) {
+            ++markedBegin;
+            markedTag = event.text;
+        } else if (event.type == PdfContentEventType::EndMarkedContent) {
+            ++markedEnd;
+        }
+    });
+    groupProcessor.Process(
+        "/G1 <</Group <</S /Transparency /I true /K false /BM /Multiply /CA 0.5>>>> BDC "
+        "0 0 10 10 re f "
+        "/P2 BDC "
+        "1 1 2 2 re S "
+        "EMC "
+        "EMC");
+    PDFPP_TEST_CHECK(groupBegin == 1);
+    PDFPP_TEST_CHECK(groupEnd == 1);
+    PDFPP_TEST_CHECK(groupProperties.isolated);
+    PDFPP_TEST_CHECK(!groupProperties.knockout);
+    PDFPP_TEST_CHECK(groupProperties.blendMode == "Multiply");
+    PDFPP_TEST_CHECK(std::abs(groupProperties.alpha - 0.5) < 1.0e-9);
+    PDFPP_TEST_CHECK(markedBegin == 1);
+    PDFPP_TEST_CHECK(markedEnd == 1);
+    PDFPP_TEST_CHECK(markedTag == "P2");
+
+    PdfContentProcessor plainMarkedProcessor;
+    bool plainMarkedBegin = false;
+    bool plainMarkedEnd = false;
+    plainMarkedProcessor.SetHandler([&](const PdfContentEvent& event) {
+        if (event.type == PdfContentEventType::BeginMarkedContent) plainMarkedBegin = true;
+        if (event.type == PdfContentEventType::EndMarkedContent) plainMarkedEnd = true;
+    });
+    plainMarkedProcessor.Process("/Artifact <</Type /Pagination>> BDC EMC");
+    PDFPP_TEST_CHECK(plainMarkedBegin);
+    PDFPP_TEST_CHECK(plainMarkedEnd);
 
     PdfTextExtractionRequest textRequest;
     textRequest.strategy = PdfTextExtractionStrategy::Location;

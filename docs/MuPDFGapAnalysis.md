@@ -16,9 +16,12 @@ a mature multi-format engine; Pdf++ remains a PDF-focused public beta.
 1. **AES-256 revision 6 and public-key security handlers.** MuPDF exposes AES-256,
    owner/user passwords, decryption, and permission controls. Pdf++ currently stops at
    AES-128/R4.
-2. **Complete rendering model.** Exact embedded-font glyph rasterization, clipping,
-   transparency groups, blend modes, patterns, shadings, ICC/DeviceN/Separation color,
-   overprint, and optional JPEG/JPX codecs are still incomplete.
+2. **Complete rendering model.** Soft masks, patterns, ICC/DeviceN color,
+   overprint, and optional JPEG/JPX codecs are still incomplete. Vector clipping,
+   transparency groups (Form XObject `/Group` and BDC/EMC), blend-mode compositing,
+   and embedded CFF/Type 2 glyph rasterization are now implemented in the CPU
+   renderer. TrueType and CFF outlines are both rasterized; simple-CFF encoding
+   mapping, hinting, and vertical metrics remain.
 3. **Writer cleanup and optimization.** The shared incremental writer is now in place;
    object-stream output, garbage collection,
    duplicate-object removal, linearization, sanitization, and unchanged-stream
@@ -26,8 +29,12 @@ a mature multi-format engine; Pdf++ remains a PDF-focused public beta.
 4. **Annotations and redaction.** Pdf++ has core annotations/highlights, but not the
    broad annotation type coverage, appearance editing, and applied redaction workflow
    exposed by MuPDF.
-5. **Digital signatures and compliance.** Signing/validation, PDF/A, PDF/X, and PDF/UA
-   validation are not implemented.
+5. **Digital signatures and compliance.** An external-signing foundation now exists
+   (`PdfSignatureManager`): it creates /Sig fields, computes `/ByteRange`, exposes the
+   exact digest input for an external signer, and writes the produced signature back
+   into the placeholder. CMS/PKCS#7 parsing, certificate chains, signing-key
+   management, and validation are still external. PDF/A, PDF/X, and PDF/UA
+   validation remain unimplemented beyond the initial conformance checks.
 
 ## Secondary gaps
 

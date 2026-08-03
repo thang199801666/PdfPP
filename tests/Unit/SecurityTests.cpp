@@ -2,12 +2,17 @@
 #include "Internal/Security/PdfCrypto.hpp"
 #include "TestRunner.hpp"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <iomanip>
+#include <span>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 using namespace CPPPdf;
@@ -131,12 +136,123 @@ void verifyEncryptedRoundTrip(const PdfEncryptionAlgorithm algorithm, const char
     std::filesystem::remove(encrypted);
 }
 
+void verifySignatureWorkflow() {
+    const auto source = securityTemp("pdfpp-signature-source.pdf");
+    const auto prepared = securityTemp("pdfpp-signature-prepared.pdf");
+    const auto signedPath = securityTemp("pdfpp-signature-signed.pdf");
+
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 400, 300});
+    writer.GetCanvas(page).BeginText().SetFontAndSize("Helvetica", 14.0)
+        .MoveText(30, 200).ShowText("signature-foundation").EndText();
+    writer.Save(source);
+
+    PdfSignatureFieldOptions options;
+    options.fieldName = "Certified";
+    options.pageIndex = 0U;
+    options.rectangle = {30, 40, 200, 90};
+    options.signerName = "Thang Nguyen";
+    options.reason = "Approval";
+    options.location = "Hanoi";
+    options.contentsSize = 512U;
+
+    const auto preparation = PdfSignatureManager::PrepareForSigning(source, prepared, options);
+    PDFPP_TEST_CHECK(preparation.fieldName == "Certified");
+    PDFPP_TEST_CHECK(preparation.byteRange[0] == 0U);
+    PDFPP_TEST_CHECK(preparation.byteRange[1] > 0U);
+    PDFPP_TEST_CHECK(preparation.byteRange[2] > preparation.byteRange[1]);
+    PDFPP_TEST_CHECK(preparation.byteRange[3] > 0U);
+    PDFPP_TEST_CHECK(!preparation.digestInput.empty());
+    PDFPP_TEST_CHECK(preparation.contentsHexLength == 2U * options.contentsSize);
+
+    const auto preparedBytes = readBytes(prepared);
+    PDFPP_TEST_CHECK(preparedBytes.find("/SubFilter /adbe.pkcs7.detached") != std::string::npos);
+    PDFPP_TEST_CHECK(preparedBytes.find("/FT /Sig") != std::string::npos);
+
+    const auto preparedFields = PdfAcroForm::GetFields(prepared);
+    PDFPP_TEST_CHECK(preparedFields.size() == 1U);
+    PDFPP_TEST_CHECK(preparedFields[0].type == PdfFormFieldType::Signature);
+    PDFPP_TEST_CHECK(preparedFields[0].name == "Certified");
+
+    const auto unsignedInfo = PdfSignatureManager::GetSignatures(prepared);
+    PDFPP_TEST_CHECK(unsignedInfo.size() == 1U);
+    PDFPP_TEST_CHECK(unsignedInfo[0].hasByteRange);
+    PDFPP_TEST_CHECK(!unsignedInfo[0].hasContents);
+    PDFPP_TEST_CHECK(unsignedInfo[0].signerName == "Thang Nguyen");
+    PDFPP_TEST_CHECK(unsignedInfo[0].reason == "Approval");
+    PDFPP_TEST_CHECK(unsignedInfo[0].location == "Hanoi");
+
+    // Simulate an external signer: hash the digest input and sign that digest.
+    const auto digest = Internal::Sha256(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(preparation.digestInput.data()),
+        preparation.digestInput.size()));
+    std::vector<std::byte> signatureBytes;
+    signatureBytes.reserve(digest.size());
+    for (const auto byte : digest) signatureBytes.push_back(static_cast<std::byte>(byte));
+
+    PdfSignatureManager::ApplySignature(prepared, signedPath, signatureBytes);
+    const auto signedBytes = readBytes(signedPath);
+    PDFPP_TEST_CHECK(signedBytes.find("/SubFilter /adbe.pkcs7.detached") != std::string::npos);
+
+    const auto signedInfo = PdfSignatureManager::GetSignatures(signedPath);
+    PDFPP_TEST_CHECK(signedInfo.size() == 1U);
+    PDFPP_TEST_CHECK(signedInfo[0].hasContents);
+    // The signature value is hex-encoded and zero-padded to the reserved
+    // capacity, so the leading bytes equal the produced signature.
+    PDFPP_TEST_CHECK(signedInfo[0].contents.size() >= signatureBytes.size());
+    const bool prefixMatches = std::equal(signatureBytes.begin(), signatureBytes.end(),
+        signedInfo[0].contents.begin());
+    PDFPP_TEST_CHECK(prefixMatches);
+
+    // The signed file must still parse as a valid document.
+    const PdfDocument signedDocument = PdfDocument::Open(signedPath);
+    PDFPP_TEST_CHECK(signedDocument.GetPageCount() == 1U);
+
+    // ByteRange validity: re-open and confirm the digest over the two ranges
+    // reproduces the signed digest.
+    const auto byteRange = signedInfo[0].byteRange;
+    const std::string file = readBytes(signedPath);
+    const std::size_t firstStart = static_cast<std::size_t>(byteRange[0]);
+    const std::size_t firstLength = static_cast<std::size_t>(byteRange[1]);
+    const std::size_t secondStart = static_cast<std::size_t>(byteRange[2]);
+    const std::size_t secondLength = static_cast<std::size_t>(byteRange[3]);
+    std::vector<std::byte> recomputed;
+    recomputed.reserve(firstLength + secondLength);
+    for (std::size_t i = firstStart; i < firstStart + firstLength; ++i) {
+        recomputed.push_back(static_cast<std::byte>(file[i]));
+    }
+    for (std::size_t i = secondStart; i < secondStart + secondLength; ++i) {
+        recomputed.push_back(static_cast<std::byte>(file[i]));
+    }
+    PDFPP_TEST_CHECK(recomputed == preparation.digestInput);
+
+    // One-shot convenience: Sign() produces the same structure.
+    const auto signedOutput = securityTemp("pdfpp-signature-once.pdf");
+    PdfSignatureManager::Sign(source, signedOutput, [](std::span<const std::byte> digestInput) {
+        const auto hash = Internal::Sha256(std::span<const std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(digestInput.data()), digestInput.size()));
+        std::vector<std::byte> result;
+        result.reserve(hash.size());
+        for (const auto byte : hash) result.push_back(static_cast<std::byte>(byte));
+        return result;
+    }, options);
+    const auto onceInfo = PdfSignatureManager::GetSignatures(signedOutput);
+    PDFPP_TEST_CHECK(onceInfo.size() == 1U);
+    PDFPP_TEST_CHECK(onceInfo[0].hasContents);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove(prepared);
+    std::filesystem::remove(signedPath);
+    std::filesystem::remove(signedOutput);
+}
+
 } // namespace
 
 int RunSecurityTests() {
     verifyCryptoPrimitives();
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Aes128, "aes128");
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Rc4_128, "rc4-128");
+    verifySignatureWorkflow();
 
     const auto original = securityTemp("pdfpp-security-source.pdf");
     const auto encrypted = securityTemp("pdfpp-security-rewritten.pdf");

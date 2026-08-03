@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -563,6 +564,258 @@ void TestSaveValidationAndRoundTrip() {
     std::filesystem::remove(output);
 }
 
+void TestTransparencyGroupRendering() {
+    const auto output = TempPath("pdfpp_feature_transparency_group.pdf");
+    std::string pdf = "%PDF-1.4\n";
+    std::array<std::size_t, 8> offsets{};
+    const auto addObject = [&](const std::size_t number, const std::string_view body) {
+        offsets[number] = pdf.size();
+        pdf += std::to_string(number) + " 0 obj\n";
+        pdf.append(body);
+        pdf += "\nendobj\n";
+    };
+    addObject(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    addObject(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    addObject(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+                 "/Resources << /XObject << /Fm1 5 0 R >> >> /Contents 4 0 R >>");
+    const std::string pageContent = "q 1 0 0 1 0 0 cm /Fm1 Do Q";
+    addObject(4, "<< /Length " + std::to_string(pageContent.size()) + ">>\nstream\n" +
+                 pageContent + "\nendstream");
+    const std::string formContent = "0 0 0 rg 10 10 60 40 re f";
+    addObject(5, "<< /Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 80 60] "
+                 "/Matrix [1 0 0 1 0 0] "
+                 "/Group << /S /Transparency /I true /K false /BM /Normal /CA 0.5 >> "
+                 "/Resources << >> "
+                 "/Length " + std::to_string(formContent.size()) + ">>\nstream\n" +
+                 formContent + "\nendstream");
+    addObject(6, "<< >>");
+    addObject(7, "<< >>");
+    const std::size_t xrefOffset = pdf.size();
+    std::ostringstream xref;
+    xref << "xref\n0 8\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i < offsets.size(); ++i) {
+        xref << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    xref << "trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n"
+         << xrefOffset << "\n%%EOF\n";
+    pdf += xref.str();
+    std::ofstream file(output, std::ios::binary);
+    file.write(pdf.data(), static_cast<std::streamsize>(pdf.size()));
+    file.close();
+
+    const auto document = PdfDocument::Open(output);
+    PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+
+    const auto list = document.BuildPageDisplayList(0U);
+    PDFPP_TEST_CHECK(list.Count(PdfContentEventType::BeginTransparencyGroup) == 1U);
+    PDFPP_TEST_CHECK(list.Count(PdfContentEventType::EndTransparencyGroup) == 1U);
+    const auto& firstEvent = list.Events().front();
+    PDFPP_TEST_CHECK(firstEvent.type == PdfContentEventType::SaveState ||
+                     firstEvent.type == PdfContentEventType::BeginTransparencyGroup ||
+                     firstEvent.type == PdfContentEventType::ConcatenateMatrix);
+
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 100U);
+    PDFPP_TEST_CHECK(bitmap.GetHeight() == 100U);
+
+    const auto insidePixel = bitmap.GetPixel(35U, 65U);
+    PDFPP_TEST_CHECK(insidePixel.red < 255U);
+    PDFPP_TEST_CHECK(insidePixel.green > 50U);
+    PDFPP_TEST_CHECK(std::abs(static_cast<int>(insidePixel.red) - static_cast<int>(insidePixel.green)) < 12);
+    PDFPP_TEST_CHECK(std::abs(static_cast<int>(insidePixel.red) - static_cast<int>(insidePixel.blue)) < 12);
+
+    std::filesystem::remove(output);
+}
+
+void TestMarkedContentTransparencyGroupRendering() {
+    const auto output = TempPath("pdfpp_feature_bdc_group.pdf");
+    std::string pdf = "%PDF-1.4\n";
+    std::array<std::size_t, 5> offsets{};
+    const auto addObject = [&](const std::size_t number, const std::string_view body) {
+        offsets[number] = pdf.size();
+        pdf += std::to_string(number) + " 0 obj\n";
+        pdf.append(body);
+        pdf += "\nendobj\n";
+    };
+    addObject(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    addObject(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    addObject(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>");
+    const std::string pageContent =
+        "0 0 1 rg 70 70 20 20 re f "
+        "/G <</Group <</S /Transparency /I true /K false /BM /Multiply /CA 0.8>>>> BDC "
+        "1 0 0 rg 10 10 40 30 re f "
+        "EMC";
+    addObject(4, "<< /Length " + std::to_string(pageContent.size()) + ">>\nstream\n" +
+                 pageContent + "\nendstream");
+    const std::size_t xrefOffset = pdf.size();
+    std::ostringstream xref;
+    xref << "xref\n0 5\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i < offsets.size(); ++i) {
+        xref << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    xref << "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n"
+         << xrefOffset << "\n%%EOF\n";
+    pdf += xref.str();
+    std::ofstream file(output, std::ios::binary);
+    file.write(pdf.data(), static_cast<std::streamsize>(pdf.size()));
+    file.close();
+
+    const auto document = PdfDocument::Open(output);
+    const auto list = document.BuildPageDisplayList(0U);
+    PDFPP_TEST_CHECK(list.Count(PdfContentEventType::BeginTransparencyGroup) == 1U);
+    PDFPP_TEST_CHECK(list.Count(PdfContentEventType::EndTransparencyGroup) == 1U);
+
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    const auto redPixel = bitmap.GetPixel(20U, 80U);
+    PDFPP_TEST_CHECK(redPixel.red > redPixel.blue);
+    const auto bluePixel = bitmap.GetPixel(80U, 20U);
+    PDFPP_TEST_CHECK(bluePixel.blue > bluePixel.red);
+
+    std::filesystem::remove(output);
+}
+
+std::vector<std::byte> BuildMinimalCffFont() {
+    const auto buildIndex = [](const std::vector<std::vector<std::byte>>& objects) {
+        std::vector<std::byte> out;
+        out.push_back(static_cast<std::byte>(objects.size() >> 8U));
+        out.push_back(static_cast<std::byte>(objects.size() & 0xFF));
+        if (objects.empty()) return out;
+        out.push_back(std::byte{1});
+        std::size_t running = 1U;
+        for (const auto& object : objects) {
+            out.push_back(static_cast<std::byte>(running & 0xFF));
+            running += object.size();
+        }
+        out.push_back(static_cast<std::byte>(running & 0xFF));
+        for (const auto& object : objects) out.insert(out.end(), object.begin(), object.end());
+        return out;
+    };
+    const auto fixedShort = [](const int value) {
+        return std::vector<std::byte>{std::byte{28},
+            static_cast<std::byte>((value >> 8) & 0xFF), static_cast<std::byte>(value & 0xFF)};
+    };
+    std::vector<std::byte> font;
+    font.push_back(std::byte{1}); font.push_back(std::byte{0});
+    font.push_back(std::byte{4}); font.push_back(std::byte{4});
+    std::vector<std::vector<std::byte>> names;
+    names.push_back({std::byte{'C'}, std::byte{'I'}, std::byte{'D'}, std::byte{'F'}, std::byte{'o'}, std::byte{'n'}, std::byte{'t'}});
+    const auto nameIndex = buildIndex(names);
+    font.insert(font.end(), nameIndex.begin(), nameIndex.end());
+    const std::size_t topDictDataSize = 11;
+    font.push_back(std::byte{0}); font.push_back(std::byte{1});
+    font.push_back(std::byte{2});
+    font.push_back(std::byte{0}); font.push_back(std::byte{1});
+    font.push_back(static_cast<std::byte>((topDictDataSize + 1U) >> 8U));
+    font.push_back(static_cast<std::byte>((topDictDataSize + 1U) & 0xFF));
+    const std::size_t topDictDataPos = font.size();
+    font.resize(topDictDataPos + topDictDataSize, std::byte{0});
+    const auto emptyIndex = buildIndex({});
+    font.insert(font.end(), emptyIndex.begin(), emptyIndex.end());
+    font.insert(font.end(), emptyIndex.begin(), emptyIndex.end());
+    const std::size_t charStringsPos = font.size();
+    const std::vector<std::byte> notdef{std::byte{14}};
+    const std::vector<std::byte> boxGlyph{
+        std::byte{139}, std::byte{139}, std::byte{21},
+        std::byte{188}, std::byte{139}, std::byte{5},   // 49 0 rlineto
+        std::byte{139}, std::byte{188}, std::byte{5},   // 0 49 rlineto
+        std::byte{116}, std::byte{139}, std::byte{5},   // -49 0 rlineto
+        std::byte{139}, std::byte{116}, std::byte{5},   // 0 -49 rlineto
+        std::byte{14}
+    };
+    std::vector<std::vector<std::byte>> charStrings;
+    charStrings.push_back(notdef);
+    charStrings.push_back(boxGlyph);
+    const auto charStringsIndex = buildIndex(charStrings);
+    font.insert(font.end(), charStringsIndex.begin(), charStringsIndex.end());
+    const std::size_t privatePos = font.size();
+    const auto privateIndex = buildIndex({});
+    font.insert(font.end(), privateIndex.begin(), privateIndex.end());
+
+    auto topDict = fixedShort(static_cast<int>(charStringsPos));
+    topDict.push_back(std::byte{17});
+    const auto zeroEncoded = fixedShort(0);
+    topDict.insert(topDict.end(), zeroEncoded.begin(), zeroEncoded.end());
+    const auto privateOffsetEncoded = fixedShort(static_cast<int>(privatePos));
+    topDict.insert(topDict.end(), privateOffsetEncoded.begin(), privateOffsetEncoded.end());
+    topDict.push_back(std::byte{18});
+    for (std::size_t i = 0; i < topDict.size(); ++i) font[topDictDataPos + i] = topDict[i];
+    return font;
+}
+
+void TestEmbeddedCffFontRendering() {
+    const auto output = TempPath("pdfpp_feature_cff_embedded.pdf");
+    const auto cffBytes = BuildMinimalCffFont();
+    std::string cffData(reinterpret_cast<const char*>(cffBytes.data()), cffBytes.size());
+
+    std::string pdf = "%PDF-1.4\n";
+    std::array<std::size_t, 9> offsets{};
+    const auto addObject = [&](const std::size_t number, const std::string_view body) {
+        offsets[number] = pdf.size();
+        pdf += std::to_string(number) + " 0 obj\n";
+        pdf.append(body);
+        pdf += "\nendobj\n";
+    };
+    addObject(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    addObject(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    addObject(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+                 "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>");
+    addObject(4, "<< /Type /Font /Subtype /Type0 /BaseFont /CIDFont /Encoding /Identity-H "
+                 "/DescendantFonts [6 0 R] >>");
+    const std::string pageContent = "BT /F1 1 Tf 50 0 0 50 10 10 Tm <0001> Tj ET";
+    addObject(5, "<< /Length " + std::to_string(pageContent.size()) + " >>\nstream\n" +
+                 pageContent + "\nendstream");
+    addObject(6, "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /CIDFont "
+                 "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> "
+                 "/FontDescriptor 7 0 R /DW 1000 >>");
+    addObject(7, "<< /Type /FontDescriptor /FontName /CIDFont /Flags 4 "
+                 "/FontBBox [0 0 100 100] /ItalicAngle 0 /Ascent 100 /Descent 0 /CapHeight 100 "
+                 "/StemV 80 /FontFile3 8 0 R >>");
+    addObject(8, "<< /Length " + std::to_string(cffData.size()) + " /Subtype /CIDFontType0C >>\nstream\n" +
+                 cffData + "\nendstream");
+
+    const std::size_t xrefOffset = pdf.size();
+    std::ostringstream xref;
+    xref << "xref\n0 9\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i < offsets.size(); ++i) {
+        xref << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    xref << "trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n"
+         << xrefOffset << "\n%%EOF\n";
+    pdf += xref.str();
+    std::ofstream file(output, std::ios::binary);
+    file.write(pdf.data(), static_cast<std::streamsize>(pdf.size()));
+    file.close();
+
+    const auto document = PdfDocument::Open(output);
+    const auto font = document.ResolveFont(0U, 0U, "F1");
+    PDFPP_TEST_CHECK(font != nullptr);
+    PDFPP_TEST_CHECK(font->HasEmbeddedCffFont());
+    PDFPP_TEST_CHECK(font->CanRenderEmbeddedGlyphs());
+    PDFPP_TEST_CHECK(font->GetEmbeddedCffFont() != nullptr);
+    PDFPP_TEST_CHECK(font->GetEmbeddedCffFont()->glyphCount == 2U);
+    const auto outline = font->GetCffGlyphOutline(1U);
+    PDFPP_TEST_CHECK(!outline.IsEmpty());
+    PDFPP_TEST_CHECK(std::abs(outline.xMax - 49.0) < 1.0e-6);
+    PDFPP_TEST_CHECK(std::abs(outline.yMax - 49.0) < 1.0e-6);
+
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    std::size_t darkPixels{};
+    for (std::size_t y = 0; y < bitmap.GetHeight(); ++y) {
+        for (std::size_t x = 0; x < bitmap.GetWidth(); ++x) {
+            const auto pixel = bitmap.GetPixel(x, y);
+            if (pixel.red < 200U) ++darkPixels;
+        }
+    }
+    PDFPP_TEST_CHECK(darkPixels > 100U);
+    std::filesystem::remove(output);
+}
+
 } // namespace
 
 int RunFeatureUnitTests() {
@@ -580,6 +833,9 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.PageMutationRemapsDependentFeatures", TestPageMutationRemapsDependentFeatures);
     runner.Run("Feature.RegexSearchOptionsAndGeometry", TestRegexSearchOptionsAndGeometry);
     runner.Run("Feature.RenderingFoundation", TestRenderingFoundation);
+    runner.Run("Feature.TransparencyGroupRendering", TestTransparencyGroupRendering);
+    runner.Run("Feature.MarkedContentTransparencyGroupRendering", TestMarkedContentTransparencyGroupRendering);
+    runner.Run("Feature.EmbeddedCffFontRendering", TestEmbeddedCffFontRendering);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

@@ -24,6 +24,7 @@
 #include <fstream>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <string_view>
@@ -527,6 +528,28 @@ void extractContentRecursively(
                   std::make_move_iterator(chunks.end()));
 }
 
+std::optional<PdfTransparencyGroupProperties> resolveTransparencyGroup(
+    const PdfDocument& document, const PdfDictionary& dictionary) {
+    const auto* groupObject = dictionary.Find(PdfName("Group"));
+    if (groupObject == nullptr) return std::nullopt;
+    const auto* group = objectDictionary(document, groupObject);
+    if (group == nullptr) return std::nullopt;
+    const auto subtype = group->GetAsName(PdfName("S"));
+    if (!subtype.has_value() || subtype->value() != "Transparency") return std::nullopt;
+    PdfTransparencyGroupProperties properties;
+    const auto readBoolean = [&](const char* key) {
+        const auto* value = group->Find(PdfName(key));
+        return value != nullptr && value->AsBoolean().value_or(false);
+    };
+    properties.isolated = readBoolean("I");
+    properties.knockout = readBoolean("K");
+    if (const auto blend = group->GetAsName(PdfName("BM"))) properties.blendMode = blend->value();
+    if (const auto alpha = group->Find(PdfName("CA"))) {
+        if (const auto real = alpha->AsReal()) properties.alpha = std::clamp(*real, 0.0, 1.0);
+    }
+    return properties;
+}
+
 void processPageContentRecursively(
     const PdfDocument& document,
     const std::string_view content,
@@ -539,11 +562,57 @@ void processPageContentRecursively(
     const PdfDocument::PdfContentEventHandler& handler) {
     if (depth > 32U || !handler) return;
 
+    std::vector<bool> markedContentGroups;
     PdfContentProcessor processor;
     processor.SetHandler([&](const PdfContentEvent& event) {
         PdfContentEvent scopedEvent = event;
         scopedEvent.resourceScope = depth == 0U ? "Page" : "Form" + std::to_string(depth);
         scopedEvent.resourceObjectNumber = resourceObjectNumber;
+
+        // Resolve name-referenced BDC property lists (e.g. "/P1 BDC") through
+        // the current resource scope. Inline dictionaries were already turned
+        // into BeginTransparencyGroup by the content processor.
+        if (event.type == PdfContentEventType::BeginMarkedContent &&
+            !event.markedContentProperty.empty() &&
+            event.markedContentProperty.front() != '<') {
+            const auto* properties = resources ? objectDictionary(
+                document, resources->Find(PdfName("Properties"))) : nullptr;
+            const auto* propertyObject = properties ? properties->Find(
+                PdfName(event.markedContentProperty)) : nullptr;
+            const auto* property = propertyObject ? objectDictionary(document, propertyObject) : nullptr;
+            if (property) {
+                const auto group = resolveTransparencyGroup(document, *property);
+                if (group.has_value()) {
+                    scopedEvent.type = PdfContentEventType::BeginTransparencyGroup;
+                    scopedEvent.transparencyGroup = *group;
+                    markedContentGroups.push_back(true);
+                    handler(scopedEvent);
+                    return;
+                }
+            }
+            markedContentGroups.push_back(false);
+            handler(scopedEvent);
+            return;
+        }
+        if (event.type == PdfContentEventType::BeginTransparencyGroup) {
+            markedContentGroups.push_back(true);
+            handler(scopedEvent);
+            return;
+        }
+        if (event.type == PdfContentEventType::EndTransparencyGroup) {
+            if (!markedContentGroups.empty()) markedContentGroups.pop_back();
+            handler(scopedEvent);
+            return;
+        }
+        if (event.type == PdfContentEventType::EndMarkedContent) {
+            const bool closesGroup = !markedContentGroups.empty() && markedContentGroups.back();
+            if (!markedContentGroups.empty()) markedContentGroups.pop_back();
+            if (closesGroup) {
+                scopedEvent.type = PdfContentEventType::EndTransparencyGroup;
+            }
+            handler(scopedEvent);
+            return;
+        }
         handler(scopedEvent);
         if (event.type != PdfContentEventType::InvokeXObject || resources == nullptr) return;
 
@@ -596,9 +665,33 @@ void processPageContentRecursively(
             const auto bytes = stream->bytes();
             childContent.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         }
+
+        const auto group = resolveTransparencyGroup(
+            document, stream->dictionary());
+        if (group.has_value()) {
+            PdfContentEvent begin;
+            begin.type = PdfContentEventType::BeginTransparencyGroup;
+            begin.text = event.text;
+            begin.operation = event.operation;
+            begin.textState = event.textState;
+            begin.resourceScope = scopedEvent.resourceScope;
+            begin.resourceObjectNumber = scopedEvent.resourceObjectNumber;
+            begin.transparencyGroup = *group;
+            handler(begin);
+        }
         processPageContentRecursively(document, childContent, childResources, childState,
                                       decodeStream, activeForms, depth + 1U,
                                       reference.objectNumber, handler);
+        if (group.has_value()) {
+            PdfContentEvent end;
+            end.type = PdfContentEventType::EndTransparencyGroup;
+            end.text = event.text;
+            end.operation = event.operation;
+            end.textState = event.textState;
+            end.resourceScope = scopedEvent.resourceScope;
+            end.resourceObjectNumber = scopedEvent.resourceObjectNumber;
+            handler(end);
+        }
 
         if (reference.objectNumber != 0U) {
             const std::uint64_t key =

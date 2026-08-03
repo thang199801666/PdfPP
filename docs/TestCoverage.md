@@ -32,3 +32,6 @@ This document maps the current public feature set to its automated unit or integ
 The executable currently reports 29 named subtests across the core, reader, writer, public API and feature suites. Strict builds compile the same suite with warnings treated as errors.
 
 | Rendering bitmap/path/text foundation | `Feature.RenderingFoundation` | Creates a PDF, renders it, validates dimensions and pixels, exports PPM, and checks invalid render limits |
+| Transparency-group compositing | `Feature.TransparencyGroupRendering`, `Feature.MarkedContentTransparencyGroupRendering` | Form XObject `/Group /S /Transparency` and BDC/EMC group discovery with blend-mode/alpha compositing |
+| Embedded CFF font parsing and rendering | `Core.ParserFiltersFontsContentText`, `Feature.EmbeddedCffFontRendering` | Hand-built CFF font, Type 2 charstring interpreter, and rasterized embedded glyph pixels |
+| Digital-signature foundation | `Security.PasswordEncryptionRoundTrips` | Prepare/sign/apply/inspect round trip with ByteRange digest-input validation |

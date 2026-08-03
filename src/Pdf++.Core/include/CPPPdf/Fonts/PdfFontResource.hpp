@@ -2,6 +2,7 @@
 
 #include <CPPPdf/Fonts/PdfFont.hpp>
 #include <CPPPdf/Fonts/PdfTrueTypeFont.hpp>
+#include <CPPPdf/Fonts/PdfCff.hpp>
 #include <CPPPdf/Core/PdfTypes.hpp>
 #include <CPPPdf/Objects/PdfObject.hpp>
 
@@ -26,13 +27,14 @@ public:
     [[nodiscard]] bool HasToUnicode() const noexcept { return toUnicode_.has_value(); }
     [[nodiscard]] bool IsComposite() const noexcept { return composite_; }
     [[nodiscard]] bool CanRenderEmbeddedGlyphs() const noexcept {
-        return embeddedTrueType_ != nullptr;
+        return embeddedTrueType_ != nullptr || (embeddedCff_ && parsedCff_ != nullptr);
     }
     [[nodiscard]] bool HasUnicodeMapping() const noexcept {
         return toUnicode_.has_value() || !simpleUnicode_.empty();
     }
     [[nodiscard]] bool IsRenderable() const noexcept {
-        return embeddedTrueType_ != nullptr || descriptor_.subtype == PdfFontSubtype::Type1;
+        return embeddedTrueType_ != nullptr || (embeddedCff_ && parsedCff_ != nullptr) ||
+               descriptor_.subtype == PdfFontSubtype::Type1;
     }
     [[nodiscard]] bool RequiresExternalShaping() const noexcept {
         return composite_ || descriptor_.subtype == PdfFontSubtype::CIDFontType0 ||
@@ -41,7 +43,8 @@ public:
     [[nodiscard]] bool HasEmbeddedCffFont() const noexcept { return embeddedCff_; }
     [[nodiscard]] bool HasEmbeddedType1Font() const noexcept { return embeddedType1_; }
     [[nodiscard]] std::string_view EmbeddedProgramSubtype() const noexcept { return embeddedProgramSubtype_; }
-    [[nodiscard]] std::uint32_t GetDefaultWidth() const noexcept { return defaultWidth_; }
+    [[nodiscard]] const PdfCffFont* GetEmbeddedCffFont() const noexcept { return parsedCff_.get(); }
+    [[nodiscard]] PdfCffGlyphOutline GetCffGlyphOutline(std::uint32_t glyphId) const;
     [[nodiscard]] std::uint32_t GetGlyphWidth(std::uint32_t characterCode) const noexcept;
     [[nodiscard]] std::size_t GetGlyphCount(std::string_view encodedBytes) const noexcept;
     [[nodiscard]] std::vector<std::uint32_t> GetCharacterCodes(std::string_view encodedBytes) const;
@@ -62,6 +65,7 @@ private:
     bool composite_{false};
     bool identityEncoding_{false};
     std::shared_ptr<const PdfTrueTypeFont> embeddedTrueType_;
+    std::shared_ptr<const PdfCffFont> parsedCff_;
     bool embeddedCff_{false};
     bool embeddedType1_{false};
     std::string embeddedProgramSubtype_;

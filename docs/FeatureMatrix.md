@@ -18,7 +18,7 @@ Legend: **Yes** = supported, **Partial** = supported with documented limitations
 | Annotations | Partial | Yes | Yes | Core annotation/highlight APIs |
 | AcroForm | Partial | Partial | Partial | Basic field update, appearance, and flattening |
 | Encryption | Yes | Yes | Partial | AES-128 (R4) and RC4-128 (R3); password/permission-aware incremental page, annotation, and AcroForm updates plus change/remove password. Page organizer/import/highlighter and AES-256 (R6) remain unsupported |
-| Digital signatures | No | No | No | Planned future subsystem |
+| Digital signatures | Partial | Partial | No | External signing foundation: /Sig fields, ByteRange computation, digest-input exposure, and in-place signature application; CMS/PKCS#7, key material and validation are external |
 | PDF/A and PDF/UA | No | No | No | Compliance validation not implemented |
 | High-level layout | N/A | No | No | Paragraph/table pagination is not implemented |
 
@@ -52,8 +52,8 @@ These safeguards reduce resource-exhaustion risk but are not a substitute for pr
 | RGB and grayscale paint state | Initial | Stroke/fill colors and line width |
 | Text rasterization | Initial | ASCII fallback from extracted text geometry |
 | Image XObject rendering | Partial | Raw decoded DeviceGray/RGB/CMYK and inline images; optional JPEG/JPX codecs remain planned |
-| Exact embedded-font glyph rendering | No | Planned |
-| Clipping, transparency and blend modes | No | Planned |
-| Patterns, shadings and advanced color spaces | No | Planned |
+| Exact embedded-font glyph rendering | Partial | TrueType and CFF/Type 2 charstring glyph outlines rasterized; simple CFF encoding mapping and full hinting remain planned |
+| Clipping, transparency and blend modes | Partial | Vector clipping, transparency groups (Form XObject `/Group` and BDC/EMC), and blend-mode compositing |
+| Patterns, shadings and advanced color spaces | Partial | Axial/radial shading and functions; patterns remain planned |
 
 | CPU page rendering | Yes (paths, colors, transforms, fallback text, raw decoded images, supersampling AA) |

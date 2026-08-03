@@ -189,6 +189,49 @@ It is a rendering foundation rather than a complete PDF imaging model. Image
 XObjects, exact embedded-font glyph rasterization, clipping paths, transparency,
 blend modes, patterns, shadings and advanced color spaces remain future work.
 
+## Pdf++ 0.45 embedded CFF glyph rendering
+
+Version 0.45 parses embedded CFF fonts (charset, CharStrings, Private DICT, and
+local/global subrs) and rasterizes their Type 2 charstring outlines in the CPU
+renderer:
+
+```cpp
+const auto document = CPPPdf::PdfDocument::Open("cjk.pdf");
+CPPPdf::PdfRenderOptions options;
+options.dpi = 144.0;
+const auto bitmap = CPPPdf::PdfPageRenderer::Render(document, 0, options);
+```
+
+Embedded TrueType and CFF/OpenType glyph outlines are both drawn from font data;
+identity-encoded CID fonts map character codes to glyphs directly. Simple-CFF
+encoding mapping, hinting, and vertical metrics remain future work.
+
+## Pdf++ 0.46 digital-signature foundation
+
+Version 0.46 adds an external digital-signature foundation. Pdf++ does not embed a
+crypto backend; instead it exposes the exact bytes an external signer must digest
+and writes the produced signature back into the placeholder:
+
+```cpp
+CPPPdf::PdfSignatureManager::Sign(
+    "unsigned.pdf", "signed.pdf",
+    [](std::span<const std::byte> digestInput) {
+        // Feed digestInput to an external CMS/PKCS#7 signer and return the bytes.
+        return ProduceSignature(digestInput);
+    },
+    [](CPPPdf::PdfSignatureFieldOptions& options) {
+        options.fieldName = "Approved";
+        options.signerName = "Thang Nguyen";
+        options.reason = "Release approval";
+        return options;
+    }());
+```
+
+`PrepareForSigning` computes the `/ByteRange`, `ApplySignature` writes the signature
+value into the `/Contents` placeholder in place, and `GetSignatures` inspects fields,
+ByteRange, and applied contents. CMS/PKCS#7 parsing, key management, and validation
+remain external.
+
 ## Contributing and security
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security-sensitive defects through the private process described in [SECURITY.md](SECURITY.md).

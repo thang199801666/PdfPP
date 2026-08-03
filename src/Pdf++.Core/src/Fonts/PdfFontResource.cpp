@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <stdexcept>
 #include <exception>
 
@@ -172,6 +173,18 @@ PdfFontResource PdfFontResource::Create(const PdfDictionary& dictionary, const R
     }
 
     const PdfObject* descriptorObject = ResolveObject(dictionary.Find(PdfName("FontDescriptor")), resolver);
+    // Composite fonts store the descriptor on the descendant CID font rather
+    // than the Type0 wrapper. Resolve through DescendantFonts when missing.
+    if (descriptorObject == nullptr && result.composite_) {
+        const PdfObject* descendantsObject = ResolveObject(dictionary.Find(PdfName("DescendantFonts")), resolver);
+        if (descendantsObject && descendantsObject->AsArray() && !descendantsObject->AsArray()->empty()) {
+            const PdfObject* descendantObject = ResolveObject(&descendantsObject->AsArray()->at(0), resolver);
+            if (descendantObject && descendantObject->AsDictionary()) {
+                descriptorObject = ResolveObject(
+                    descendantObject->AsDictionary()->Find(PdfName("FontDescriptor")), resolver);
+            }
+        }
+    }
     if (descriptorObject && descriptorObject->AsDictionary()) {
         const auto* descriptor = descriptorObject->AsDictionary();
         const PdfObject* fontFileObject = ResolveObject(descriptor->Find(PdfName("FontFile2")), resolver);
@@ -206,6 +219,27 @@ PdfFontResource PdfFontResource::Create(const PdfDictionary& dictionary, const R
             result.embeddedCff_ = result.embeddedProgramSubtype_ == "Type1C" ||
                 result.embeddedProgramSubtype_ == "CIDFontType0C" ||
                 result.embeddedProgramSubtype_ == "OpenType";
+            if (result.embeddedCff_) {
+                const auto& stream = *cffObject->AsStream();
+                std::vector<std::byte> bytes(stream.bytes().begin(), stream.bytes().end());
+                const PdfObject* filterObject = ResolveObject(stream.dictionary().Find(PdfName("Filter")), resolver);
+                std::vector<PdfFilterSpec> filters;
+                if (filterObject) {
+                    if (const auto* name = filterObject->AsName()) filters.push_back({name->value(), {}});
+                    else if (const auto* array = filterObject->AsArray()) {
+                        for (const auto& item : array->values())
+                            if (const auto* name = item.AsName()) filters.push_back({name->value(), {}});
+                    }
+                }
+                try {
+                    if (!filters.empty()) bytes = PdfFilterPipeline().Decode(bytes, filters);
+                    result.parsedCff_ = std::make_shared<const PdfCffFont>(
+                        PdfCffParser::ParseFont(bytes));
+                } catch (const std::exception&) {
+                    // Keep malformed embedded CFF fonts from making an otherwise
+                    // readable PDF unusable; fall back to metrics/Unicode decode.
+                }
+            }
         }
         const PdfObject* type1Object = ResolveObject(descriptor->Find(PdfName("FontFile")), resolver);
         result.embeddedType1_ = type1Object != nullptr && type1Object->AsStream() != nullptr;
@@ -271,6 +305,16 @@ std::uint32_t PdfFontResource::GetGlyphWidth(std::uint32_t characterCode) const 
 
 std::optional<std::uint16_t> PdfFontResource::GetEmbeddedGlyphId(
     const std::uint32_t characterCode) const noexcept {
+    if (parsedCff_) {
+        // For identity-encoded CID fonts the character code is the glyph index
+        // (CID) directly. Simple CFF fonts need an encoding table to map codes
+        // to SIDs, which is not yet implemented for glyph rasterization.
+        if (composite_ && identityEncoding_ &&
+            characterCode < parsedCff_->glyphCount) {
+            return static_cast<std::uint16_t>(characterCode);
+        }
+        return std::nullopt;
+    }
     if (!embeddedTrueType_) return std::nullopt;
     if (identityEncoding_ && composite_) return embeddedTrueType_->GetGlyphId(characterCode);
     const auto unicode = simpleUnicode_.find(characterCode);
@@ -346,6 +390,11 @@ std::string PdfFontResource::Decode(std::string_view encodedBytes) const {
         output += it == simpleUnicode_.end() ? Utf8(code) : it->second;
     }
     return output;
+}
+
+PdfCffGlyphOutline PdfFontResource::GetCffGlyphOutline(const std::uint32_t glyphId) const {
+    if (!parsedCff_) return {};
+    return PdfCffParser::GetGlyphOutline(*parsedCff_, glyphId);
 }
 
 } // namespace CPPPdf

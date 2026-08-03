@@ -1,3 +1,29 @@
+## 0.46.0
+
+- Added an external digital-signature foundation (`PdfSignatureManager`).
+- `PrepareForSigning` adds a `/Sig` field with widget annotation and a signature dictionary, then writes a prepared file whose `/Contents` is a zero-filled placeholder.
+- ByteRange handling: the prepared file's `/ByteRange` is patched in place and the exact digest input (the two byte ranges) is exposed for an external signer.
+- `ApplySignature` writes the produced signature value (hex, zero-padded) into the placeholder while preserving ByteRange validity; `Sign` wraps prepare/sign/apply in one callback-based call.
+- `GetSignatures` inspects signature fields, `/V` dictionaries, ByteRange, and applied contents.
+- Added regression coverage for the prepare/sign/apply/inspect round trip.
+
+## 0.45.0
+
+- Added embedded CFF font parsing: charset (formats 0/1/2), CharStrings INDEX, Private DICT default/nominal widths, and local/global subrs.
+- Added a bounded Type 2 charstring interpreter producing move/line/cubic glyph outlines with width extraction.
+- The CPU renderer now rasterizes embedded CFF/Type 2 glyphs (Type1C, CIDFontType0C, OpenType) with cubic flattening; identity-encoded CID fonts map character codes to glyphs directly.
+- Font descriptors of composite fonts are now resolved through the descendant CID font when missing on the Type0 wrapper.
+- Added regression coverage for the CFF parser, the charstring interpreter, and embedded-CFF glyph rendering.
+
+## 0.44.0
+
+- Added transparency-group boundary discovery and compositing to the CPU renderer.
+- Form XObjects carrying `/Group << /S /Transparency >>` now render into an offscreen layer and composite back with the group's blend mode, alpha, isolated, and knockout flags.
+- BDC/EMC marked content with an inline or name-referenced transparency group emits dedicated begin/end group events.
+- Added `BeginTransparencyGroup`, `EndTransparencyGroup`, `BeginMarkedContent`, and `EndMarkedContent` content event types with group metadata.
+- The renderer now replays vector paths and images in a single content-order pass so transparency groups and z-order are preserved.
+- Added rendering regression coverage for Form XObject groups and marked-content groups.
+
 ## 0.43.0
 
 - Added vector clipping path support to the CPU page renderer.
