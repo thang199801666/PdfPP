@@ -19,6 +19,10 @@ compile_commands.json
 .ninja_*
 Makefile
 
+# Visual Studio per-project build directories (from standalone builds)
+**/build/
+**/build/**
+
 # Visual Studio
 .vs/
 *.VC.db
@@ -70,6 +74,10 @@ benchmark-results/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Python tooling
+__pycache__/
+*.pyc
 
 # Archives and local scratch files
 *.zip
