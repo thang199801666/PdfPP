@@ -678,15 +678,40 @@ const auto bytes = makeMinimalPdf();
         file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     }
     std::vector<CPPPdf::PdfAnnotation> annotations;
-    annotations.push_back(CPPPdf::PdfAnnotation{
-        0U, CPPPdf::PdfAnnotationType::Underline, {10, 10, 80, 25}, {{10, 10, 80, 25}},
-        {0.0, 0.0, 1.0}, 0.8, "Underline test", "Pdf++", {}, false});
-    annotations.push_back(CPPPdf::PdfAnnotation{
-        0U, CPPPdf::PdfAnnotationType::TextNote, {100, 100, 120, 120}, {},
-        {1.0, 1.0, 0.0}, 1.0, "Review this", "Pdf++", {}, true});
-    annotations.push_back(CPPPdf::PdfAnnotation{
-        0U, CPPPdf::PdfAnnotationType::Link, {30, 30, 130, 50}, {},
-        {0.0, 0.0, 1.0}, 1.0, {}, {}, "https://example.com", false});
+    {
+        CPPPdf::PdfAnnotation annotation;
+        annotation.pageIndex = 0U;
+        annotation.type = CPPPdf::PdfAnnotationType::Underline;
+        annotation.rectangle = {10, 10, 80, 25};
+        annotation.quadrilaterals = {{10, 10, 80, 25}};
+        annotation.color = {0.0, 0.0, 1.0};
+        annotation.opacity = 0.8;
+        annotation.contents = "Underline test";
+        annotation.title = "Pdf++";
+        annotations.push_back(annotation);
+    }
+    {
+        CPPPdf::PdfAnnotation annotation;
+        annotation.pageIndex = 0U;
+        annotation.type = CPPPdf::PdfAnnotationType::TextNote;
+        annotation.rectangle = {100, 100, 120, 120};
+        annotation.color = {1.0, 1.0, 0.0};
+        annotation.opacity = 1.0;
+        annotation.contents = "Review this";
+        annotation.title = "Pdf++";
+        annotation.open = true;
+        annotations.push_back(annotation);
+    }
+    {
+        CPPPdf::PdfAnnotation annotation;
+        annotation.pageIndex = 0U;
+        annotation.type = CPPPdf::PdfAnnotationType::Link;
+        annotation.rectangle = {30, 30, 130, 50};
+        annotation.color = {0.0, 0.0, 1.0};
+        annotation.opacity = 1.0;
+        annotation.uri = "https://example.com";
+        annotations.push_back(annotation);
+    }
     const auto editResult = CPPPdf::PdfAnnotationEditor::AddAnnotations(
         annotationInput, annotationOutput, annotations);
     if (editResult.annotationCount != 3U || editResult.modifiedPageCount != 1U) {

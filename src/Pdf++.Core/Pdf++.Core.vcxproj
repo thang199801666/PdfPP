@@ -86,6 +86,7 @@
     <ClInclude Include="include\CPPPdf\Text\PdfTextDocumentIndex.hpp" />
     <ClInclude Include="include\CPPPdf\Annotations\PdfKeywordHighlighter.hpp" />
     <ClInclude Include="include\CPPPdf\Annotations\PdfAnnotationEditor.hpp" />
+    <ClInclude Include="include\CPPPdf\Annotations\PdfXfdf.hpp" />
     <ClInclude Include="include\CPPPdf\Document\PdfPageOrganizer.hpp" />
     <ClInclude Include="include\CPPPdf\Document\PdfPageImporter.hpp" />
     <ClInclude Include="src\Internal\Writer\PdfObjectSerializer.hpp" />
@@ -133,6 +134,7 @@
     <ClCompile Include="src\Text\PdfTextDocumentIndex.cpp" />
     <ClCompile Include="src\Annotations\PdfKeywordHighlighter.cpp" />
     <ClCompile Include="src\Annotations\PdfAnnotationEditor.cpp" />
+    <ClCompile Include="src\Annotations\PdfXfdf.cpp" />
     <ClCompile Include="src\Document\PdfPageOrganizer.cpp" />
     <ClCompile Include="src\Document\PdfPageImporter.cpp" />
     <ClCompile Include="src\Internal\Writer\PdfObjectSerializer.cpp" />

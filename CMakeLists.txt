@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.52.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.53.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -66,6 +66,7 @@ set(PDFPP_PUBLIC_HEADERS
     src/Pdf++.Core/include/CPPPdf/Text/PdfTextDocumentIndex.hpp
     src/Pdf++.Core/include/CPPPdf/Annotations/PdfKeywordHighlighter.hpp
     src/Pdf++.Core/include/CPPPdf/Annotations/PdfAnnotationEditor.hpp
+src/Pdf++.Core/include/CPPPdf/Annotations/PdfXfdf.hpp
     src/Pdf++.Core/include/CPPPdf/Document/PdfPageOrganizer.hpp
     src/Pdf++.Core/include/CPPPdf/Document/PdfPageImporter.hpp
     src/Pdf++.Core/include/CPPPdf/Forms/PdfAcroForm.hpp
@@ -109,6 +110,7 @@ set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Text/PdfTextDocumentIndex.cpp
     src/Pdf++.Core/src/Annotations/PdfKeywordHighlighter.cpp
     src/Pdf++.Core/src/Annotations/PdfAnnotationEditor.cpp
+src/Pdf++.Core/src/Annotations/PdfXfdf.cpp
     src/Pdf++.Core/src/Forms/PdfAcroForm.cpp
     src/Pdf++.Core/src/Validation/PdfConformance.cpp)
 

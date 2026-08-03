@@ -1,3 +1,24 @@
+## 0.53.0
+
+- Added FreeText, Ink, Polygon, Polyline, Square, Circle and Stamp annotation
+  types to `PdfAnnotationEditor` with per-type fields (ink paths, vertices,
+  interior color, border width, line-end styles, rotation, stamp name, text
+  alignment).
+- `PdfAnnotationEditor::RemoveAnnotations` removes annotations by page with an
+  optional subtype filter; `UpdateAnnotationContents` rewrites the contents and
+  title of matching annotations.
+- `PdfAnnotationEditor::GenerateAppearances` writes deterministic `/AP /N` Form
+  XObject appearance streams for every drawable annotation type using native
+  PDF graphics operators.
+- Added XFDF export/import (`PdfXfdf`): exports page annotations to the Adobe
+  XFDF XML schema and imports an XFDF file back into a PDF via the annotation
+  editor.
+- Fixed annotation serialization bugs: line-end names now carry the `/` name
+  prefix, and interior-color/border defaults no longer leak into unrelated
+  annotation types.
+- Tests: `API.AdvancedAnnotationsAndXfdf` covers the new types, removal,
+  update, appearance generation and the XFDF round trip. All suites green.
+
 ## 0.52.0
 
 - Reorganized the unit-test suite by domain: the monolithic `RunCoreTests()`

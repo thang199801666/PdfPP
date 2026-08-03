@@ -53,7 +53,9 @@ secondary scope.
 
 - Complete AcroForm widgets, appearances, flags and calculations.
 - Add XFDF import/export and reliable flattening.
+- `PdfXfdf` exports page annotations to the Adobe XFDF XML schema and imports an XFDF file back into a PDF through `PdfAnnotationEditor`.
 - Add FreeText, Stamp, Ink, Polygon and Polyline annotations.
+- `PdfAnnotationEditor` supports FreeText, Ink, Polygon, Polyline, Square, Circle and Stamp types (ink paths, vertices, interior color, line-end styles, rotation, stamp names), plus `RemoveAnnotations`, `UpdateAnnotationContents`, and `GenerateAppearances` which writes `/AP /N` Form XObject appearances.
 - Add annotation appearances, replies, popups and flattening.
 - Complete outlines, destinations, actions, page labels and optional content.
 - Improve attachments, portfolios and embedded-file relationships.

@@ -34,6 +34,12 @@ std::vector<std::byte> ReadBytes(const std::filesystem::path& path) {
     return bytes;
 }
 
+std::string ReadBytesAsString(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    PDFPP_TEST_CHECK(input);
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
 void ExpectThrows(const auto& operation) {
     bool thrown = false;
     try {
@@ -375,6 +381,179 @@ void TestAnnotationsAndHighlight(const std::filesystem::path& base) {
     });
 }
 
+void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
+    // FreeText, Ink, Polygon, Polyline, Square, Circle and Stamp types.
+    const auto advanced = TempPath("pdfpp_api_advanced_annotations.pdf");
+    std::vector<PdfAnnotation> annotations;
+    {
+        PdfAnnotation freeText;
+        freeText.pageIndex = 0;
+        freeText.type = PdfAnnotationType::FreeText;
+        freeText.rectangle = {20, 200, 220, 260};
+        freeText.contents = "Free text note";
+        freeText.textAlignment = 1;
+        annotations.push_back(freeText);
+    }
+    {
+        PdfAnnotation ink;
+        ink.pageIndex = 0;
+        ink.type = PdfAnnotationType::Ink;
+        ink.rectangle = {20, 150, 120, 190};
+        ink.inkPaths = {{{30, 160}, {50, 180}, {80, 165}, {110, 185}}};
+        annotations.push_back(ink);
+    }
+    {
+        PdfAnnotation polygon;
+        polygon.pageIndex = 0;
+        polygon.type = PdfAnnotationType::Polygon;
+        polygon.rectangle = {20, 100, 120, 140};
+        polygon.vertices = {{25, 105}, {115, 108}, {110, 135}, {30, 130}};
+        polygon.interiorColor = {0.8, 0.9, 0.95};
+        polygon.lineStart = PdfLineEndStyle::ClosedArrow;
+        polygon.lineEnd = PdfLineEndStyle::Diamond;
+        annotations.push_back(polygon);
+    }
+    {
+        PdfAnnotation polyline;
+        polyline.pageIndex = 0;
+        polyline.type = PdfAnnotationType::Polyline;
+        polyline.rectangle = {20, 60, 120, 90};
+        polyline.vertices = {{25, 65}, {60, 85}, {115, 62}};
+        annotations.push_back(polyline);
+    }
+    {
+        PdfAnnotation square;
+        square.pageIndex = 0;
+        square.type = PdfAnnotationType::Square;
+        square.rectangle = {200, 60, 280, 120};
+        square.borderWidth = 2.5;
+        annotations.push_back(square);
+    }
+    {
+        PdfAnnotation circle;
+        circle.pageIndex = 0;
+        circle.type = PdfAnnotationType::Circle;
+        circle.rectangle = {200, 130, 280, 190};
+        circle.borderWidth = 1.5;
+        circle.interiorColor = {0.9, 0.9, 0.9};
+        annotations.push_back(circle);
+    }
+    {
+        PdfAnnotation stamp;
+        stamp.pageIndex = 0;
+        stamp.type = PdfAnnotationType::Stamp;
+        stamp.rectangle = {300, 200, 420, 260};
+        stamp.stampName = "Draft";
+        stamp.rotationDegrees = 15.0;
+        annotations.push_back(stamp);
+    }
+    const auto addResult = PdfAnnotationEditor::AddAnnotations(base, advanced, annotations);
+    PDFPP_TEST_CHECK(addResult.annotationCount == annotations.size());
+    PDFPP_TEST_CHECK(addResult.modifiedPageCount == 1U);
+    auto advancedDocument = PdfDocument::Open(advanced);
+    const PdfDictionary* advancedPage = advancedDocument.GetObject(
+        advancedDocument.GetPageReference(0U)).AsDictionary();
+    PDFPP_TEST_CHECK(advancedPage != nullptr);
+    const PdfArray* advancedAnnots = advancedPage->GetAsArray(PdfName("Annots"));
+    PDFPP_TEST_CHECK(advancedAnnots != nullptr && advancedAnnots->size() == 7U);
+    bool foundFreeText = false;
+    bool foundInkList = false;
+    bool foundVertices = false;
+    bool foundDraft = false;
+    for (const auto& value : advancedAnnots->values()) {
+        const auto reference = value.AsReference();
+        if (!reference) continue;
+        const PdfDictionary* annotation = advancedDocument.GetObject(
+            PdfReference{reference->first, reference->second}).AsDictionary();
+        if (!annotation) continue;
+        const PdfObject* subtype = annotation->Find(PdfName("Subtype"));
+        const auto subtypeName = subtype ? subtype->AsName() : nullptr;
+        if (subtypeName && subtypeName->value() == "FreeText") foundFreeText = true;
+        if (annotation->Find(PdfName("InkList"))) foundInkList = true;
+        if (annotation->Find(PdfName("Vertices"))) foundVertices = true;
+        const PdfObject* stampName = annotation->Find(PdfName("Name"));
+        const auto stamp = stampName ? stampName->AsName() : nullptr;
+        if (stamp && stamp->value() == "Draft") foundDraft = true;
+    }
+    PDFPP_TEST_CHECK(foundFreeText);
+    PDFPP_TEST_CHECK(foundInkList);
+    PDFPP_TEST_CHECK(foundVertices);
+    PDFPP_TEST_CHECK(foundDraft);
+
+    // RemoveAnnotations: drop just the FreeText entry, keep the rest.
+    const auto removed = TempPath("pdfpp_api_removed_annotations.pdf");
+    const auto removeResult = PdfAnnotationEditor::RemoveAnnotations(
+        advanced, removed, 0U, {"/FreeText"});
+    PDFPP_TEST_CHECK(removeResult.removedCount == 1U);
+    PDFPP_TEST_CHECK(removeResult.modifiedPageCount == 1U);
+    auto removedDocument = PdfDocument::Open(removed);
+    const PdfDictionary* removedPage = removedDocument.GetObject(
+        removedDocument.GetPageReference(0U)).AsDictionary();
+    const PdfArray* keptAnnots = removedPage->GetAsArray(PdfName("Annots"));
+    PDFPP_TEST_CHECK(keptAnnots != nullptr && keptAnnots->size() == 6U);
+
+    // RemoveAnnotations with no filter removes everything.
+    const auto removedAll = TempPath("pdfpp_api_removed_all.pdf");
+    const auto removeAllResult = PdfAnnotationEditor::RemoveAnnotations(advanced, removedAll, 0U);
+    PDFPP_TEST_CHECK(removeAllResult.removedCount == 7U);
+    auto removedAllDocument = PdfDocument::Open(removedAll);
+    const PdfDictionary* clearedPage = removedAllDocument.GetObject(
+        removedAllDocument.GetPageReference(0U)).AsDictionary();
+    const PdfArray* clearedAnnots = clearedPage->GetAsArray(PdfName("Annots"));
+    PDFPP_TEST_CHECK(clearedAnnots == nullptr || clearedAnnots->empty());
+
+    // UpdateAnnotationContents rewrites the FreeText contents.
+    const auto updated = TempPath("pdfpp_api_updated_annotation.pdf");
+    const auto updatedCount = PdfAnnotationEditor::UpdateAnnotationContents(
+        advanced, updated, 0U, PdfAnnotationType::FreeText, "Revised note", "New title");
+    PDFPP_TEST_CHECK(updatedCount == 1U);
+    const std::string updatedBytes = ReadBytesAsString(updated);
+    PDFPP_TEST_CHECK(updatedBytes.find("Revised note") != std::string::npos);
+
+    // XFDF export then import round trip.
+    const auto xfdfPath = TempPath("pdfpp_api_annotations.xfdf");
+    const auto exportResult = PdfXfdf::ExportAnnotations(advanced, 0U, xfdfPath);
+    PDFPP_TEST_CHECK(exportResult.annotationCount == 7U);
+    const std::string xfdfBytes = ReadBytesAsString(xfdfPath);
+    PDFPP_TEST_CHECK(xfdfBytes.find("<xfdf") != std::string::npos);
+    PDFPP_TEST_CHECK(xfdfBytes.find("<freetext") != std::string::npos);
+    PDFPP_TEST_CHECK(xfdfBytes.find("<stamp") != std::string::npos);
+
+    const auto reimported = TempPath("pdfpp_api_xfdf_reimported.pdf");
+    const auto importResult = PdfXfdf::ImportAnnotations(base, 0U, xfdfPath, reimported);
+    PDFPP_TEST_CHECK(importResult.addedCount >= 7U);
+    auto reimportedDocument = PdfDocument::Open(reimported);
+    PDFPP_TEST_CHECK(reimportedDocument.GetPageCount() == 2U);
+
+    // GenerateAppearances: every annotation gets an /AP /N Form XObject.
+    const auto appeared = TempPath("pdfpp_api_appeared_annotations.pdf");
+    const auto appearanceResult = PdfAnnotationEditor::GenerateAppearances(advanced, appeared, 0U);
+    PDFPP_TEST_CHECK(appearanceResult.appearanceCount == 7U);
+    PDFPP_TEST_CHECK(appearanceResult.modifiedPageCount == 1U);
+    auto appearedDocument = PdfDocument::Open(appeared);
+    const PdfDictionary* appearedPage = appearedDocument.GetObject(
+        appearedDocument.GetPageReference(0U)).AsDictionary();
+    const PdfArray* appearedAnnots = appearedPage->GetAsArray(PdfName("Annots"));
+    PDFPP_TEST_CHECK(appearedAnnots != nullptr && appearedAnnots->size() == 7U);
+    std::size_t apCount = 0U;
+    for (const auto& value : appearedAnnots->values()) {
+        const auto ref = value.AsReference();
+        if (!ref) continue;
+        const PdfDictionary* annotation = appearedDocument.GetObject(
+            PdfReference{ref->first, ref->second}).AsDictionary();
+        if (annotation && annotation->Find(PdfName("AP"))) ++apCount;
+    }
+    PDFPP_TEST_CHECK(apCount == 7U);
+
+    std::filesystem::remove(advanced);
+    std::filesystem::remove(removed);
+    std::filesystem::remove(removedAll);
+    std::filesystem::remove(updated);
+    std::filesystem::remove(xfdfPath);
+    std::filesystem::remove(reimported);
+    std::filesystem::remove(appeared);
+}
+
 } // namespace
 
 
@@ -594,7 +773,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 52U);
+    static_assert(CPPPdf::VersionMinor == 53U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -604,7 +783,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.52.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.53.0");
 }
 
 int RunApiCoverageTests() {
@@ -627,6 +806,7 @@ int RunApiCoverageTests() {
     runner.Run("API.PageEditingAndOrganization", [&] { TestPageEditingAndOrganization(base); });
     runner.Run("API.PageImport", [&] { TestImport(base); });
     runner.Run("API.AnnotationsAndHighlight", [&] { TestAnnotationsAndHighlight(base); });
+    runner.Run("API.AdvancedAnnotationsAndXfdf", [&] { TestAdvancedAnnotationsAndXfdf(base); });
 
     std::filesystem::remove(base);
     return runner.PrintSummary("Public API coverage");
