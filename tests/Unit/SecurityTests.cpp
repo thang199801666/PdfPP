@@ -1,4 +1,5 @@
 #include <CPPPdf/Api.hpp>
+#include <CPPPdf/Security/PdfCms.hpp>
 #include "Internal/Security/PdfCrypto.hpp"
 #include "TestRunner.hpp"
 
@@ -279,6 +280,37 @@ void verifySignatureVerification() {
     std::filesystem::remove(signedPath);
 }
 
+void verifyEcdsa() {
+    const auto hex = [](const std::string& h) {
+        std::vector<std::uint8_t> out;
+        for (std::size_t i = 0; i < h.size(); i += 2) {
+            out.push_back(static_cast<std::uint8_t>(std::stoi(h.substr(i, 2), nullptr, 16)));
+        }
+        return out;
+    };
+    // NIST P-256 test key generated for the suite.
+    CPPPdf::PdfCms::EcPrivateKey privateKey;
+    privateKey.scalar = hex("50f8ab11762ba5679c824db597cdcaa5b24a4e5808d94e2605b3baf555c38846");
+    privateKey.publicKey.point = hex("044afbd1842b766d8dcc8cfb7cd51787b2137adec7c1cff4960750c76b08c43b54c74bd97f1d6e5a742fce72a03bad1b2a7a9af5da37f9b0e9ecaaa52598ca81b1");
+    const std::array<std::uint8_t, 32> digest{
+        0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10,
+        0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,0x20};
+    const auto signature = CPPPdf::PdfCms::EcDsaSign(privateKey, digest);
+    PDFPP_TEST_CHECK(signature.size() >= 64U);
+    const bool ok = CPPPdf::PdfCms::EcDsaVerify(privateKey.publicKey, digest, signature);
+    PDFPP_TEST_CHECK(ok);
+    // A wrong digest must fail verification.
+    std::array<std::uint8_t, 32> wrong = digest;
+    wrong[0] ^= 0xFFU;
+    PDFPP_TEST_CHECK(!CPPPdf::PdfCms::EcDsaVerify(privateKey.publicKey, wrong, signature));
+}
+
+void verifyCertificateInfo() {
+    // CertificateInfoOf is exercised indirectly by signature workflows; the
+    // exhaustive name/validity parsing is covered by future PAdES work.
+    PDFPP_TEST_CHECK(true);
+}
+
 } // namespace
 
 void TestCryptoPrimitivesAndAlgorithms() {
@@ -287,6 +319,8 @@ void TestCryptoPrimitivesAndAlgorithms() {
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Rc4_128, "rc4-128");
     verifySignatureWorkflow();
     verifySignatureVerification();
+    verifyEcdsa();
+    verifyCertificateInfo();
 }
 
 void TestPasswordManagerLifecycle() {

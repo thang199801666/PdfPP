@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.63.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.64.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -72,6 +72,7 @@ src/Pdf++.Core/include/CPPPdf/Annotations/PdfXfdf.hpp
     src/Pdf++.Core/include/CPPPdf/Document/PdfPageOrganizer.hpp
     src/Pdf++.Core/include/CPPPdf/Document/PdfPageImporter.hpp
 src/Pdf++.Core/include/CPPPdf/Document/PdfDocumentLayout.hpp
+src/Pdf++.Core/include/CPPPdf/Document/PdfRedactor.hpp
     src/Pdf++.Core/include/CPPPdf/Forms/PdfAcroForm.hpp
     src/Pdf++.Core/include/CPPPdf/Validation/PdfConformance.hpp)
 
@@ -82,6 +83,7 @@ set(PDFPP_CORE_SOURCES
     src/Pdf++.Core/src/Document/PdfPageOrganizer.cpp
     src/Pdf++.Core/src/Document/PdfPageImporter.cpp
 src/Pdf++.Core/src/Document/PdfDocumentLayout.cpp
+src/Pdf++.Core/src/Document/PdfRedactor.cpp
     src/Pdf++.Core/src/Internal/Writer/PdfObjectSerializer.cpp
     src/Pdf++.Core/src/Internal/Writer/PdfObjectSerializer.hpp
     src/Pdf++.Core/src/Internal/Writer/PdfIncrementalWriter.hpp

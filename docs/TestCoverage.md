@@ -44,6 +44,8 @@ sub-suites. Strict builds compile the same suite with warnings treated as errors
 | Embedded CFF font parsing and rendering | `Fonts.CffParser`, `Feature.EmbeddedCffFontRendering` | Hand-built CFF font, Type 2 charstring interpreter, and rasterized embedded glyph pixels |
 | Digital-signature foundation | `Security.CryptoPrimitivesAndAlgorithms` | Prepare/sign/apply/inspect round trip with ByteRange digest-input validation |
 | Signature verification | `Security.CryptoPrimitivesAndAlgorithms` | `PdfSignatureManager::VerifySignature` recomputes the ByteRange digest, extracts the CMS signer certificate/signature, and verifies RSA-PKCS#1 v1.5 |
+| ECDSA P-256 | `Security.CryptoPrimitivesAndAlgorithms` | `EcDsaSign`/`EcDsaVerify` sign/verify SHA-256 (plus wrong-digest rejection) |
+| Redaction | `Feature.Redaction` | `PdfRedactor::RedactText` covers matched text with black rectangles |
 | PDF/A conformance validation | `Validation.PdfAConforming`, `Validation.PdfAMissingMetadataAndOutput`, `Validation.PdfAPartMismatch`, `Validation.PdfUAStructure` | Conforming metadata/output-intent pass; missing metadata/output intent, part mismatch, and PDF/UA structure failures |
 | Line dash patterns | `Content.DashPatternParsing`, `Feature.DashPatternRendering` | Content `d` parsing and pixel-level dash on/off alternation |
 | Shading rendering + soft masks | `Feature.ShadingRenderingAndSoftMask` | Axial gradient render (blue→red) through a clip path, dictionary shading resource resolution, differing-size soft-mask sampling, and blended gradient compositing |

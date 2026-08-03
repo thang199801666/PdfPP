@@ -40,6 +40,42 @@ public:
     [[nodiscard]] static RsaPublicKey ParsePublicKeyPem(std::string_view pem);
     [[nodiscard]] static RsaPrivateKey ParsePrivateKeyPem(std::string_view pem);
 
+    // ECDSA (NIST P-256) support. Public key is the uncompressed SEC1 point
+    // (0x04 || X || Y), 65 bytes; private key is the 32-byte scalar.
+    struct EcPublicKey final {
+        std::vector<std::uint8_t> point; // 65 bytes uncompressed
+    };
+    struct EcPrivateKey final {
+        std::vector<std::uint8_t> scalar; // 32 bytes
+        EcPublicKey publicKey;
+    };
+
+    // Signs a SHA-256 digest with ECDSA P-256, returning the raw (r || s)
+    // signature, 64 bytes. Uses CNG on Windows; the fallback path requires a
+    // working big-number core and is disabled when unavailable.
+    [[nodiscard]] static std::vector<std::uint8_t> EcDsaSign(
+        const EcPrivateKey& key,
+        std::span<const std::uint8_t, 32> digest);
+    [[nodiscard]] static bool EcDsaVerify(
+        const EcPublicKey& key,
+        std::span<const std::uint8_t, 32> digest,
+        std::span<const std::uint8_t> signature);
+
+    // Certificate validation helpers.
+    struct CertificateInfo final {
+        std::string subject;   // CN of the subject
+        std::string issuer;    // CN of the issuer
+        std::uint64_t notBefore{}; // Unix seconds
+        std::uint64_t notAfter{};  // Unix seconds
+        bool selfSigned{};
+        bool hasValidity{};
+    };
+
+    // Extracts basic fields from a DER X.509 certificate: subject/issuer common
+    // names, validity period, and whether it is self-signed.
+    [[nodiscard]] static CertificateInfo CertificateInfoOf(
+        std::span<const std::uint8_t> certificateDer);
+
     // Extracts the RSA public key from a DER-encoded X.509 certificate by
     // locating the SubjectPublicKeyInfo BIT STRING inside it.
     [[nodiscard]] static bool ParsePublicKeyFromCertificate(

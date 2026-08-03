@@ -78,11 +78,13 @@ secondary scope.
 - External signing foundation: `PdfSignatureManager` creates a /Sig field and signature dictionary, prepares a file with a zero-filled `/Contents` placeholder, computes the `/ByteRange` over the exact bytes an external signer must digest, and writes the produced signature value back into the placeholder. `GetSignatures` inspects fields, ByteRange, and applied signature contents.
 - Add CMS/PKCS#7, RSA/ECDSA, certificate chains and signature validation.
 - `PdfCms` builds and parses minimal CMS SignedData and signs/verifies RSA-PKCS#1 v1.5 over SHA-256 (CNG on Windows, big-number fallback elsewhere). `PdfSignatureManager::VerifySignature` recomputes the /ByteRange digest, recovers the signer key from the embedded certificate, and verifies the RSA signature.
+- ECDSA P-256 sign/verify (`EcDsaSign`/`EcDsaVerify`) and basic certificate introspection (`CertificateInfoOf`) are available.
 - Add PAdES, timestamping, DSS and long-term validation foundations.
 - Implement PDF/A-1 through PDF/A-4 creation and validation.
 - Practical PDF/A validation: `PdfConformanceValidator` checks the file version header, forbids encryption, verifies the XMP metadata stream's `pdfaid:part`/`conformance`, requires a `/GTS_PDFA1` output intent, validates embedded TrueType/CFF fonts (plus ToUnicode for level U and tagged structure for level A), rejects transparency for PDF/A-1, and flags forbidden annotation subtypes.
 - Implement PDF/UA structure trees, role maps, language and alt text.
 - Add redaction and metadata/attachment sanitization.
+- `PdfRedactor::RedactText` covers matched text with opaque black rectangles via an appended content stream.
 
 ## Phase 6: Production Quality
 

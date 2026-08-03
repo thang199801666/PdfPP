@@ -741,6 +741,27 @@ void TestDocumentLayoutPrimitives() {
 }
 
 
+void TestRedaction() {
+    const auto input = TempPath("pdfpp_feature_redact_input.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 300, 300});
+    writer.GetCanvas(page).BeginText().SetFontAndSize("Helvetica", 12)
+        .MoveText(30, 200).ShowText("SECRET code is hidden").EndText();
+    writer.Save(input);
+
+    const auto output = TempPath("pdfpp_feature_redact_output.pdf");
+    const auto result = PdfRedactor::RedactText(input, output,
+        {PdfRedactor::RedactionRequest{0U, "SECRET", {}}});
+    PDFPP_TEST_CHECK(result.redactionCount >= 1U);
+    PDFPP_TEST_CHECK(result.modifiedPageCount == 1U);
+    const auto document = PdfDocument::Open(output);
+    PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+    const std::string pageBytes = document.readIndirectObject(document.GetPageReference(0U).objectNumber);
+    PDFPP_TEST_CHECK(pageBytes.find("/Contents") != std::string::npos);
+    std::filesystem::remove(input);
+    std::filesystem::remove(output);
+}
+
 void TestPortfolio() {
     const auto output = TempPath("pdfpp_feature_portfolio.pdf");
     PdfWriter writer;
@@ -1243,6 +1264,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.TextLayoutAndFallback", TestTextLayoutAndFallback);
     runner.Run("Feature.DocumentLayoutPrimitives", TestDocumentLayoutPrimitives);
     runner.Run("Feature.Portfolio", TestPortfolio);
+    runner.Run("Feature.Redaction", TestRedaction);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

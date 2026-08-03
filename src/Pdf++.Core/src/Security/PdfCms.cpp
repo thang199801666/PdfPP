@@ -834,4 +834,186 @@ bool PdfCms::RsaSha256Verify(
 #endif
 }
 
+#if defined(_WIN32)
+namespace {
+// Imports an ECDSA P-256 key blob into a BCrypt provider.
+NTSTATUS ImportEcKey(BCRYPT_ALG_HANDLE algorithm, const std::vector<std::uint8_t>& point,
+                     const std::vector<std::uint8_t>& scalar,
+                     const bool includePrivate, BCRYPT_KEY_HANDLE& outKey) {
+    // BCRYPT_ECCKEY_BLOB header (X, Y sizes) followed by X || Y (|| d when private).
+    const std::size_t coordSize = 32U;
+    std::vector<std::uint8_t> blob;
+    blob.resize(sizeof(BCRYPT_ECCKEY_BLOB));
+    auto* header = reinterpret_cast<BCRYPT_ECCKEY_BLOB*>(blob.data());
+    header->dwMagic = includePrivate ? BCRYPT_ECDSA_PRIVATE_P256_MAGIC : BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
+    header->cbKey = static_cast<ULONG>(coordSize);
+    if (point.size() < 1U + 2U * coordSize) return STATUS_INVALID_PARAMETER;
+    std::vector<std::uint8_t> x(point.begin() + 1, point.begin() + 1 + coordSize);
+    std::vector<std::uint8_t> y(point.begin() + 1 + coordSize, point.begin() + 1 + 2U * coordSize);
+    blob.insert(blob.end(), x.begin(), x.end());
+    blob.insert(blob.end(), y.begin(), y.end());
+    if (includePrivate) {
+        blob.insert(blob.end(), scalar.begin(), scalar.end());
+    }
+    return BCryptImportKeyPair(algorithm, nullptr,
+                               includePrivate ? BCRYPT_ECCPRIVATE_BLOB : BCRYPT_ECCPUBLIC_BLOB,
+                               &outKey, blob.data(), static_cast<ULONG>(blob.size()), 0U);
+}
+} // namespace
+#endif
+
+std::vector<std::uint8_t> PdfCms::EcDsaSign(
+    const EcPrivateKey& key,
+    const std::span<const std::uint8_t, 32> digest) {
+#if defined(_WIN32)
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_ECDSA_P256_ALGORITHM, nullptr, 0U) != 0) return {};
+    BCRYPT_KEY_HANDLE keyHandle = nullptr;
+    if (ImportEcKey(algorithm, key.publicKey.point, key.scalar, true, keyHandle) != 0) {
+        BCryptCloseAlgorithmProvider(algorithm, 0U);
+        return {};
+    }
+    std::vector<std::uint8_t> hash = {digest.begin(), digest.end()};
+    ULONG resultSize = 0;
+    const NTSTATUS status = BCryptSignHash(keyHandle, nullptr, hash.data(),
+                                           static_cast<ULONG>(hash.size()), nullptr, 0,
+                                           &resultSize, BCRYPT_PAD_PKCS1);
+    std::vector<std::uint8_t> result(resultSize);
+    if (status == 0U) {
+        BCryptSignHash(keyHandle, nullptr, hash.data(), static_cast<ULONG>(hash.size()),
+                       result.data(), static_cast<ULONG>(result.size()), &resultSize, BCRYPT_PAD_PKCS1);
+    }
+    BCryptDestroyKey(keyHandle);
+    BCryptCloseAlgorithmProvider(algorithm, 0U);
+    if (status != 0U) return {};
+    return result; // DER ECDSA-Sig-Value
+#else
+    return {}; // ECDSA requires CNG on this platform.
+#endif
+}
+
+bool PdfCms::EcDsaVerify(
+    const EcPublicKey& key,
+    const std::span<const std::uint8_t, 32> digest,
+    const std::span<const std::uint8_t> signature) {
+#if defined(_WIN32)
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_ECDSA_P256_ALGORITHM, nullptr, 0U) != 0) return false;
+    BCRYPT_KEY_HANDLE keyHandle = nullptr;
+    if (ImportEcKey(algorithm, key.point, {}, false, keyHandle) != 0) {
+        BCryptCloseAlgorithmProvider(algorithm, 0U);
+        return false;
+    }
+    std::vector<std::uint8_t> hash = {digest.begin(), digest.end()};
+    std::vector<std::uint8_t> sig(signature.begin(), signature.end());
+    const NTSTATUS status = BCryptVerifySignature(keyHandle, nullptr, hash.data(),
+                                                  static_cast<ULONG>(hash.size()),
+                                                  sig.data(), static_cast<ULONG>(sig.size()),
+                                                  BCRYPT_PAD_PKCS1);
+    BCryptDestroyKey(keyHandle);
+    BCryptCloseAlgorithmProvider(algorithm, 0U);
+    return status == 0U;
+#else
+    (void)key; (void)digest; (void)signature;
+    return false; // ECDSA requires CNG on this platform.
+#endif
+}
+
+PdfCms::CertificateInfo PdfCms::CertificateInfoOf(
+    const std::span<const std::uint8_t> certificateDer) {
+    CertificateInfo info;
+    DerReader outer(certificateDer);
+    std::uint8_t tag = 0;
+    std::span<const std::uint8_t> certificateValue;
+    if (!outer.ReadElement(tag, certificateValue) || tag != 0x30U) return info;
+    std::span<const std::uint8_t> tbs;
+    if (!FindChild(certificateValue, 0x30U, tbs)) return info;
+
+    // Parse the UTCTime/GeneralizedTime from a validity SEQUENCE, and the
+    // first printable name CN from subject/issuer.
+    const auto readTime = [](std::span<const std::uint8_t> value) -> std::uint64_t {
+        if (value.size() < 13U) return 0U;
+        const auto digits = [&](const std::size_t offset, const std::size_t count) -> std::uint64_t {
+            std::uint64_t out = 0;
+            for (std::size_t i = 0; i < count; ++i) {
+                if (value[offset + i] < '0' || value[offset + i] > '9') return 0U;
+                out = out * 10U + static_cast<std::uint64_t>(value[offset + i] - '0');
+            }
+            return out;
+        };
+        if (value[0] == '2' && value.size() >= 15U) { // GeneralizedTime YYYYMMDD
+            std::uint64_t year = digits(0, 4);
+            std::uint64_t month = digits(4, 2);
+            std::uint64_t day = digits(6, 2);
+            std::uint64_t hour = digits(8, 2);
+            std::uint64_t minute = digits(10, 2);
+            std::uint64_t second = digits(12, 2);
+            (void)month; (void)day; (void)hour; (void)minute;
+            return year * 365U * 86400U + second;
+        }
+        std::uint64_t year = 2000U + digits(0, 2); // UTCTime YYMMDD
+        std::uint64_t second = digits(10, 2);
+        return year * 365U * 86400U + second;
+    };
+    const auto findName = [](std::span<const std::uint8_t> name, std::string& out) {
+        // Name ::= SEQUENCE OF RelativeDistinguishedName (SET OF AttributeTypeAndValue)
+        DerReader nameReader(name);
+        std::uint8_t nTag = 0;
+        std::span<const std::uint8_t> rdn;
+        while (nameReader.ReadElement(nTag, rdn)) {
+            DerReader rdnReader(rdn);
+            std::span<const std::uint8_t> attr;
+            if (rdnReader.ReadElement(nTag, attr)) {
+                DerReader attrReader(attr);
+                std::span<const std::uint8_t> oid;
+                std::span<const std::uint8_t> value;
+                if (attrReader.ReadElement(nTag, oid) && attrReader.ReadElement(nTag, value)) {
+                    // CommonName OID 2.5.4.3 = 55 04 03.
+                    if (oid.size() >= 3U && oid[oid.size() - 3U] == 0x55U &&
+                        oid[oid.size() - 2U] == 0x04U && oid[oid.size() - 1U] == 0x03U) {
+                        out.assign(reinterpret_cast<const char*>(value.data()), value.size());
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    // tbsCertificate: version [0] (optional), serial INTEGER, signature SEQUENCE,
+    // issuer SEQUENCE, validity SEQUENCE, subject SEQUENCE, spki SEQUENCE.
+    DerReader tbsReader(tbs);
+    std::uint8_t tTag = 0;
+    std::span<const std::uint8_t> element;
+    // First element: version [0] (optional) or serial.
+    if (!tbsReader.ReadElement(tTag, element)) return info;
+    if (tTag == 0xA0U) {
+        // version [0]: skip it, next is serial.
+        if (!tbsReader.ReadElement(tTag, element)) return info;
+    }
+    // serial INTEGER
+    // signature SEQUENCE
+    if (!tbsReader.ReadElement(tTag, element)) return info;
+    // signature SEQUENCE
+    if (!tbsReader.ReadElement(tTag, element)) return info;
+    // issuer SEQUENCE
+    if (!tbsReader.ReadElement(tTag, element)) return info;
+    findName(element, info.issuer);
+    // validity SEQUENCE
+    if (!tbsReader.ReadElement(tTag, element)) return info;
+    {
+        DerReader validity(element);
+        std::span<const std::uint8_t> notBefore;
+        std::span<const std::uint8_t> notAfter;
+        if (validity.ReadElement(tTag, notBefore)) info.notBefore = readTime(notBefore);
+        if (validity.ReadElement(tTag, notAfter)) info.notAfter = readTime(notAfter);
+        info.hasValidity = info.notBefore != 0U && info.notAfter != 0U;
+    }
+    // subject SEQUENCE
+    if (!tbsReader.ReadElement(tTag, element)) return info;
+    findName(element, info.subject);
+    info.selfSigned = info.subject == info.issuer && !info.subject.empty();
+    return info;
+}
+
 } // namespace CPPPdf

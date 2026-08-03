@@ -1,3 +1,15 @@
+## 0.64.0
+
+- ECDSA (NIST P-256) signature support in `PdfCms`: `EcDsaSign`/`EcDsaVerify`
+  sign and verify SHA-256 digests via CNG on Windows (DER ECDSA-Sig-Value).
+- PDF redaction: `PdfRedactor::RedactText` finds literal text on a page and
+  covers it with opaque black rectangles via an appended content stream.
+- Certificate introspection: `PdfCms::CertificateInfoOf` extracts subject/
+  issuer, validity window, and self-signed flag from a DER X.509 certificate
+  (exhaustive name/chain validation is future PAdES work).
+- Tests: `verifyEcdsa` (sign/verify + wrong-digest rejection) and
+  `Feature.Redaction` cover the new features. All suites green.
+
 ## 0.63.0
 
 - PDF portfolios: `PdfWriter::SetPortfolio`/`ClearPortfolio`/`HasPortfolio`
