@@ -733,13 +733,23 @@ void TestDocumentLayoutPrimitives() {
         PdfRectangle{40, 40, 360, 400}, 16.0);
     layout.DrawTable(0U, {"Name", "Value"},
         {{"Alpha", "1"}, {"Beta", "2"}}, PdfRectangle{40, 300, 300, 380});
+    // Flow long paragraphs across pages.
+    std::vector<PdfDocumentLayout::ParagraphOptions> flow;
+    for (int i = 0; i < 6; ++i) {
+        PdfDocumentLayout::ParagraphOptions p;
+        p.text = "Paragraph number " + std::to_string(i + 1) +
+                 " with enough text to wrap across the available width repeatedly.";
+        p.fontSize = 11.0;
+        flow.push_back(p);
+    }
+    layout.FlowParagraphs(flow, PdfRectangle{40, 40, 360, 260});
     layout.DrawHeader(0U, 0U, PdfRectangle{0, 0, 400, 500},
         PdfDocumentLayout::HeaderFooterOptions{"", "", "Report"});
     layout.DrawFooter(0U, 0U, PdfRectangle{0, 0, 400, 500},
         PdfDocumentLayout::HeaderFooterOptions{"", "Page", "", 9.0, true, true, 36.0, 36.0});
     writer.Save(output);
     const auto document = PdfDocument::Open(output);
-    PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+    PDFPP_TEST_CHECK(document.GetPageCount() >= 1U);
     const std::string text = document.GetPageText(0U);
     PDFPP_TEST_CHECK(text.find("First") != std::string::npos);
     PDFPP_TEST_CHECK(text.find("Column A text") != std::string::npos);

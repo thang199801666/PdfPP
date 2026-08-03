@@ -101,24 +101,56 @@ PdfDocumentLayout::LayoutResult PdfDocumentLayout::FlowParagraphs(
         if (paragraph.spaceBefore > 0.0) y -= paragraph.spaceBefore;
         const auto* font = FontFor(paragraph);
         const double usableWidth = flowBox.width() - paragraph.leftIndent - paragraph.rightIndent;
+        const PdfRectangle paragraphBox{flowBox.left + paragraph.leftIndent, flowBox.bottom,
+                                        flowBox.right - paragraph.rightIndent, y};
         if (font == nullptr) {
-            // Base-14 fallback: draw with Helvetica, line height approximation.
+            // Base-14 fallback: measure with an approximate advance.
             const double lineHeight = paragraph.fontSize * paragraph.lineSpacing;
             const std::size_t lineCount = std::max<std::size_t>(
                 1U, static_cast<std::size_t>(std::ceil(paragraph.text.size() * paragraph.fontSize * 0.5 / std::max(usableWidth, 1.0))));
-            y -= lineCount * lineHeight;
+            if (y - lineCount * lineHeight < flowBox.bottom) {
+                if (page + 1U >= writer_.GetPageCount()) writer_.AddPage();
+                ++page;
+                y = flowBox.top;
+            }
+            // Draw the paragraph line by line with Helvetica.
+            double cursor = y - paragraph.fontSize;
+            std::size_t pos = 0;
+            while (pos < paragraph.text.size()) {
+                const auto end = std::min(paragraph.text.size(), pos + static_cast<std::size_t>(usableWidth / (paragraph.fontSize * 0.5)));
+                const std::string line = paragraph.text.substr(pos, end - pos);
+                writer_.GetCanvas(page).BeginText().SetFontAndSize("Helvetica", paragraph.fontSize)
+                    .MoveText(flowBox.left + paragraph.leftIndent, cursor).ShowText(line).EndText();
+                cursor -= lineHeight;
+                if (cursor < flowBox.bottom && end < paragraph.text.size()) {
+                    if (page + 1U >= writer_.GetPageCount()) writer_.AddPage();
+                    ++page;
+                    cursor = flowBox.top - paragraph.fontSize;
+                }
+                pos = end;
+            }
+            y = cursor;
         } else {
+            // Measure to detect overflow and insert a page break.
             const auto lines = SplitLines(paragraph.text, usableWidth, paragraph);
             const double lineHeight = font->GetLineHeight(paragraph.fontSize, paragraph.lineSpacing);
+            if (y - lines.size() * lineHeight < flowBox.bottom) {
+                if (page + 1U >= writer_.GetPageCount()) writer_.AddPage();
+                ++page;
+                y = flowBox.top;
+            }
+            // Draw with the embedded font into the available box.
+            PdfTextLayoutOptions layoutOptions;
+            layoutOptions.box = paragraphBox;
+            layoutOptions.fontSize = paragraph.fontSize;
+            layoutOptions.lineSpacing = paragraph.lineSpacing;
+            layoutOptions.alignment = paragraph.alignment;
+            layoutOptions.wrap = paragraph.wrap;
+            writer_.GetCanvas(page).DrawTextUtf8(*font, paragraph.text, layoutOptions);
             y -= lines.size() * lineHeight;
         }
         if (paragraph.spaceAfter > 0.0) y -= paragraph.spaceAfter;
         ++result.paragraphsFlowed;
-        if (y < flowBox.bottom && page + 1U >= writer_.GetPageCount()) {
-            writer_.AddPage();
-            ++page;
-            y = flowBox.top;
-        }
     }
     if (currentPage) *currentPage = page;
     result.pagesWritten = page - startPage + 1U;
