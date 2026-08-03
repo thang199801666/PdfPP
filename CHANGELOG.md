@@ -1,3 +1,18 @@
+## 0.56.0
+
+- Fixed shading resource resolution: `ResolveShading` now accepts a shading
+  dictionary referenced by `/Shading` even when the referenced object is a plain
+  dictionary (not only a stream), so `sh` operators with dictionary shadings
+  resolve and render correctly.
+- Shading paint now blends into the target bitmap (`BlendPixelInBounds`) instead
+  of overwriting, so axial/radial gradients composite correctly over content.
+- Soft masks with dimensions different from their image are now sampled by
+  normalized coordinates instead of assuming the same pixel layout.
+- Added `PdfImageInfo.softMaskWidth`/`softMaskHeight`.
+- Tests: `Feature.ShadingRenderingAndSoftMask` renders an axial gradient (blue to
+  red across the page) through a clip path with a differing-size soft mask. All
+  suites green.
+
 ## 0.55.0
 
 - Added optional content groups (PDF layers): `PdfWriter::AddOptionalContentGroup`

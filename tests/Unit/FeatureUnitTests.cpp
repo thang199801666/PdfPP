@@ -351,6 +351,65 @@ void TestEmbeddedFileLifecycleAndValidation() {
     std::filesystem::remove(filePath);
 }
 
+void TestShadingRenderingAndSoftMask() {
+    // Build a raw PDF with an axial shading resource and an image whose soft
+    // mask has a different size than the image itself.
+    std::ostringstream pdf;
+    pdf << "%PDF-1.4\n";
+    std::array<std::size_t, 9> offsets{};
+    const auto object = [&](const std::size_t number, const std::string& body) {
+        offsets[number] = static_cast<std::size_t>(pdf.tellp());
+        pdf << number << " 0 obj\n" << body << "\nendobj\n";
+    };
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+              "/Resources << /Shading << /Sh1 4 0 R >> /XObject << /Im1 6 0 R >> >> "
+              "/Contents 8 0 R >>");
+    object(4, "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] "
+              "/Function 5 0 R /Extend [true true] >>");
+    object(5, "<< /FunctionType 2 /C0 [0 0 1] /C1 [1 0 0] /N 1 >>");
+    const std::string imageStream = "\xFF\x00\x00\x00\xFF\x00\x00\x00\xFF\xFF\xFF\x00";
+    object(6, "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 "
+              "/ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask 9 0 R "
+              "/Length " + std::to_string(imageStream.size()) + " >>\nstream\n"
+              + imageStream + "\nendstream");
+    const std::string content = "0 0 100 100 re W n /Sh1 sh /Im1 Do";
+    object(8, "<< /Length " + std::to_string(content.size()) + " >>\nstream\n"
+              + content + "endstream");
+    // 4x4 soft mask (different size than the 2x2 image): all opaque, so the
+    // image must still be visible over the shading.
+    const std::string maskStream = std::string(16, '\xFF');
+    object(9, "<< /Type /XObject /Subtype /Image /Width 4 /Height 4 "
+              "/ColorSpace /DeviceGray /BitsPerComponent 8 /Length "
+              + std::to_string(maskStream.size()) + " >>\nstream\n"
+              + maskStream + "\nendstream");
+    const std::size_t xrefOffset = static_cast<std::size_t>(pdf.tellp());
+    pdf << "xref\n0 10\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i <= 9U; ++i) {
+        pdf << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    pdf << "trailer\n<< /Size 10 /Root 1 0 R >>\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    const auto output = TempPath("pdfpp_feature_shading.pdf");
+    {
+        std::ofstream file(output, std::ios::binary);
+        file << pdf.str();
+    }
+    const auto document = PdfDocument::Open(output);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 100U);
+    PDFPP_TEST_CHECK(bitmap.GetHeight() == 100U);
+    // The axial shading goes blue -> red across the page; the left edge is
+    // blue-dominant and the right edge red-dominant.
+    const auto leftPixel = bitmap.GetPixel(5U, 50U);
+    const auto rightPixel = bitmap.GetPixel(95U, 50U);
+    PDFPP_TEST_CHECK(leftPixel.blue > leftPixel.red);
+    PDFPP_TEST_CHECK(rightPixel.red > rightPixel.blue);
+    std::filesystem::remove(output);
+}
+
 void TestOptionalContentLayers() {
     const auto output = TempPath("pdfpp_feature_layers.pdf");
     PdfWriter writer;
@@ -931,6 +990,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.MarkedContentTransparencyGroupRendering", TestMarkedContentTransparencyGroupRendering);
     runner.Run("Feature.EmbeddedCffFontRendering", TestEmbeddedCffFontRendering);
     runner.Run("Feature.DashPatternRendering", TestDashPatternRendering);
+    runner.Run("Feature.ShadingRenderingAndSoftMask", TestShadingRenderingAndSoftMask);
     runner.Run("Feature.OptionalContentLayers", TestOptionalContentLayers);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);

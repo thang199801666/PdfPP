@@ -1035,6 +1035,8 @@ void imageColorSpaceMetadata(const PdfDocument& document, const PdfDictionary& d
         if (softMask) {
             image.info.hasSoftMask = true;
             image.info.softMaskReference = maskReference;
+            image.info.softMaskWidth = mask.info.width;
+            image.info.softMaskHeight = mask.info.height;
         } else {
             image.info.hasExplicitMask = true;
             image.info.explicitMaskReference = maskReference;
@@ -3048,8 +3050,10 @@ std::optional<PdfDictionary> PdfDocument::ResolveShading(
     const auto* entry = shadings ? shadings->Find(PdfName(std::string(resourceName))) : nullptr;
     if (entry == nullptr) return std::nullopt;
     if (const auto reference = entry->AsReference()) {
-        const auto* stream = GetObject({reference->first, reference->second}).AsStream();
-        return stream ? std::optional<PdfDictionary>(stream->dictionary()) : std::nullopt;
+        const auto& resolved = GetObject({reference->first, reference->second});
+        if (const auto* stream = resolved.AsStream()) return stream->dictionary();
+        if (const auto* dictionary = resolved.AsDictionary()) return *dictionary;
+        return std::nullopt;
     }
     if (const auto* dictionary = entry->AsDictionary()) return *dictionary;
     return std::nullopt;

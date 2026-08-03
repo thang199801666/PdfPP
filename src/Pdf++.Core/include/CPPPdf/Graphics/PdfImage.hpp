@@ -54,6 +54,9 @@ struct PdfImageInfo {
     bool hasExplicitMask{};
     PdfReference softMaskReference{};
     PdfReference explicitMaskReference{};
+    // Dimensions of the decoded soft-mask stream (may differ from the image).
+    std::uint32_t softMaskWidth{};
+    std::uint32_t softMaskHeight{};
     PdfRectangle boundingBox{};
     double fillAlpha{1.0};
     double strokeAlpha{1.0};

@@ -769,7 +769,8 @@ void IntersectClip(PdfBitmap& bitmap, ClipRegion& clip,
 }
 
 
-PdfRgbaColor ImagePixel(const PdfExtractedImage& image, const std::size_t x, const std::size_t y) {
+PdfRgbaColor ImagePixel(const PdfExtractedImage& image, const std::size_t x, const std::size_t y,
+                        const double u = 0.0, const double v = 0.0) {
     if (!image.info.decoded || image.info.width == 0U || image.info.height == 0U) return {};
     const auto pixelIndex = y * static_cast<std::size_t>(image.info.width) + x;
     PdfRgbaColor color{};
@@ -840,8 +841,20 @@ PdfRgbaColor ImagePixel(const PdfExtractedImage& image, const std::size_t x, con
     } else {
         return {};
     }
-    if (!image.alphaBytes.empty() && pixelIndex < image.alphaBytes.size()) {
-        const auto maskAlpha = std::to_integer<std::uint8_t>(image.alphaBytes[pixelIndex]);
+    if (!image.alphaBytes.empty()) {
+        const auto maskAlpha = [&]() {
+            const std::size_t maskWidth = image.info.softMaskWidth != 0U ? image.info.softMaskWidth : image.info.width;
+            const std::size_t maskHeight = image.info.softMaskHeight != 0U ? image.info.softMaskHeight : image.info.height;
+            if (maskWidth == image.info.width && maskHeight == image.info.height && pixelIndex < image.alphaBytes.size()) {
+                return std::to_integer<std::uint8_t>(image.alphaBytes[pixelIndex]);
+            }
+            if (maskWidth == 0U || maskHeight == 0U || image.alphaBytes.size() < maskWidth * maskHeight) return std::uint8_t{255U};
+            const std::size_t maskX = std::min<std::size_t>(maskWidth - 1U,
+                static_cast<std::size_t>(std::lround(std::clamp(u, 0.0, 1.0) * static_cast<double>(maskWidth - 1U))));
+            const std::size_t maskY = std::min<std::size_t>(maskHeight - 1U,
+                static_cast<std::size_t>(std::lround(std::clamp(1.0 - v, 0.0, 1.0) * static_cast<double>(maskHeight - 1U))));
+            return std::to_integer<std::uint8_t>(image.alphaBytes[maskY * maskWidth + maskX]);
+        }();
         color.alpha = static_cast<std::uint8_t>(
             (static_cast<std::uint16_t>(color.alpha) * maskAlpha + 127U) / 255U);
     }
@@ -853,7 +866,7 @@ PdfRgbaColor SampleImage(const PdfExtractedImage& image, const double u, const d
     const double sourceY = std::clamp(1.0 - v, 0.0, 1.0) * static_cast<double>(image.info.height - 1U);
     if (!interpolate) {
         return ImagePixel(image, static_cast<std::size_t>(std::lround(sourceX)),
-                          static_cast<std::size_t>(std::lround(sourceY)));
+                          static_cast<std::size_t>(std::lround(sourceY)), u, v);
     }
     const auto x0 = static_cast<std::size_t>(std::floor(sourceX));
     const auto y0 = static_cast<std::size_t>(std::floor(sourceY));
@@ -861,10 +874,10 @@ PdfRgbaColor SampleImage(const PdfExtractedImage& image, const double u, const d
     const auto y1 = std::min<std::size_t>(y0 + 1U, image.info.height - 1U);
     const double tx = sourceX - static_cast<double>(x0);
     const double ty = sourceY - static_cast<double>(y0);
-    const auto p00 = ImagePixel(image, x0, y0);
-    const auto p10 = ImagePixel(image, x1, y0);
-    const auto p01 = ImagePixel(image, x0, y1);
-    const auto p11 = ImagePixel(image, x1, y1);
+    const auto p00 = ImagePixel(image, x0, y0, u, v);
+    const auto p10 = ImagePixel(image, x1, y0, u, v);
+    const auto p01 = ImagePixel(image, x0, y1, u, v);
+    const auto p11 = ImagePixel(image, x1, y1, u, v);
     const auto blend = [&](const double a, const double b, const double c, const double d) {
         const double top = static_cast<double>(a) + (static_cast<double>(b) - a) * tx;
         const double bottom = static_cast<double>(c) + (static_cast<double>(d) - c) * tx;
@@ -970,8 +983,9 @@ void PaintAxialShading(PdfBitmap& bitmap, const PdfAxialShading& shading,
             const auto channel = [alpha](const double value) {
                 return static_cast<std::uint8_t>(std::lround(std::clamp(value * alpha, 0.0, 1.0) * 255.0));
             };
-            bitmap.SetPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
-                            {channel((*values)[0]), channel((*values)[1]), channel((*values)[2]), 255U});
+            bitmap.BlendPixelInBounds(static_cast<std::size_t>(x), static_cast<std::size_t>(y),
+                                      {channel((*values)[0]), channel((*values)[1]),
+                                       channel((*values)[2]), 255U});
         }
     }
 }
@@ -986,8 +1000,9 @@ void PaintRadialShading(PdfBitmap& bitmap, const PdfRadialShading& shading,
             const auto channel = [alpha](const double value) {
                 return static_cast<std::uint8_t>(std::lround(std::clamp(value * alpha, 0.0, 1.0) * 255.0));
             };
-            bitmap.SetPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
-                            {channel((*values)[0]), channel((*values)[1]), channel((*values)[2]), 255U});
+            bitmap.BlendPixelInBounds(static_cast<std::size_t>(x), static_cast<std::size_t>(y),
+                                      {channel((*values)[0]), channel((*values)[1]),
+                                       channel((*values)[2]), 255U});
         }
     }
 }

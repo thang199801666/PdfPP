@@ -28,6 +28,7 @@ secondary scope.
 - Transparency group bitmap compositing supports isolated clearing, knockout replacement, and Form boundary discovery. The CPU renderer detects `/Group /S /Transparency` on Form XObjects and BDC/EMC marked content, renders group content into an offscreen layer, and composites with the group's blend mode, alpha, isolated, and knockout flags.
 - Indexed image color spaces now carry palette metadata and render 1/2/4/8-bit samples; Separation has a limited alternate-space fallback pending tint-transform evaluation.
 - Shading operator `sh` now emits a dedicated `PaintShading` event; axial/radial resource evaluation remains the next renderer step.
+- Axial and radial shading are rendered by the CPU renderer: `ResolveShading` handles both stream and dictionary shading resources, and gradient paint blends into the page (blue→red axial gradients verified through clip paths).
 - Added reusable Type 2 exponential PDF function evaluator for future shading and tint-transform evaluation.
 - Added reusable axial shading sampler with domain and extend handling; renderer resource integration remains.
 - Added sampled (Type 0) and stitched (Type 3) function foundations plus ICCBased profile and DeviceN component metadata extraction.
