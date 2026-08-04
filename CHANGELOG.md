@@ -1,3 +1,11 @@
+## 0.108.0
+
+- PNG decoding: `PdfImage::FromPng` reads PNG files (RGB/RGBA/palette/gray,
+  bit depths 1-16, non-interlaced) via zlib inflate + scanline filters and
+  returns a raw RGB image with alpha composited over black.
+- Tests: `Feature.PngOutput` round-trips a rendered PNG back into a PdfImage.
+  All suites green.
+
 ## 0.107.0
 
 - Tiling patterns (write): `PdfWriter::AddTilingPattern` registers a pattern

@@ -1,9 +1,14 @@
 #include <CPPPdf/Graphics/PdfImage.hpp>
 #include <CPPPdf/PdfError.hpp>
 #include "Internal/Graphics/PdfJpegEncoder.hpp"
-
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <limits>
+#include <string>
+#include <vector>
+#include <zlib.h>
 
 namespace CPPPdf {
 namespace {
@@ -123,6 +128,227 @@ PdfImage PdfImage::FromJpeg(const std::span<const std::byte> jpegBytes) {
     else if (info.components == 4U) colorSpace = PdfImageColorSpace::DeviceCMYK;
     return PdfImage(info.width, info.height, colorSpace, PdfImageEncoding::Dct,
                     info.precision, std::vector<std::byte>(jpegBytes.begin(), jpegBytes.end()));
+}
+
+namespace {
+constexpr std::uint32_t kPngSignature = 0x89504E47U;
+
+std::uint32_t readPngU32(const std::span<const std::byte>& bytes, const std::size_t offset) {
+    return (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset])) << 24U) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset + 1U])) << 16U) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset + 2U])) << 8U) |
+           static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset + 3U]));
+}
+
+std::uint8_t paethPredictor(const std::uint8_t a, const std::uint8_t b, const std::uint8_t c) {
+    const std::int32_t p = static_cast<std::int32_t>(a) + static_cast<std::int32_t>(b) - static_cast<std::int32_t>(c);
+    const std::int32_t pa = std::abs(p - a);
+    const std::int32_t pb = std::abs(p - b);
+    const std::int32_t pc = std::abs(p - c);
+    if (pa <= pb && pa <= pc) return a;
+    if (pb <= pc) return b;
+    return c;
+}
+} // namespace
+
+PdfImage PdfImage::FromPng(const std::span<const std::byte> pngBytes) {
+    // Signature (8 bytes): 89 50 4E 47 0D 0A 1A 0A.
+    if (pngBytes.size() < 8U) throw PdfException(PdfErrorCode::InvalidArgument, "PNG is too short.");
+    if (readPngU32(pngBytes, 0U) != kPngSignature || pngBytes[4] != std::byte{0x0D} ||
+        pngBytes[5] != std::byte{0x0A} || pngBytes[6] != std::byte{0x1A} || pngBytes[7] != std::byte{0x0A}) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Not a PNG file.");
+    }
+    std::uint32_t width = 0U, height = 0U;
+    std::uint8_t bitDepth = 8U, colorType = 2U;
+    bool interlace = false;
+    std::vector<std::uint8_t> palette;
+    std::vector<std::uint8_t> trns;
+    std::vector<std::uint8_t> rawData;
+    std::size_t cursor = 8U;
+    bool haveIdat = false;
+    while (cursor + 12U <= pngBytes.size()) {
+        const std::uint32_t length = readPngU32(pngBytes, cursor);
+        if (cursor + 12U + length > pngBytes.size()) break;
+        std::string type(reinterpret_cast<const char*>(&pngBytes[cursor + 4U]), 4);
+        const std::span<const std::byte> data = pngBytes.subspan(cursor + 8U, length);
+        if (type == "IHDR") {
+            if (length < 13U) throw PdfException(PdfErrorCode::InvalidArgument, "Malformed PNG IHDR.");
+            width = readPngU32(data, 0U);
+            height = readPngU32(data, 4U);
+            bitDepth = std::to_integer<std::uint8_t>(data[8]);
+            colorType = std::to_integer<std::uint8_t>(data[9]);
+            interlace = std::to_integer<std::uint8_t>(data[12]) != 0U;
+            if (width == 0U || height == 0U || width > 32768U || height > 32768U) {
+                throw PdfException(PdfErrorCode::InvalidArgument, "Invalid PNG dimensions.");
+            }
+            if (interlace) {
+                throw PdfException(PdfErrorCode::UnsupportedFeature,
+                                   "Interlaced PNG is not supported by PdfImage::FromPng.");
+            }
+            if (bitDepth != 1U && bitDepth != 2U && bitDepth != 4U && bitDepth != 8U && bitDepth != 16U) {
+                throw PdfException(PdfErrorCode::UnsupportedFeature, "Unsupported PNG bit depth.");
+            }
+        } else if (type == "PLTE") {
+            if (length % 3U != 0U) throw PdfException(PdfErrorCode::InvalidArgument, "Malformed PNG palette.");
+            palette.assign(reinterpret_cast<const std::uint8_t*>(data.data()),
+                           reinterpret_cast<const std::uint8_t*>(data.data() + data.size()));
+        } else if (type == "tRNS") {
+            trns.assign(reinterpret_cast<const std::uint8_t*>(data.data()),
+                        reinterpret_cast<const std::uint8_t*>(data.data() + data.size()));
+        } else if (type == "IDAT") {
+            rawData.insert(rawData.end(),
+                           reinterpret_cast<const std::uint8_t*>(data.data()),
+                           reinterpret_cast<const std::uint8_t*>(data.data() + data.size()));
+            haveIdat = true;
+        } else if (type == "IEND") {
+            break;
+        }
+        cursor += 12U + length;
+    }
+    if (!haveIdat || width == 0U || height == 0U) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "PNG is missing IDAT data.");
+    }
+    // Inflate IDAT with zlib.
+    std::vector<std::uint8_t> inflated;
+    {
+        uLongf size = static_cast<uLongf>(rawData.size() * 2U + 1024U);
+        std::vector<std::uint8_t> buffer(size);
+        int ret;
+        do {
+            uLongf capacity = size;
+            ret = uncompress(buffer.data(), &capacity, rawData.data(), static_cast<uLong>(rawData.size()));
+            if (ret == Z_BUF_ERROR || ret == Z_OK) {
+                inflated.assign(buffer.data(), buffer.data() + capacity);
+                if (ret == Z_OK) break;
+                size = size * 2U + 1024U;
+                buffer.resize(size);
+                continue;
+            }
+            throw PdfException(PdfErrorCode::InvalidArgument, "PNG IDAT inflate failed.");
+        } while (ret == Z_BUF_ERROR);
+    }
+    // Determine channels per pixel (before expansion).
+    std::size_t channels = 0U;
+    switch (colorType) {
+    case 0U: channels = 1U; break;
+    case 2U: channels = 3U; break;
+    case 3U: channels = 1U; break;
+    case 4U: channels = 2U; break;
+    case 6U: channels = 4U; break;
+    default: throw PdfException(PdfErrorCode::UnsupportedFeature, "Unsupported PNG color type.");
+    }
+    const std::size_t bitsPerPixel = channels * bitDepth;
+    const std::size_t stride = (width * bitsPerPixel + 7U) / 8U;
+    if (inflated.size() < stride * height) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "PNG decompressed data is too short.");
+    }
+    // Undo scanline filters.
+    std::vector<std::uint8_t> decoded(inflated.size());
+    const auto sampleAt = [&](const std::size_t row, const std::size_t byteIndex) -> std::uint8_t {
+        return decoded[row * stride + byteIndex];
+    };
+    for (std::size_t row = 0; row < height; ++row) {
+        const std::uint8_t filter = inflated[row * (stride + 1U)];
+        const std::uint8_t* source = &inflated[row * (stride + 1U) + 1U];
+        std::uint8_t* target = &decoded[row * stride];
+        for (std::size_t i = 0; i < stride; ++i) {
+            const std::uint8_t raw = source[i];
+            const std::uint8_t left = i >= 1U ? target[i - 1U] : 0U;
+            const std::uint8_t up = row > 0U ? sampleAt(row - 1U, i) : 0U;
+            const std::uint8_t upperLeft = (row > 0U && i >= 1U) ? sampleAt(row - 1U, i - 1U) : 0U;
+            switch (filter) {
+            case 0U: target[i] = raw; break;
+            case 1U: target[i] = static_cast<std::uint8_t>(raw + left); break;
+            case 2U: target[i] = static_cast<std::uint8_t>(raw + up); break;
+            case 3U: target[i] = static_cast<std::uint8_t>(raw + ((left + up) >> 1U)); break;
+            case 4U: target[i] = static_cast<std::uint8_t>(raw + paethPredictor(left, up, upperLeft)); break;
+            default: throw PdfException(PdfErrorCode::InvalidArgument, "Unknown PNG filter type.");
+            }
+        }
+    }
+    // Expand to 8-bit RGB (colorType 6 stays RGBA -> we drop to RGB via compositing).
+    std::vector<std::byte> rgb;
+    rgb.reserve(static_cast<std::size_t>(width) * height * 3U);
+    const auto sampleChannel = [&](const std::size_t row, const std::size_t col,
+                                   const std::size_t channel) -> std::uint16_t {
+        if (bitDepth == 8U) {
+            return decoded[row * stride + col * channels + channel];
+        }
+        if (bitDepth == 16U) {
+            const std::size_t index = row * stride + (col * channels + channel) * 2U;
+            return (static_cast<std::uint16_t>(decoded[index]) << 8U) | decoded[index + 1U];
+        }
+        // Sub-byte bit depth: expand via repeated high bits.
+        const std::size_t bitsPerChannel = bitDepth;
+        const std::size_t bitsPerPixel = channels * bitsPerChannel;
+        const std::size_t byteIndex = row * stride + (col * bitsPerPixel) / 8U;
+        const std::size_t bitShift = 8U - bitsPerPixel - ((col * bitsPerPixel) % 8U);
+        const std::uint8_t rawSample = (decoded[byteIndex] >> bitShift) & ((1U << bitsPerChannel) - 1U);
+        if (bitsPerChannel == 1U) return rawSample ? 255U : 0U;
+        if (bitsPerChannel == 2U) return static_cast<std::uint16_t>(rawSample * 85U);
+        return static_cast<std::uint16_t>(rawSample * 17U);
+    };
+    std::size_t trnsIndex = 0U;
+    for (std::size_t row = 0; row < height; ++row) {
+        for (std::size_t col = 0; col < width; ++col) {
+            std::uint16_t r = 0U, g = 0U, b = 0U, a = 255U;
+            switch (colorType) {
+            case 0U: // grayscale
+                r = g = b = sampleChannel(row, col, 0U);
+                if (trns.size() >= 2U) {
+                    const std::uint16_t key = (static_cast<std::uint16_t>(trns[0]) << 8U) | trns[1U];
+                    if (r == key) a = 0U;
+                }
+                break;
+            case 2U: // RGB
+                r = sampleChannel(row, col, 0U);
+                g = sampleChannel(row, col, 1U);
+                b = sampleChannel(row, col, 2U);
+                if (trns.size() >= 6U) {
+                    const std::uint16_t kr = (static_cast<std::uint16_t>(trns[0]) << 8U) | trns[1U];
+                    const std::uint16_t kg = (static_cast<std::uint16_t>(trns[2]) << 8U) | trns[3U];
+                    const std::uint16_t kb = (static_cast<std::uint16_t>(trns[4]) << 8U) | trns[5U];
+                    if (r == kr && g == kg && b == kb) a = 0U;
+                }
+                break;
+            case 3U: { // palette
+                const std::uint16_t index = sampleChannel(row, col, 0U);
+                if (static_cast<std::size_t>(index) * 3U + 2U < palette.size()) {
+                    r = palette[index * 3U];
+                    g = palette[index * 3U + 1U];
+                    b = palette[index * 3U + 2U];
+                }
+                if (index < trns.size()) a = trns[index];
+                break;
+            }
+            case 4U: // gray + alpha
+                r = g = b = sampleChannel(row, col, 0U);
+                a = sampleChannel(row, col, 1U);
+                break;
+            case 6U: // RGBA
+                r = sampleChannel(row, col, 0U);
+                g = sampleChannel(row, col, 1U);
+                b = sampleChannel(row, col, 2U);
+                a = sampleChannel(row, col, 3U);
+                break;
+            }
+            // Composite alpha over black for the RGB output.
+            if (a < 255U) {
+                const auto blend = [a](const std::uint16_t value) {
+                    return static_cast<std::uint8_t>(value * a / 255U);
+                };
+                rgb.push_back(std::byte{blend(r)});
+                rgb.push_back(std::byte{blend(g)});
+                rgb.push_back(std::byte{blend(b)});
+            } else {
+                rgb.push_back(std::byte{static_cast<std::uint8_t>(r & 0xFFU)});
+                rgb.push_back(std::byte{static_cast<std::uint8_t>(g & 0xFFU)});
+                rgb.push_back(std::byte{static_cast<std::uint8_t>(b & 0xFFU)});
+            }
+            (void)trnsIndex;
+        }
+    }
+    return PdfImage(width, height, PdfImageColorSpace::DeviceRGB, PdfImageEncoding::Raw, 8U, std::move(rgb));
 }
 
 namespace {

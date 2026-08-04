@@ -99,6 +99,9 @@ public:
         std::span<const std::byte> rgbBytes);
 
     static PdfImage FromJpeg(std::span<const std::byte> jpegBytes);
+    // Decodes a PNG file (RGB/RGBA/palette/gray, bit depths 1-8) into a raw
+    // RGB image. Uses zlib inflate for IDAT.
+    static PdfImage FromPng(std::span<const std::byte> pngBytes);
 
     // Creates an image whose payload is a JPEG 2000 (JPX) codestream; the
     // width/height are read from the SOC (FF 4F FF 51) + SIZ markers when

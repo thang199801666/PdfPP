@@ -1175,6 +1175,14 @@ void TestPngOutput() {
     const auto cornerVOriginal = bitmap.GetPixel(0U, 29U);
     PDFPP_TEST_CHECK(cornerV.red == cornerVOriginal.red && cornerV.green == cornerVOriginal.green &&
                      cornerV.blue == cornerVOriginal.blue);
+    // Round-trip PNG back into a PdfImage.
+    const std::string pngString = ReadText(pngPath);
+    const auto pngImage = PdfImage::FromPng(std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(pngString.data()), pngString.size()));
+    PDFPP_TEST_CHECK(pngImage.GetWidth() == 40U);
+    PDFPP_TEST_CHECK(pngImage.GetHeight() == 30U);
+    PDFPP_TEST_CHECK(pngImage.GetColorSpace() == PdfImageColorSpace::DeviceRGB);
+    PDFPP_TEST_CHECK(pngImage.GetBytes().size() == 40U * 30U * 3U);
     std::filesystem::remove(pdfPath);
     std::filesystem::remove(pngPath);
     std::filesystem::remove(jpegPath);
