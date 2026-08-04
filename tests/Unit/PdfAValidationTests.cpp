@@ -95,5 +95,8 @@ void TestPdfUAStructure() {
     const auto conforming = buildConformancePdf(true, true);
     const auto document = PdfDocument::Open(std::span<const std::byte>(conforming));
     const auto result = PdfConformanceValidator::Validate(document, PdfConformanceProfile::PdfUA1);
+    // The minimal test file has no structure tree, /Lang, or /MarkInfo.
     PDFPP_TEST_CHECK(hasIssue(result, "PDFUA-TAG-001"));
+    PDFPP_TEST_CHECK(hasIssue(result, "PDFUA-LANG-001"));
+    PDFPP_TEST_CHECK(hasIssue(result, "PDFUA-MARKED-001"));
 }

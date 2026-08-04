@@ -322,6 +322,17 @@ PdfValidationResult PdfConformanceValidator::Validate(
         if (catalog == nullptr || catalog->Find(PdfName("StructTreeRoot")) == nullptr) {
             result.issues.push_back({"PDFUA-TAG-001", "PDF/UA requires a structure tree root.", true});
         }
+        if (catalog != nullptr && catalog->Find(PdfName("Lang")) == nullptr) {
+            result.issues.push_back({"PDFUA-LANG-001", "PDF/UA requires a /Lang catalog entry.", true});
+        }
+        if (catalog != nullptr) {
+            const auto* markInfo = resolveDictionary(document, catalog->Find(PdfName("MarkInfo")));
+            const bool marked = markInfo != nullptr && markInfo->Find(PdfName("Marked")) &&
+                markInfo->Find(PdfName("Marked"))->AsBoolean().value_or(false);
+            if (!marked) {
+                result.issues.push_back({"PDFUA-MARKED-001", "PDF/UA requires /MarkInfo /Marked true.", true});
+            }
+        }
         if (document.GetDocumentInfo().title.empty()) {
             result.issues.push_back({"PDFUA-TITLE-001", "PDF/UA requires a document title.", false});
         }

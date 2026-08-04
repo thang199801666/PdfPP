@@ -1,3 +1,11 @@
+## 0.74.0
+
+- PDF/UA validation checks: `PdfConformanceValidator` now also requires a
+  `/Lang` catalog entry (`PDFUA-LANG-001`) and `/MarkInfo /Marked true`
+  (`PDFUA-MARKED-001`) in addition to the structure tree root.
+- Tests: `Validation.PdfUAStructure` verifies the new issues are reported.
+  All suites green.
+
 ## 0.73.0
 
 - CCITT Group 4 fax encoding: `PdfImage::EncodeCcittG4` produces a CCITT
