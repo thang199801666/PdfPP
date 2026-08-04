@@ -62,6 +62,12 @@ public:
         std::string_view utf8,
         double maxWidth,
         const std::function<double(std::string_view)>& measure);
+
+    // True when the string consists only of Unicode whitespace.
+    [[nodiscard]] static bool IsWhitespace(std::string_view utf8);
+
+    // Removes leading and trailing Unicode whitespace.
+    [[nodiscard]] static std::string TrimWhitespace(std::string_view utf8);
 };
 
 } // namespace CPPPdf

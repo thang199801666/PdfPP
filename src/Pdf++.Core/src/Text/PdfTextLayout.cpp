@@ -606,4 +606,35 @@ std::vector<std::string> PdfTextLayout::WordWrap(
     return lines;
 }
 
+namespace {
+bool isWhitespaceCp(const std::uint32_t cp) {
+    return cp == 0x09U || cp == 0x0AU || cp == 0x0BU || cp == 0x0CU || cp == 0x0DU ||
+           cp == 0x20U || cp == 0x85U || cp == 0xA0U || cp == 0x1680U ||
+           (cp >= 0x2000U && cp <= 0x200AU) || cp == 0x2028U || cp == 0x2029U ||
+           cp == 0x202FU || cp == 0x205FU || cp == 0x3000U;
+}
+} // namespace
+
+bool PdfTextLayout::IsWhitespace(const std::string_view utf8) {
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    if (cps.empty()) return true;
+    for (const std::uint32_t cp : cps) {
+        if (!isWhitespaceCp(cp)) return false;
+    }
+    return true;
+}
+
+std::string PdfTextLayout::TrimWhitespace(const std::string_view utf8) {
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    std::size_t begin = 0;
+    std::size_t end = cps.size();
+    while (begin < end && isWhitespaceCp(cps[begin])) ++begin;
+    while (end > begin && isWhitespaceCp(cps[end - 1U])) --end;
+    std::string out;
+    for (std::size_t i = begin; i < end; ++i) appendUtf8(out, cps[i]);
+    return out;
+}
+
 } // namespace CPPPdf

@@ -1,3 +1,10 @@
+## 0.141.0
+
+- Unicode whitespace: `PdfTextLayout::IsWhitespace` and `TrimWhitespace`
+  handle full Unicode whitespace ranges.
+- Tests: `API.TextSearch` trims NBSP and checks mixed strings. All suites
+  green.
+
 ## 0.140.0
 
 - Match limit: `PdfTextSearchOptions::maxMatches` caps literal search results
