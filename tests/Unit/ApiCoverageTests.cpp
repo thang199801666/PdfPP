@@ -348,6 +348,12 @@ void TestPageEditingAndOrganization(const std::filesystem::path& base) {
     PDFPP_TEST_CHECK(croppedDocument.GetPageInfo(0U).cropBox.top == 300);
     ExpectThrows([&] { (void)PdfPageEditor::SetPageBox(base, cropped, 99U, PdfRectangle{}, true); });
 
+    // Rotate a page and read it back.
+    const auto rotated = TempPath("pdfpp_api_rotated.pdf");
+    PDFPP_TEST_CHECK(PdfPageEditor::SetPageRotation(base, rotated, 0U, 90) == 1U);
+    PDFPP_TEST_CHECK(PdfDocument::Open(rotated).GetPageInfo(0U).rotation == 90);
+    ExpectThrows([&] { (void)PdfPageEditor::SetPageRotation(base, rotated, 0U, 45); });
+
     const auto splitDirectory = TempPath("pdfpp_api_split");
     std::filesystem::remove_all(splitDirectory);
     const auto split = PdfPageOrganizer::SplitEvery(base, splitDirectory, 1, "api");
@@ -971,7 +977,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 91U);
+    static_assert(CPPPdf::VersionMinor == 92U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -981,7 +987,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.91.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.92.0");
 }
 
 int RunApiCoverageTests() {

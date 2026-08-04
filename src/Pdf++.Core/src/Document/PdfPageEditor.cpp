@@ -712,4 +712,29 @@ std::size_t PdfPageEditor::SetPageBox(
     return 1U;
 }
 
+std::size_t PdfPageEditor::SetPageRotation(
+    const std::filesystem::path& inputPath,
+    const std::filesystem::path& outputPath,
+    const std::size_t pageIndex,
+    const int rotation,
+    const PdfReaderOptions& readerOptions) {
+    if (rotation % 90 != 0) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Rotation must be a multiple of 90 degrees.");
+    }
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (pageIndex >= document.GetPageCount()) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Page index is out of range.");
+    }
+    const PdfReference pageReference = document.GetPageReference(pageIndex);
+    const PdfObject& pageObject = document.GetObject(pageReference);
+    const PdfDictionary* dictionary = pageObject.AsDictionary();
+    if (!dictionary) throw PdfException(PdfErrorCode::MalformedObject, "Page is not a dictionary.");
+    PdfDictionary updated = *dictionary;
+    updated.Put(PdfName("Rotate"), PdfObject(static_cast<std::int64_t>((rotation % 360 + 360) % 360)));
+    Internal::PdfIncrementalWriter writer(inputPath, outputPath, document);
+    writer.WriteDictionary(pageReference, updated);
+    writer.Finish(Internal::PdfIncrementalWriter::NextObjectNumber(document));
+    return 1U;
+}
+
 } // namespace CPPPdf

@@ -1,3 +1,10 @@
+## 0.92.0
+
+- Page rotation: `PdfPageEditor::SetPageRotation` sets a page's `/Rotate`
+  value (multiple of 90) via an incremental update.
+- Tests: `API.PageEditingAndOrganization` rotates a page to 90 degrees, reads
+  it back, and rejects non-multiples of 90. All suites green.
+
 ## 0.91.0
 
 - Ellipse/circle drawing: `PdfCanvas` gains `DrawEllipse`, `FillEllipse`,

@@ -86,6 +86,15 @@ public:
         bool cropBox,
         const PdfReaderOptions& readerOptions = {});
 
+    // Sets a page's /Rotate value (0, 90, 180, or 270 degrees clockwise) via
+    // an incremental update. Returns the modified page count.
+    [[nodiscard]] static std::size_t SetPageRotation(
+        const std::filesystem::path& inputPath,
+        const std::filesystem::path& outputPath,
+        std::size_t pageIndex,
+        int rotation,
+        const PdfReaderOptions& readerOptions = {});
+
     [[nodiscard]] static PdfPageEditResult AddTextStamp(
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
