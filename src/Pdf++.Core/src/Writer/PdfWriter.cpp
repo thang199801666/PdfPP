@@ -703,6 +703,12 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     for (auto& id : type1Ids) id = allocate();
     for (auto& id : type1FileIds) id = allocate();
     for (auto& id : type1DescIds) id = allocate();
+    std::vector<int> cffIds(state_->cffFonts.size());
+    std::vector<int> cffFileIds(state_->cffFonts.size());
+    std::vector<int> cffDescIds(state_->cffFonts.size());
+    for (auto& id : cffIds) id = allocate();
+    for (auto& id : cffFileIds) id = allocate();
+    for (auto& id : cffDescIds) id = allocate();
     std::vector<int> pageIds,contentIds; for(std::size_t i=0;i<state_->pages.size();++i){pageIds.push_back(allocate());contentIds.push_back(allocate());}
     std::vector<std::vector<int>> linkIds(state_->pages.size());
     std::vector<std::vector<int>> attachmentIds(state_->pages.size());
@@ -1000,6 +1006,20 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         objects[structTreeObject] = "<< /Type /StructTreeRoot /K [] "
             "/ParentTree << /Nums [0 []] >> /RoleMap << /Document /Document >> >>";
     }
+    for (std::size_t i = 0; i < state_->cffFonts.size(); ++i) {
+        const auto& cff = state_->cffFonts[i].font;
+        const std::string base = cff.name.empty() ? "PdfPPCFF" : cff.name;
+        const auto& raw = cff.data;
+        std::string cffFile(reinterpret_cast<const char*>(raw.data()), raw.size());
+        objects[cffFileIds[i]] = "<< /Length " + std::to_string(cffFile.size())
+            + " /Subtype /Type1C >>\nstream\n" + cffFile + "\nendstream";
+        objects[cffDescIds[i]] = "<< /Type /FontDescriptor /FontName /" + base
+            + " /Flags 32 /FontBBox [-250 -250 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 "
+            + "/CapHeight 700 /StemV 80 /FontFile3 " + std::to_string(cffFileIds[i]) + " 0 R >>";
+        objects[cffIds[i]] = "<< /Type /Font /Subtype /Type1 /BaseFont /" + base
+            + " /FirstChar 32 /LastChar 255 /Encoding /WinAnsiEncoding /FontDescriptor "
+            + std::to_string(cffDescIds[i]) + " 0 R >>";
+    }
     for (std::size_t i = 0; i < state_->ocgs.size(); ++i) {
         objects[ocgIds[i]] = "<< /Type /OCG /Name (" + escapePdfString(state_->ocgs[i].name) + ") /Usage << >> >>";
     }
@@ -1019,7 +1039,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     }
     for(std::size_t i=0;i<state_->pages.size();++i){
         const auto&p=state_->pages[i];std::ostringstream box;box<<p.mediaBox.left<<' '<<p.mediaBox.bottom<<' '<<p.mediaBox.right<<' '<<p.mediaBox.top;
-        std::ostringstream fonts; fonts<<"/F1 "<<base14Font<<" 0 R "; for(const auto fi:p.embeddedFontIndices)fonts<<'/'<<state_->embeddedFonts.at(fi).resourceName<<' '<<fontIds.at(fi).type0<<" 0 R "; for(const auto ti:p.type1FontIndices)fonts<<'/'<<state_->type1Fonts.at(ti).resourceName<<' '<<type1Ids.at(ti)<<" 0 R ";
+        std::ostringstream fonts; fonts<<"/F1 "<<base14Font<<" 0 R "; for(const auto fi:p.embeddedFontIndices)fonts<<'/'<<state_->embeddedFonts.at(fi).resourceName<<' '<<fontIds.at(fi).type0<<" 0 R "; for(const auto ti:p.type1FontIndices)fonts<<'/'<<state_->type1Fonts.at(ti).resourceName<<' '<<type1Ids.at(ti)<<" 0 R "; for(const auto ci:p.cffFontIndices)fonts<<'/'<<state_->cffFonts.at(ci).resourceName<<' '<<cffIds.at(ci)<<" 0 R ";
         std::ostringstream xObjects;for(const auto ii:p.imageIndices)xObjects<<'/'<<state_->images.at(ii).resourceName<<' '<<imageIds.at(ii)<<" 0 R ";
         std::string resources="<< /Font << "+fonts.str()+">>";if(!p.imageIndices.empty())resources+=" /XObject << "+xObjects.str()+">>";if(!p.extGStateIndices.empty()){std::ostringstream gs;for(const auto gi:p.extGStateIndices)gs<<'/'<<state_->extGStates.at(gi).resourceName<<' '<<extGStateIds.at(gi)<<" 0 R ";resources+=" /ExtGState << "+gs.str()+">>";}if(!p.ocgResources.empty()){std::ostringstream props;props<<" /Properties << ";for(const auto& name:p.ocgResources){const std::size_t index=name.size()>2?static_cast<std::size_t>(std::stoul(name.substr(2)))-1U:0U;if(index<state_->ocgs.size())props<<'/'<<name<<' '<<ocgIds[index]<<" 0 R ";}props<<">>";resources+=props.str();}resources+=" >>";
         std::string annotations;

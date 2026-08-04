@@ -1,3 +1,11 @@
+## 0.81.0
+
+- Embedded CFF (Type1C) font writing: `PdfCanvas::SetEmbeddedCffFontAndSize`
+  selects a parsed CFF font and the writer emits a `/Subtype /Type1` font with
+  a `/FontFile3 /Subtype /Type1C` stream and `/FontDescriptor`.
+- Tests: `Feature.CffFontEmbedding` embeds a hand-built CFF font and verifies
+  the `/FontFile3`/`/Type1C` output. All suites green (33 feature subtests).
+
 ## 0.80.0
 
 - Tagged PDF: `PdfWriter::SetTaggedPdf`/`SetLanguage` write `/MarkInfo

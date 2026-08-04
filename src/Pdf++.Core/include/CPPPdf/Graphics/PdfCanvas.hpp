@@ -4,6 +4,7 @@
 #include <CPPPdf/Rendering/PdfBitmap.hpp>
 #include <CPPPdf/Fonts/PdfTrueTypeFont.hpp>
 #include <CPPPdf/Fonts/PdfType1Font.hpp>
+#include <CPPPdf/Fonts/PdfCff.hpp>
 #include <memory>
 #include <span>
 #include <string>
@@ -82,6 +83,9 @@ public:
     PdfCanvas& SetType1FontAndSize(const PdfType1Font& font, double size);
     // Shows Latin-1 text using the active Type1 font.
     PdfCanvas& ShowType1Text(std::string latin1Text);
+    // Selects an embedded CFF (Type1C) font for subsequent text; the CFF
+    // program is written as a /FontFile3 /Subtype /Type1C stream.
+    PdfCanvas& SetEmbeddedCffFontAndSize(const PdfCffFont& font, double size);
     PdfCanvas& SetTextMatrix(double a, double b, double c, double d, double e, double f);
     PdfCanvas& MoveText(double x, double y);
     PdfCanvas& ShowText(std::string text);

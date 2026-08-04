@@ -154,8 +154,30 @@ PdfCanvas& PdfCanvas::SetType1FontAndSize(const PdfType1Font& font, const double
 
 PdfCanvas& PdfCanvas::ShowType1Text(std::string latin1Text) {
     auto& page = state_->pages[pageIndex_];
-    if (!page.activeType1FontIndex) throw std::logic_error("ShowType1Text requires SetType1FontAndSize first.");
+    if (!page.activeType1FontIndex && !page.activeCffFontIndex) {
+        throw std::logic_error("ShowType1Text requires SetType1FontAndSize or SetEmbeddedCffFontAndSize first.");
+    }
     Append("(" + escape(latin1Text) + ") Tj\n");
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::SetEmbeddedCffFontAndSize(const PdfCffFont& font, const double size) {
+    if (size <= 0.0 || !std::isfinite(size)) throw std::invalid_argument("Font size must be positive and finite.");
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    std::size_t index = state_->cffFonts.size();
+    for (std::size_t i = 0; i < state_->cffFonts.size(); ++i) {
+        if (state_->cffFonts[i].font.data == font.data) { index = i; break; }
+    }
+    if (index == state_->cffFonts.size()) {
+        state_->cffFonts.push_back({font, "CFF" + std::to_string(index + 1U)});
+    }
+    auto& page = state_->pages[pageIndex_];
+    page.activeCffFontIndex = index;
+    page.currentFontSize = size;
+    if (std::find(page.cffFontIndices.begin(), page.cffFontIndices.end(), index) == page.cffFontIndices.end()) {
+        page.cffFontIndices.push_back(index);
+    }
+    Append("/" + state_->cffFonts[index].resourceName + " " + number(size) + " Tf\n");
     return *this;
 }
 

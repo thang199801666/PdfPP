@@ -4,6 +4,7 @@
 #include <CPPPdf/Graphics/PdfImage.hpp>
 #include <CPPPdf/Fonts/PdfTrueTypeFont.hpp>
 #include <CPPPdf/Fonts/PdfType1Font.hpp>
+#include <CPPPdf/Fonts/PdfCff.hpp>
 #include <string>
 #include <vector>
 #include <optional>
@@ -30,6 +31,10 @@ struct PdfWriterEmbeddedFont {
 };
 struct PdfWriterType1Font {
     PdfType1Font font;
+    std::string resourceName;
+};
+struct PdfWriterCffFont {
+    PdfCffFont font;
     std::string resourceName;
 };
 struct PdfWriterBookmark {
@@ -88,8 +93,10 @@ struct PdfWriterPage {
     std::vector<std::size_t> extGStateIndices;
     std::vector<std::size_t> embeddedFontIndices;
     std::vector<std::size_t> type1FontIndices;
+    std::vector<std::size_t> cffFontIndices;
     std::optional<std::size_t> activeEmbeddedFontIndex;
     std::optional<std::size_t> activeType1FontIndex;
+    std::optional<std::size_t> activeCffFontIndex;
     std::vector<PdfWriterLink> links;
     std::vector<PdfWriterFileAttachment> fileAttachments;
     std::set<std::string> ocgResources;
@@ -111,6 +118,7 @@ struct PdfWriterState {
     std::vector<PdfWriterExtGState> extGStates;
     std::vector<PdfWriterEmbeddedFont> embeddedFonts;
     std::vector<PdfWriterType1Font> type1Fonts;
+    std::vector<PdfWriterCffFont> cffFonts;
     std::optional<PdfEncryptionOptions> encryption;
 };
 }

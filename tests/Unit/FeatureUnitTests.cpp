@@ -1,5 +1,6 @@
 #include <CPPPdf/Api.hpp>
 #include "TestRunner.hpp"
+#include "TestHelpers.hpp"
 
 #include <algorithm>
 #include <array>
@@ -933,8 +934,25 @@ void TestType1FontEmbedding() {
     std::filesystem::remove(output);
 }
 
-void TestTaggedPdf() {
-    const auto output = TempPath("pdfpp_feature_tagged.pdf");
+void TestCffFontEmbedding() {
+    const auto cffBytes = CPPPdfTest::BuildMinimalCff();
+    const auto font = PdfCffParser::ParseFont(std::span<const std::byte>(cffBytes));
+    PDFPP_TEST_CHECK(font.name == "Test");
+    const auto output = TempPath("pdfpp_feature_cff.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 200, 200});
+    writer.GetCanvas(page).BeginText().SetEmbeddedCffFontAndSize(font, 12)
+        .MoveText(20, 150).ShowType1Text("CFF").EndText();
+    writer.Save(output);
+    const std::string bytes = ReadText(output);
+    PDFPP_TEST_CHECK(bytes.find("/FontFile3") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Type1C") != std::string::npos);
+    auto document = PdfDocument::Open(output);
+    PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+    std::filesystem::remove(output);
+}
+
+void TestTaggedPdf() {    const auto output = TempPath("pdfpp_feature_tagged.pdf");
     PdfWriter writer;
     writer.AddPage({0, 0, 200, 200});
     writer.SetTaggedPdf(true);
@@ -1462,6 +1480,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
     runner.Run("Feature.TaggedPdf", TestTaggedPdf);
+    runner.Run("Feature.CffFontEmbedding", TestCffFontEmbedding);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");
