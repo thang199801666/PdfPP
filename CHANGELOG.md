@@ -1,3 +1,10 @@
+## 0.96.0
+
+- JPEG output: `PdfBitmap::SaveJpeg` writes a baseline JPEG (quality 1-100)
+  using the internal encoder with no external libraries.
+- Tests: `Feature.PngOutput` additionally writes a JPEG and checks the SOI
+  marker. All suites green.
+
 ## 0.95.0
 
 - Document conveniences: `PdfDocument::GetPageMediaBox` and `GetAllPagesText`

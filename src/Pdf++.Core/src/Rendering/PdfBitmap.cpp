@@ -1,5 +1,6 @@
 #include <CPPPdf/Rendering/PdfBitmap.hpp>
 #include <CPPPdf/PdfError.hpp>
+#include <CPPPdf/Graphics/PdfImage.hpp>
 
 #include <algorithm>
 #include <array>
@@ -274,6 +275,26 @@ void PdfBitmap::SavePng(const std::filesystem::path& path) const {
     writeChunk("IEND", nullptr, 0U);
     if (!output) {
         throw PdfException(PdfErrorCode::FileOpenFailed, "Unable to write rendered PNG image.");
+    }
+}
+
+void PdfBitmap::SaveJpeg(const std::filesystem::path& path, const int quality) const {
+    std::vector<std::byte> rgb;
+    rgb.reserve(pixels_.size() / 4U * 3U);
+    for (std::size_t offset = 0; offset + 3U < pixels_.size(); offset += 4U) {
+        rgb.push_back(pixels_[offset]);
+        rgb.push_back(pixels_[offset + 1U]);
+        rgb.push_back(pixels_[offset + 2U]);
+    }
+    const auto jpeg = PdfImage::EncodeJpeg(
+        static_cast<std::uint32_t>(width_), static_cast<std::uint32_t>(height_), rgb, quality);
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        throw PdfException(PdfErrorCode::FileOpenFailed, "Unable to create rendered JPEG image.");
+    }
+    output.write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(jpeg.size()));
+    if (!output) {
+        throw PdfException(PdfErrorCode::FileOpenFailed, "Unable to write rendered JPEG image.");
     }
 }
 

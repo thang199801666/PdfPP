@@ -56,6 +56,8 @@ public:
     // Writes a true-color 8-bit PNG (RGBA, non-interlaced, zlib-compressed)
     // without external libraries.
     void SavePng(const std::filesystem::path& path) const;
+    // Writes a baseline JPEG (DCT, quality 1-100) without external libraries.
+    void SaveJpeg(const std::filesystem::path& path, int quality = 85) const;
 
 private:
     std::size_t width_{};

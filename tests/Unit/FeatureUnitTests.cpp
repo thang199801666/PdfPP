@@ -1114,8 +1114,15 @@ void TestPngOutput() {
     PDFPP_TEST_CHECK(bytes.find("IHDR") != std::string::npos);
     PDFPP_TEST_CHECK(bytes.find("IDAT") != std::string::npos);
     PDFPP_TEST_CHECK(bytes.find("IEND") != std::string::npos);
+    const auto jpegPath = TempPath("pdfpp_feature_out.jpg");
+    bitmap.SaveJpeg(jpegPath, 90);
+    const std::string jpegBytes = ReadText(jpegPath);
+    PDFPP_TEST_CHECK(jpegBytes.size() > 2U);
+    PDFPP_TEST_CHECK(static_cast<unsigned char>(jpegBytes[0]) == 0xFFU &&
+                     static_cast<unsigned char>(jpegBytes[1]) == 0xD8U);
     std::filesystem::remove(pdfPath);
     std::filesystem::remove(pngPath);
+    std::filesystem::remove(jpegPath);
 }
 
 void TestTaggedPdf() {
