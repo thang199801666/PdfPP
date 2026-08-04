@@ -1,3 +1,12 @@
+## 0.76.0
+
+- C ABI: added `pdfpp_c.h`/`pdfpp_c.cpp` exposing the core through opaque
+  handles — `pdfpp_open`, `pdfpp_page_count`, `pdfpp_page_text`,
+  `pdfpp_render_ppm`, `pdfpp_version`, and `pdfpp_close` — so the library can
+  be consumed from C, FFI, or scripting runtimes.
+- Tests: `API.CApi` opens a file, reads text, renders to PPM, and checks
+  null-handle error handling. All suites green.
+
 ## 0.75.0
 
 - JPEG encoder: `PdfImage::EncodeJpeg` writes a baseline JPEG (DCT, 4:4:4,

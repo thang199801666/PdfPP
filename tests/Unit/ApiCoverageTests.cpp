@@ -1,4 +1,5 @@
 #include <CPPPdf/Api.hpp>
+#include <CPPPdf/pdfpp_c.h>
 
 #include <algorithm>
 #include <array>
@@ -692,6 +693,35 @@ void TestAcroFormCalculations() {
     std::filesystem::remove(calcOutput);
 }
 
+void TestCApi() {
+    // The C ABI mirrors the core through opaque handles.
+    PDFPP_TEST_CHECK(std::string(::pdfpp_version()) == CPPPdf::VersionString);
+    const auto base = TempPath("pdfpp_capi_base.pdf");
+    {
+        PdfWriter writer;
+        const auto page = writer.AddPage({0, 0, 120, 120});
+        writer.GetCanvas(page).BeginText().SetFontAndSize("Helvetica", 12)
+            .MoveText(10, 100).ShowText("C API text").EndText();
+        writer.Save(base);
+    }
+    char errbuf[256] = {};
+    int pageCount = 0;
+    PdfDocumentHandle doc = ::pdfpp_open(base.string().c_str(), &pageCount, errbuf, sizeof(errbuf));
+    PDFPP_TEST_CHECK(doc != nullptr);
+    PDFPP_TEST_CHECK(pageCount == 1);
+    char text[64] = {};
+    const int written = ::pdfpp_page_text(doc, 0, text, sizeof(text), errbuf, sizeof(errbuf));
+    PDFPP_TEST_CHECK(written > 0);
+    PDFPP_TEST_CHECK(std::string(text).find("C API") != std::string::npos);
+    const auto ppm = TempPath("pdfpp_capi_render.ppm");
+    PDFPP_TEST_CHECK(::pdfpp_render_ppm(doc, 0, 72.0, ppm.string().c_str(), errbuf, sizeof(errbuf)) == 0);
+    PDFPP_TEST_CHECK(std::filesystem::exists(ppm));
+    ::pdfpp_close(doc);
+    PDFPP_TEST_CHECK(::pdfpp_page_count(nullptr, errbuf, sizeof(errbuf)) == -1);
+    std::filesystem::remove(base);
+    std::filesystem::remove(ppm);
+}
+
 } // namespace
 
 
@@ -911,7 +941,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 75U);
+    static_assert(CPPPdf::VersionMinor == 76U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -921,7 +951,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.75.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.76.0");
 }
 
 int RunApiCoverageTests() {
@@ -946,7 +976,7 @@ int RunApiCoverageTests() {
     runner.Run("API.AnnotationsAndHighlight", [&] { TestAnnotationsAndHighlight(base); });
     runner.Run("API.AdvancedAnnotationsAndXfdf", [&] { TestAdvancedAnnotationsAndXfdf(base); });
     runner.Run("API.AcroFormCalculations", TestAcroFormCalculations);
-
+    runner.Run("API.CApi", TestCApi);
     std::filesystem::remove(base);
     return runner.PrintSummary("Public API coverage");
 }

@@ -101,6 +101,7 @@
     <ClInclude Include="include\CPPPdf\Forms\PdfAcroForm.hpp" />
     <ClInclude Include="include\CPPPdf\Api.hpp" />
     <ClInclude Include="include\CPPPdf\Version.hpp" />
+    <ClInclude Include="include\CPPPdf\pdfpp_c.h" />
     <ClInclude Include="include\CPPPdf\Types.hpp" />
     <ClInclude Include="include\CPPPdf\Reader.hpp" />
     <ClInclude Include="include\CPPPdf\Document.hpp" />
@@ -132,6 +133,7 @@
     <ClCompile Include="src\Security\PdfSignature.cpp" />
     <ClCompile Include="src\Security\PdfCms.cpp" />
     <ClCompile Include="src\Security\PdfPades.cpp" />
+    <ClCompile Include="src\Api\pdfpp_c.cpp" />
     <ClCompile Include="src\Validation\PdfConformance.cpp" />
     <ClCompile Include="src\Graphics\PdfCanvas.cpp" />
     <ClCompile Include="src\Graphics\PdfImage.cpp" />

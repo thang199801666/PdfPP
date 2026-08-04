@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.75.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.76.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -25,6 +25,7 @@ set(PDFPP_PUBLIC_HEADERS
     src/Pdf++.Core/include/CPPPdf/CPPPdf.h
     src/Pdf++.Core/include/CPPPdf/Api.hpp
     src/Pdf++.Core/include/CPPPdf/Version.hpp
+src/Pdf++.Core/include/CPPPdf/pdfpp_c.h
     src/Pdf++.Core/include/CPPPdf/Types.hpp
     src/Pdf++.Core/include/CPPPdf/Reader.hpp
     src/Pdf++.Core/include/CPPPdf/Document.hpp
@@ -111,6 +112,7 @@ src/Pdf++.Core/src/Internal/Graphics/PdfJpegEncoder.cpp
     src/Pdf++.Core/src/Security/PdfSignature.cpp
 src/Pdf++.Core/src/Security/PdfCms.cpp
 src/Pdf++.Core/src/Security/PdfPades.cpp
+src/Pdf++.Core/src/Api/pdfpp_c.cpp
     src/Pdf++.Core/src/Internal/Security/PdfStandardSecurity.hpp
     src/Pdf++.Core/src/Graphics/PdfCanvas.cpp
     src/Pdf++.Core/src/Graphics/PdfImage.cpp

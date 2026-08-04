@@ -102,6 +102,7 @@ secondary scope.
 - Add parallel rendering and memory budgets for large files.
 - `PdfPageRenderer::RenderAllPagesParallel` renders pages concurrently (independent document per worker), and `PdfReaderOptions::limits` provide memory/count budgets.
 - Stabilize C++, C ABI, CMake packaging and cross-platform support.
+- A C ABI (`pdfpp_c.h`) exposes open/page-count/text/render/version through opaque handles for FFI and scripting runtimes.
 - Publish API documentation, examples, versioning and contribution policy.
 - `examples/report.cpp` demonstrates the writer, layout, portfolios, and parallel rendering.
 
