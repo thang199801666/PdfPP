@@ -3623,6 +3623,23 @@ std::vector<PdfTextSearchMatch> PdfDocument::SearchText(
     return PdfTextSearch::Find(chunks, keyword, options);
 }
 
+std::vector<PdfTextSearchMatch> PdfDocument::SearchTextInRegion(
+    const std::size_t pageIndex,
+    const std::string_view keyword,
+    const PdfRectangle& region,
+    const PdfTextSearchOptions& options) const {
+    const auto matches = SearchText(pageIndex, keyword, options);
+    std::vector<PdfTextSearchMatch> result;
+    for (const auto& match : matches) {
+        // Keep matches whose bounding box intersects the region.
+        if (match.boundingBox.left <= region.right && match.boundingBox.right >= region.left &&
+            match.boundingBox.bottom <= region.top && match.boundingBox.top >= region.bottom) {
+            result.push_back(match);
+        }
+    }
+    return result;
+}
+
 std::optional<std::size_t> PdfDocument::ResolveDestination(const PdfObject& destination) const {    // Dest is either an array [page /Fit ...] or a name reference.
     const auto resolvePageIndex = [&](const PdfReference& page) {
         const auto& pages = pageReferences();

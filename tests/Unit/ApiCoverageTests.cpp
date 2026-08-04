@@ -268,6 +268,11 @@ void TestTextSearch() {
     PDFPP_TEST_CHECK(pageMatches.size() == 1);
     PDFPP_TEST_CHECK(pageMatches[0].matchedText == "Gamma");
     ExpectThrows([&] { (void)searchDocument.SearchText(9U, "x"); });
+    // Region search filters by bounding box.
+    const auto regionMatches = searchDocument.SearchTextInRegion(0U, "gamma", PdfRectangle{0, 0, 300, 300});
+    PDFPP_TEST_CHECK(regionMatches.size() == 1);
+    const auto emptyRegion = searchDocument.SearchTextInRegion(0U, "gamma", PdfRectangle{0, 0, 5, 5});
+    PDFPP_TEST_CHECK(emptyRegion.empty());
     std::filesystem::remove(searchPath);
 }
 
@@ -1097,7 +1102,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 146U);
+    static_assert(CPPPdf::VersionMinor == 147U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1107,7 +1112,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.146.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.147.0");
 }
 
 int RunApiCoverageTests() {

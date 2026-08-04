@@ -1,3 +1,10 @@
+## 0.147.0
+
+- Region search: `PdfDocument::SearchTextInRegion` filters matches whose
+  bounding box intersects a rectangle.
+- Tests: `API.TextSearch` finds a match in a full-page region and none in an
+  empty corner. All suites green.
+
 ## 0.146.0
 
 - BMP decoding: `PdfImage::FromBmp` reads 24/32-bit uncompressed BMPs into a

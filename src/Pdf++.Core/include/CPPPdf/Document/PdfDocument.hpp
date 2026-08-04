@@ -235,6 +235,13 @@ class PdfDocument final {public:
         std::string_view keyword,
         const PdfTextSearchOptions& options = {}) const;
 
+    // Searches for text whose bounding box intersects the given region.
+    [[nodiscard]] std::vector<PdfTextSearchMatch> SearchTextInRegion(
+        std::size_t pageIndex,
+        std::string_view keyword,
+        const PdfRectangle& region,
+        const PdfTextSearchOptions& options = {}) const;
+
     // Reads the document outline (/Outlines tree) as a flat list of bookmarks.
     [[nodiscard]] std::vector<PdfOutlineEntry> GetOutlines() const;
 

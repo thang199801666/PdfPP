@@ -5,8 +5,8 @@
 namespace CPPPdf {
 
 inline constexpr unsigned int VersionMajor = 0;
-inline constexpr unsigned int VersionMinor = 146;
+inline constexpr unsigned int VersionMinor = 147;
 inline constexpr unsigned int VersionPatch = 0;
-inline constexpr std::string_view VersionString = "0.146.0";
+inline constexpr std::string_view VersionString = "0.147.0";
 
 } // namespace CPPPdf
