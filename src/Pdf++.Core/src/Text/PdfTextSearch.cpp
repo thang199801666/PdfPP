@@ -24,11 +24,8 @@ struct ChunkSpan final {
 };
 
 std::string asciiFold(const std::string_view value) {
-    std::string result(value.size(), '\0');
-    std::transform(value.begin(), value.end(), result.begin(), [](const char character) {
-        return static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-    });
-    return result;
+    // Unicode-aware case folding: ASCII plus Latin-1 / Latin Extended-A.
+    return PdfTextLayout::ToLower(value);
 }
 
 bool sameLine(const PdfTextChunk& left, const PdfTextChunk& right, const double tolerance) {

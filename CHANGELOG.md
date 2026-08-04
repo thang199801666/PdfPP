@@ -1,3 +1,10 @@
+## 0.143.0
+
+- Unicode case-insensitive search: literal matching now folds Latin-1 and Latin
+  Extended-A letters, so "CAF\u00c9" matches "caf\u00e9".
+- Tests: `API.TextSearch` matches an uppercase accented needle. All suites
+  green.
+
 ## 0.142.0
 
 - Canvas font introspection: `PdfCanvas::GetActiveFontName` returns the active
