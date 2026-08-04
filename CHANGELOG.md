@@ -1,3 +1,11 @@
+## 0.77.0
+
+- CCITT Group 3/4 one-dimensional decoding: `PdfImage::DecodeCcittG4` converts a
+  fax codestream back to packed 1-bit rows using the run-length terminator
+  codes and EOL resynchronization.
+- Tests: `Feature.JpxImageWrite` also decodes the encoded G4 payload. All
+  suites green.
+
 ## 0.76.0
 
 - C ABI: added `pdfpp_c.h`/`pdfpp_c.cpp` exposing the core through opaque

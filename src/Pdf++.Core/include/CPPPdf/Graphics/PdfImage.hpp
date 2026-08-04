@@ -118,6 +118,13 @@ public:
         std::uint32_t width, std::uint32_t height,
         std::span<const std::byte> bits);
 
+    // Decodes a CCITT Group 3/4 one-dimensional codestream back to packed
+    // 1-bit rows (MSB-first, width bits per row, height rows). Returns an empty
+    // vector when the stream is malformed.
+    [[nodiscard]] static std::vector<std::byte> DecodeCcittG4(
+        std::uint32_t width, std::uint32_t height,
+        std::span<const std::byte> faxBytes);
+
     // Encodes an RGB image as a baseline JPEG (DCT, 4:4:4, quality 1-100)
     // without external libraries. Returns a complete JPEG file.
     [[nodiscard]] static std::vector<std::byte> EncodeJpeg(

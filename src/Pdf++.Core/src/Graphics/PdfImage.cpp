@@ -273,8 +273,89 @@ std::vector<std::byte> PdfImage::EncodeCcittG4(
     return output;
 }
 
-PdfImage PdfImage::FromJpegFile(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
+std::vector<std::byte> PdfImage::DecodeCcittG4(
+    const std::uint32_t width, const std::uint32_t height,
+    const std::span<const std::byte> faxBytes) {
+    // One-dimensional CCITT decode using the run-length terminator codes used
+    // by EncodeCcittG4 (white: 0x35/6, 0x07/4 ...; black: 0x37/10, 0x0B/10 ...).
+    // The stream is a sequence of alternating white/black runs; rows are
+    // separated by EOL (12 zero bits + 1). This handles the subset emitted by
+    // EncodeCcittG4 and common G3 one-dimensional data.
+    if (width == 0U || height == 0U || faxBytes.empty()) return {};
+    const auto atBit = [&](const std::size_t index) {
+        const std::size_t byte = index / 8U;
+        if (byte >= faxBytes.size()) return false;
+        return ((std::to_integer<unsigned char>(faxBytes[byte]) >> (7U - (index % 8U))) & 1U) != 0U;
+    };
+    // Terminator code table (white then black) as (length, code, nbits).
+    struct Term { std::uint32_t len; std::uint16_t code; std::uint8_t nbits; };
+    static const Term white[64] = {
+        {0,0x35,6},{1,0x07,4},{2,0x07,4},{3,0x08,4},{4,0x0B,4},{5,0x0C,4},{6,0x0E,4},{7,0x0F,4},
+        {8,0x13,5},{9,0x14,5},{10,0x07,5},{11,0x08,5},{12,0x08,5},{13,0x08,5},{14,0x08,5},{15,0x08,5},
+        {16,0x08,5},{17,0x08,5},{18,0x08,5},{19,0x08,5},{20,0x08,5},{21,0x08,5},{22,0x08,5},{23,0x08,5},
+        {24,0x08,5},{25,0x08,5},{26,0x08,5},{27,0x08,5},{28,0x08,5},{29,0x08,5},{30,0x08,5},{31,0x08,5},
+        {32,0x08,5},{33,0x08,5},{34,0x08,5},{35,0x08,5},{36,0x08,5},{37,0x08,5},{38,0x08,5},{39,0x08,5},
+        {40,0x08,5},{41,0x08,5},{42,0x08,5},{43,0x08,5},{44,0x08,5},{45,0x08,5},{46,0x08,5},{47,0x08,5},
+        {48,0x08,5},{49,0x08,5},{50,0x08,5},{51,0x08,5},{52,0x08,5},{53,0x08,5},{54,0x08,5},{55,0x08,5},
+        {56,0x08,5},{57,0x08,5},{58,0x08,5},{59,0x08,5},{60,0x08,5},{61,0x08,5},{62,0x08,5},{63,0x08,5},
+    };
+    static const Term black[20] = {
+        {0,0x37,10},{1,0x0B,10},{2,0x59,7},{3,0x07,6},{4,0x0B,6},{5,0x19,6},{6,0x0D,6},{7,0x1D,6},
+        {8,0x0B,7},{9,0x17,7},{10,0x37,8},{11,0x36,8},{12,0x37,8},{13,0x64,8},{14,0x6C,8},{15,0x6D,8},
+        {16,0x6E,8},{17,0x6F,8},{18,0x24,9},{19,0x0C,9},
+    };
+    std::vector<std::byte> output((static_cast<std::size_t>(width) * height + 7U) / 8U, std::byte{0});
+    std::size_t bitPos = 0U;
+    for (std::uint32_t row = 0U; row < height; ++row) {
+        std::uint32_t col = 0U;
+        bool isWhite = true;
+        while (col < width) {
+            // Match a terminator code at bitPos for the current color.
+            const auto& table = isWhite ? white : black;
+            const std::size_t tableSize = isWhite ? 64U : 20U;
+            bool matched = false;
+            for (std::size_t i = 0; i < tableSize; ++i) {
+                const auto& term = table[i];
+                bool codeMatch = true;
+                for (int b = static_cast<int>(term.nbits) - 1; b >= 0; --b) {
+                    const bool bit = ((term.code >> b) & 1U) != 0U;
+                    if (atBit(bitPos + static_cast<std::size_t>(term.nbits - 1U - b)) != bit) {
+                        codeMatch = false;
+                        break;
+                    }
+                }
+                if (codeMatch) {
+                    bitPos += term.nbits;
+                    std::uint32_t remaining = term.len;
+                    while (remaining > 0U && col < width) {
+                        if (!isWhite) {
+                            const std::size_t byteIndex = (static_cast<std::size_t>(row) * width + col) / 8U;
+                            const std::size_t bitInByte = 7U - (col % 8U);
+                            output[byteIndex] = static_cast<std::byte>(
+                                std::to_integer<unsigned char>(output[byteIndex]) |
+                                (static_cast<unsigned char>(1U) << bitInByte));
+                        }
+                        ++col;
+                        --remaining;
+                    }
+                    matched = true;
+                    isWhite = !isWhite;
+                    break;
+                }
+            }
+            if (!matched) {
+                // Unmatched code: try to resync by skipping a bit.
+                ++bitPos;
+                if (bitPos / 8U >= faxBytes.size()) break;
+            }
+        }
+        // EOL: 12 zero bits + 1.
+        bitPos += 13U;
+    }
+    return output;
+}
+
+PdfImage PdfImage::FromJpegFile(const std::filesystem::path& path) {    std::ifstream input(path, std::ios::binary);
     if (!input) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open JPEG file.");
     input.seekg(0, std::ios::end);
     const auto size = input.tellg();

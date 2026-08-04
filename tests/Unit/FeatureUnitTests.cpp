@@ -868,6 +868,8 @@ void TestJpxImageWrite() {
     const std::vector<std::byte> oneBit{std::byte{0xAA}, std::byte{0x55}};
     const auto g4 = PdfImage::EncodeCcittG4(16U, 1U, oneBit);
     PDFPP_TEST_CHECK(!g4.empty());
+    const auto g4decoded = PdfImage::DecodeCcittG4(16U, 1U, g4);
+    PDFPP_TEST_CHECK(!g4decoded.empty());
 
     // JPEG encoder: a small RGB image round-trips through FromJpeg dimensions.
     std::vector<std::byte> rgb(8 * 8 * 3U, std::byte{0x80});
