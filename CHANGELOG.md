@@ -1,3 +1,10 @@
+## 0.130.0
+
+- CFF glyph names: `PdfCffParser::GetGlyphName` maps a glyph's charset SID to
+  its name via the CFF Standard Strings table (falling back to "gidN").
+- Tests: `Feature.CffFontEmbedding` resolves glyph 0 to ".notdef". All suites
+  green.
+
 ## 0.129.0
 
 - Bitmap drawing: `PdfBitmap::FillRectangle`, `DrawRectangle`, and `DrawLine`

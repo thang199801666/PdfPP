@@ -82,6 +82,9 @@ public:
     // Returns the glyph's advance width in font units (from the charstring
     // width operand, or the private dict default).
     static double GetAdvanceWidth(const PdfCffFont& font, std::uint32_t glyphId);
+    // Returns the glyph's name from the CFF Standard Strings (SID), or "gidN"
+    // for SIDs beyond the standard table.
+    static std::string GetGlyphName(const PdfCffFont& font, std::uint32_t glyphId);
 };
 
 } // namespace CPPPdf
