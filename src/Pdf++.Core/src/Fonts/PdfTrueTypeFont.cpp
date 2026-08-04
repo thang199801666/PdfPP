@@ -222,6 +222,106 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
                     if(subOff==0U||lookup+subOff+6U>gb+gpos->second.length)continue;
                     const std::size_t sub=lookup+subOff;
                     const std::uint16_t format=Read16(bytes,sub);
+                    if(format==2U){
+                        // PairPosFormat2: class-based kerning. Class1 records of
+                        // (class1Count x class2Count) value records apply between
+                        // glyph classes.
+                        if(sub+16U>gb+gpos->second.length)continue;
+                        const std::uint16_t coverageOff=Read16(bytes,sub+2U);
+                        const std::uint16_t valueFormat1=Read16(bytes,sub+4U);
+                        const std::uint16_t valueFormat2=Read16(bytes,sub+6U);
+                        const std::uint16_t classDef1Off=Read16(bytes,sub+8U);
+                        const std::uint16_t classDef2Off=Read16(bytes,sub+10U);
+                        const std::uint16_t class1Count=Read16(bytes,sub+12U);
+                        const std::uint16_t class2Count=Read16(bytes,sub+14U);
+                        const bool hasXAdvance1=(valueFormat1&0x0004U)!=0U;
+                        if(!hasXAdvance1||coverageOff==0U||classDef1Off==0U||classDef2Off==0U)continue;
+                        const std::size_t cov=sub+coverageOff;
+                        if(cov+4U>gb+gpos->second.length)continue;
+                        const std::uint16_t covFormat=Read16(bytes,cov);
+                        const std::uint16_t covCount=Read16(bytes,cov+2U);
+                        // Helper: class of a glyph from a ClassDef (format 1 array
+                        // indexed by glyph, format 2 range records).
+                        const auto classOf = [&](const std::size_t classDef,
+                                                 const std::uint16_t glyph) -> std::uint16_t {
+                            if(classDef+4U>gb+gpos->second.length)return 0U;
+                            const std::uint16_t cf=Read16(bytes,classDef);
+                            const std::uint16_t cc=Read16(bytes,classDef+2U);
+                            if(cf==1U){
+                                if(glyph<cc)return Read16(bytes,classDef+4U+std::size_t(glyph)*2U);
+                                return 0U;
+                            }
+                            if(cf==2U){
+                                for(std::uint16_t r=0;r<cc;++r){
+                                    const std::size_t at=classDef+4U+std::size_t(r)*6U;
+                                    if(at+6U>gb+gpos->second.length)break;
+                                    const std::uint16_t start=Read16(bytes,at);
+                                    const std::uint16_t end=Read16(bytes,at+2U);
+                                    if(glyph>=start&&glyph<=end)return Read16(bytes,at+4U);
+                                }
+                            }
+                            return 0U;
+                        };
+                        // Build firstGlyph list from coverage with class1.
+                        std::vector<std::pair<std::uint16_t,std::uint16_t>> firsts;
+                        for(std::uint16_t p=0;p<covCount;++p){
+                            std::uint16_t firstGlyph=0;
+                            if(covFormat==1U){
+                                firstGlyph=Read16(bytes,cov+4U+std::size_t(p)*2U);
+                            } else if(covFormat==2U){
+                                const std::uint16_t rc=Read16(bytes,cov+2U);
+                                for(std::uint16_t r=0;r<rc;++r){
+                                    const std::size_t at=cov+4U+std::size_t(r)*6U;
+                                    if(at+6U>gb+gpos->second.length)break;
+                                    const std::uint16_t start=Read16(bytes,at);
+                                    const std::uint16_t end=Read16(bytes,at+2U);
+                                    const std::uint16_t sg=Read16(bytes,at+4U);
+                                    if(p>=start&&p<end){firstGlyph=static_cast<std::uint16_t>(sg+(p-start));break;}
+                                }
+                            }
+                            firsts.emplace_back(firstGlyph,classOf(sub+classDef1Off,firstGlyph));
+                        }
+                        const std::size_t value1Size=std::popcount(valueFormat1)*2U;
+                        const std::size_t value2Size=std::popcount(valueFormat2)*2U;
+                        const std::size_t xAdvanceOffset=std::popcount(valueFormat1&0x0003U)*2U;
+                        const std::size_t recordSize=value1Size+value2Size;
+                        const std::size_t recordsBase=sub+16U;
+                        for(const auto& [firstGlyph,class1]:firsts){
+                            if(class1>=class1Count)continue;
+                            const std::size_t class1Rec=recordsBase+static_cast<std::size_t>(class1)*class2Count*recordSize;
+                            for(std::uint16_t c2=0;c2<class2Count;++c2){
+                                const std::size_t rec=class1Rec+static_cast<std::size_t>(c2)*recordSize;
+                                if(rec+2U+xAdvanceOffset>gb+gpos->second.length)break;
+                                const std::int16_t xAdvance=ReadS16(bytes,rec+xAdvanceOffset);
+                                if(xAdvance==0)continue;
+                                // Enumerate second glyphs of class2 from classDef2.
+                                const std::size_t cdef2=sub+classDef2Off;
+                                if(cdef2+4U>gb+gpos->second.length)continue;
+                                const std::uint16_t cf=Read16(bytes,cdef2);
+                                const std::uint16_t cc=Read16(bytes,cdef2+2U);
+                                if(cf==1U){
+                                    for(std::uint16_t g2=0;g2<cc;++g2){
+                                        if(Read16(bytes,cdef2+4U+std::size_t(g2)*2U)==c2){
+                                            f.kerning_.emplace((std::uint64_t(firstGlyph)<<16U)|g2,xAdvance);
+                                        }
+                                    }
+                                } else if(cf==2U){
+                                    for(std::uint16_t r=0;r<cc;++r){
+                                        const std::size_t at=cdef2+4U+std::size_t(r)*6U;
+                                        if(at+6U>gb+gpos->second.length)break;
+                                        const std::uint16_t start=Read16(bytes,at);
+                                        const std::uint16_t end=Read16(bytes,at+2U);
+                                        if(Read16(bytes,at+4U)==c2){
+                                            for(std::uint32_t g=start;g<=static_cast<std::uint32_t>(end);++g){
+                                                f.kerning_.emplace((std::uint64_t(firstGlyph)<<16U)|static_cast<std::uint16_t>(g),xAdvance);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     if(format!=1U)continue; // PairPosFormat1
                     const std::uint16_t coverageOff=Read16(bytes,sub+2U);
                     const std::uint16_t valueFormat1=Read16(bytes,sub+4U);

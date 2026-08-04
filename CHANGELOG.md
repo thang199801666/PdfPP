@@ -1,3 +1,12 @@
+## 0.111.0
+
+- GPOS PairPosFormat2 (class-based kerning): the TrueType parser now reads
+  class-definition subtables and applies xAdvance pairs between glyph classes,
+  covering fonts whose kern data lives in class records rather than explicit
+  pairs (e.g. Arial).
+- Tests: `Feature.TextLayoutAndFallback` still finds a non-zero "AV" kern. All
+  suites green.
+
 ## 0.110.0
 
 - Renderer applies GPOS mark-to-mark positioning for stacked diacritics: a
