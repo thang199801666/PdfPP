@@ -1,3 +1,12 @@
+## 0.70.0
+
+- Fixed `PdfCms::CertificateInfoOf`: the tbsCertificate walker read the
+  signature algorithm twice, shifting the issuer/validity/subject offsets. The
+  certificate now reports subject/issuer common names, the validity window, and
+  the self-signed flag correctly.
+- Tests: `verifyCertificateInfo` checks subject, issuer, self-signed, validity,
+  and notAfter > notBefore for a real self-signed certificate.
+
 ## 0.69.0
 
 - PAdES foundations: `PdfDss::AddDocumentSecurityStore` writes a catalog `/DSS`

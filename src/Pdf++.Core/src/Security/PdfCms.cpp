@@ -994,8 +994,6 @@ PdfCms::CertificateInfo PdfCms::CertificateInfoOf(
     // serial INTEGER
     // signature SEQUENCE
     if (!tbsReader.ReadElement(tTag, element)) return info;
-    // signature SEQUENCE
-    if (!tbsReader.ReadElement(tTag, element)) return info;
     // issuer SEQUENCE
     if (!tbsReader.ReadElement(tTag, element)) return info;
     findName(element, info.issuer);

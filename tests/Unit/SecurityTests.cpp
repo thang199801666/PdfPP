@@ -306,9 +306,34 @@ void verifyEcdsa() {
 }
 
 void verifyCertificateInfo() {
-    // CertificateInfoOf is exercised indirectly by signature workflows; the
-    // exhaustive name/validity parsing is covered by future PAdES work.
-    PDFPP_TEST_CHECK(true);
+    const auto hex = [](const std::string& h) {
+        std::vector<std::uint8_t> out;
+        for (std::size_t i = 0; i < h.size(); i += 2) {
+            out.push_back(static_cast<std::uint8_t>(std::stoi(h.substr(i, 2), nullptr, 16)));
+        }
+        return out;
+    };
+    const std::string certHex =
+        "308201b13082011aa0030201020214401b85de455964d8a49ea7dbf4ec57fa7a0b39c4"
+        "300d06092a864886f70d01010b050030153113301106035504030c0a50646650502054"
+        "657374301e170d3234303130313030303030305a170d3335303130313030303030305a"
+        "30153113301106035504030c0a5064665050205465737430819f300d06092a864886f7"
+        "0d010101050003818d0030818902818100bbced11a28aaf9c329fb349ab6151188e4f2"
+        "f9ec708a64258efd8b147a74f947ec30557dfc1760a038d850657146e8a5b558a4d46"
+        "04233676e11314f7719d7369bf267ee71a1af6198d827394dd87498f16655cfb20e961"
+        "51f86e037441621a977d33fc73131a49ec9bc8c2b5bb15eae79c7b9dffd2c0bea00ba"
+        "7994a65329470203010001300d06092a864886f70d01010b0500038181006970bcd9f2"
+        "ae7580600cab1d5096c44a75dfff0b3b8619b6ead09b83548ab99275a37566fadef43e"
+        "22169cd8195fb9f9e7317d6ef29f042f6a8c3d8a923da1b0b046cc6597a6e5e69e9380"
+        "cecac0f4c59ea4eac92a0c1f9596a8a804e4297a39e9f34e693eb67f2cab4fa3406ad"
+        "430ee5b4f992d62f3aff7f7a4f85b269cafd7";
+    const auto cert = hex(certHex);
+    const auto info = CPPPdf::PdfCms::CertificateInfoOf(cert);
+    PDFPP_TEST_CHECK(info.subject == "PdfPP Test");
+    PDFPP_TEST_CHECK(info.issuer == "PdfPP Test");
+    PDFPP_TEST_CHECK(info.selfSigned);
+    PDFPP_TEST_CHECK(info.hasValidity);
+    PDFPP_TEST_CHECK(info.notAfter > info.notBefore);
 }
 
 void verifyDss() {
