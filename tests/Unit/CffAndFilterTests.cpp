@@ -91,6 +91,59 @@ void TestFilters() {
         const std::array<std::byte, 4> sample{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
         (void)PdfFilterPipeline::DecodeFlate(sample, 1U);
     }));
+
+    // Round trips through the newly added Encode* counterparts.
+    const std::string payload =
+        "The quick brown fox jumps over the lazy dog. "
+        "\x00\x01\x02\x7F\x80\xFF"          // binary bytes, repeated runs
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"       // long run for RunLength
+        "Mixed case mixed case mixed case, 0123456789, 0123456789.";
+    std::vector<std::byte> bytes;
+    bytes.reserve(payload.size());
+    for (const char ch : payload) bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(ch)));
+
+    const auto flateEncoded = PdfFilterPipeline::EncodeFlate(bytes);
+    const auto flateRound = PdfFilterPipeline::DecodeFlate(flateEncoded,
+        std::numeric_limits<std::size_t>::max());
+    PDFPP_TEST_CHECK(std::equal(flateRound.begin(), flateRound.end(), bytes.begin(), bytes.end()));
+
+    const auto hexEncoded = PdfFilterPipeline::EncodeAsciiHex(bytes);
+    const auto hexRound = PdfFilterPipeline::DecodeAsciiHex(hexEncoded);
+    PDFPP_TEST_CHECK(std::equal(hexRound.begin(), hexRound.end(), bytes.begin(), bytes.end()));
+
+    const auto a85Encoded = PdfFilterPipeline::EncodeAscii85(bytes);
+    const auto a85Round = PdfFilterPipeline::DecodeAscii85(a85Encoded);
+    PDFPP_TEST_CHECK(std::equal(a85Round.begin(), a85Round.end(), bytes.begin(), bytes.end()));
+
+    const auto rlEncoded = PdfFilterPipeline::EncodeRunLength(bytes);
+    const auto rlRound = PdfFilterPipeline::DecodeRunLength(rlEncoded);
+    PDFPP_TEST_CHECK(std::equal(rlRound.begin(), rlRound.end(), bytes.begin(), bytes.end()));
+
+    const auto lzwEncoded = PdfFilterPipeline::EncodeLzw(bytes);
+    const auto lzwRound = PdfFilterPipeline::DecodeLzw(lzwEncoded);
+    PDFPP_TEST_CHECK(std::equal(lzwRound.begin(), lzwRound.end(), bytes.begin(), bytes.end()));
+
+    // Pipeline-level encode then decode round trip with two chained filters.
+    const auto chained = PdfFilterPipeline{}.Encode(bytes, {
+        PdfFilterSpec{"ASCII85Decode", {}}, PdfFilterSpec{"FlateDecode", {}}});
+    const auto chainedRound = PdfFilterPipeline{}.Decode(chained, {
+        PdfFilterSpec{"FlateDecode", {}}, PdfFilterSpec{"ASCII85Decode", {}}});
+    PDFPP_TEST_CHECK(std::equal(chainedRound.begin(), chainedRound.end(), bytes.begin(), bytes.end()));
+
+    const std::vector<std::byte> rows{
+        std::byte{10}, std::byte{20}, std::byte{30}, std::byte{40},
+        std::byte{50}, std::byte{60}, std::byte{70}, std::byte{80}};
+    const auto tiffPredictor = PdfFilterPipeline{}.Encode(rows, {
+        PdfFilterSpec{"FlateDecode", "/Predictor 2 /Colors 1 /BitsPerComponent 8 /Columns 4"}});
+    const auto tiffRound = PdfFilterPipeline{}.Decode(tiffPredictor, {
+        PdfFilterSpec{"FlateDecode", "/Predictor 2 /Colors 1 /BitsPerComponent 8 /Columns 4"}});
+    PDFPP_TEST_CHECK(std::equal(tiffRound.begin(), tiffRound.end(), rows.begin(), rows.end()));
+
+    const auto pngPredictor = PdfFilterPipeline{}.Encode(rows, {
+        PdfFilterSpec{"FlateDecode", "/Predictor 12 /Colors 1 /BitsPerComponent 8 /Columns 4"}});
+    const auto pngRound = PdfFilterPipeline{}.Decode(pngPredictor, {
+        PdfFilterSpec{"FlateDecode", "/Predictor 12 /Colors 1 /BitsPerComponent 8 /Columns 4"}});
+    PDFPP_TEST_CHECK(std::equal(pngRound.begin(), pngRound.end(), rows.begin(), rows.end()));
 }
 
 void TestInputSources() {

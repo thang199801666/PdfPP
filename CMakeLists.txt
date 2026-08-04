@@ -89,7 +89,9 @@ src/Pdf++.Core/src/Document/PdfDocumentLayout.cpp
 src/Pdf++.Core/src/Document/PdfRedactor.cpp
     src/Pdf++.Core/src/Internal/Writer/PdfObjectSerializer.cpp
     src/Pdf++.Core/src/Internal/Writer/PdfObjectSerializer.hpp
-src/Pdf++.Core/src/Internal/Graphics/PdfJpegEncoder.hpp
+    src/Pdf++.Core/src/Internal/Writer/PdfObjectCollectionWriter.cpp
+    src/Pdf++.Core/src/Internal/Writer/PdfObjectCollectionWriter.hpp
+    src/Pdf++.Core/src/Internal/Graphics/PdfJpegEncoder.hpp
     src/Pdf++.Core/src/Internal/Writer/PdfIncrementalWriter.hpp
     src/Pdf++.Core/src/Writer/PdfIncrementalWriter.cpp
     src/Pdf++.Core/src/Filters/PdfFilterPipeline.cpp
@@ -108,6 +110,7 @@ src/Pdf++.Core/src/Internal/Graphics/PdfJpegEncoder.cpp
     src/Pdf++.Core/src/Writer/PdfWriter.cpp
     src/Pdf++.Core/src/Writer/PdfWriterState.hpp
     src/Pdf++.Core/src/Security/PdfStandardSecurity.cpp
+    src/Pdf++.Core/src/Security/PdfCrypto.cpp
     src/Pdf++.Core/src/Security/PdfPasswordManager.cpp
     src/Pdf++.Core/src/Security/PdfSignature.cpp
 src/Pdf++.Core/src/Security/PdfCms.cpp

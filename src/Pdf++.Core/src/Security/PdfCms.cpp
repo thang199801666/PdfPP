@@ -591,6 +591,7 @@ std::vector<std::uint8_t> PdfCms::BuildSignedData(
     const RsaPrivateKey& privateKey,
     const std::span<const std::uint8_t> certificateDer,
     const std::string_view signerName) {
+    (void)signerName;
     // Minimal CMS SignedData (RFC 5652) with one signer, detached content.
     // Structure:
     //  ContentInfo ::= SEQUENCE { contentType OID signedData, content [0] SignedData }

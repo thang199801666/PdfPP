@@ -62,6 +62,7 @@ struct PdfPageInfo {
 struct PdfTextExtractionOptions {
     bool preserveLayout{true};
     bool insertSpaces{true};
+    bool ignoreInvisibleText{true};
     double lineTolerance{0.25};
     double wordGapThreshold{3.0};
 };

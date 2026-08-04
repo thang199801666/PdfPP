@@ -35,11 +35,38 @@ void verifyCryptoPrimitives() {
     const auto digest = Internal::Sha256(std::span<const std::uint8_t>(
         reinterpret_cast<const std::uint8_t*>(message.data()), message.size()));
     PDFPP_TEST_CHECK(digest == hexArray<32>("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+    const auto sha512 = Internal::Sha512(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(message.data()), message.size()));
+    PDFPP_TEST_CHECK(sha512 == hexArray<64>(
+        "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a"
+        "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"));
+    const auto sha384 = Internal::Sha384(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(message.data()), message.size()));
+    PDFPP_TEST_CHECK(sha384 == hexArray<48>(
+        "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed"
+        "8086072ba1e7cc2358baeca134c825a7"));
     const auto key = hexArray<32>("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
     const auto plaintext = hexArray<16>("00112233445566778899aabbccddeeff");
     const auto ciphertext = Internal::Aes256EncryptBlock(key, plaintext);
     PDFPP_TEST_CHECK(ciphertext == hexArray<16>("8ea2b7ca516745bfeafc49904b496089"));
     PDFPP_TEST_CHECK(Internal::Aes256DecryptBlock(key, ciphertext) == plaintext);
+    const std::array<std::uint8_t, 16> iv{};
+    const std::array<std::uint8_t, 32> cbcInput{
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+        0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
+        0x90, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0, 0xf0, 0xff};
+    const auto cbcCipher = Internal::Aes256CbcEncrypt(key, iv, cbcInput);
+    PDFPP_TEST_CHECK(Internal::Aes256CbcDecrypt(key, iv, cbcCipher)
+                     == std::vector<std::uint8_t>(cbcInput.begin(), cbcInput.end()));
+    bool rejectedUnaligned = false;
+    try {
+        const std::array<std::uint8_t, 1> invalid{0};
+        (void)Internal::Aes256CbcEncrypt(key, iv, invalid);
+    } catch (const std::invalid_argument&) {
+        rejectedUnaligned = true;
+    }
+    PDFPP_TEST_CHECK(rejectedUnaligned);
 }
 
 std::filesystem::path securityTemp(const char* name) {
@@ -374,6 +401,7 @@ void verifyDss() {
 void TestCryptoPrimitivesAndAlgorithms() {
     verifyCryptoPrimitives();
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Aes128, "aes128");
+    verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Rc4_40, "rc4-40");
     verifyEncryptedRoundTrip(PdfEncryptionAlgorithm::Rc4_128, "rc4-128");
     verifySignatureWorkflow();
     verifySignatureVerification();

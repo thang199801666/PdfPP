@@ -35,11 +35,14 @@ struct PdfFormFieldInfo final {
     bool required{};
     bool noExport{};
     bool checked{};
+    bool radio{};
+    std::vector<std::size_t> selectedIndices;
 };
 
 struct PdfFormFieldUpdate final {
     std::string name;
     std::string value;
+    std::vector<std::string> selections;
 };
 
 struct PdfFormUpdateOptions final {

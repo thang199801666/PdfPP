@@ -38,6 +38,17 @@ enum class PdfImageEncoding {
     Unsupported
 };
 
+// File container format detected from leading bytes (iText `ImageType`).
+enum class PdfImageType {
+    Unknown,
+    Png,
+    Jpeg,
+    Bmp,
+    Jpeg2000,
+    Ccitt,
+    Raw
+};
+
 struct PdfImageInfo {
     std::string resourceName;
     PdfReference reference{};
@@ -153,6 +164,10 @@ public:
     // Loads an image file, auto-detecting the format (PNG, JPEG, or raw RGB
     // data with a .rgb extension).
     static PdfImage FromFile(const std::filesystem::path& path);
+
+    // Detects the container format from the leading bytes of an image file.
+    // Matches iText `ImageDataFactory::GetImageType`.
+    [[nodiscard]] static PdfImageType DetectImageType(std::span<const std::byte> bytes);
 
     static PdfImage FromGray(
         std::uint32_t width,

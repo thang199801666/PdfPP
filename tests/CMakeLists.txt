@@ -12,5 +12,10 @@ add_executable(PdfPP.UnitTests
 )
 target_link_libraries(PdfPP.UnitTests PRIVATE CPPPdf::Core)
 target_compile_features(PdfPP.UnitTests PRIVATE cxx_std_20)
-target_include_directories(PdfPP.UnitTests PRIVATE ${PROJECT_SOURCE_DIR}/src/Pdf++.Core/src)
+target_include_directories(PdfPP.UnitTests PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/Pdf++.Core/src
+    ${PROJECT_SOURCE_DIR}/third_party/zlib)
+if(MSVC)
+    target_compile_options(PdfPP.UnitTests PRIVATE /utf-8)
+endif()
 add_test(NAME PdfPP.UnitTests COMMAND PdfPP.UnitTests)

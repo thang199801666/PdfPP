@@ -147,6 +147,8 @@ const char* subtypeName(PdfAnnotationType type) {
     case PdfAnnotationType::StrikeOut: return "StrikeOut";
     case PdfAnnotationType::TextNote: return "Text";
     case PdfAnnotationType::Link: return "Link";
+    case PdfAnnotationType::Line: return "Line";
+    case PdfAnnotationType::FileAttachment: return "FileAttachment";
     case PdfAnnotationType::FreeText: return "FreeText";
     case PdfAnnotationType::Ink: return "Ink";
     case PdfAnnotationType::Polygon: return "Polygon";
@@ -217,14 +219,62 @@ void writeVertices(std::ostream& output, const PdfAnnotation& annotation) {
     output << "]\n";
 }
 
+void writeLine(std::ostream& output, const PdfAnnotation& annotation) {
+    if (annotation.type != PdfAnnotationType::Line) return;
+    PdfPoint first{annotation.rectangle.left, annotation.rectangle.bottom};
+    PdfPoint second{annotation.rectangle.right, annotation.rectangle.top};
+    if (annotation.vertices.size() >= 2U) {
+        first = annotation.vertices[0];
+        second = annotation.vertices[1];
+    }
+    output << "/L [" << first.x << ' ' << first.y << ' '
+           << second.x << ' ' << second.y << "]\n";
+}
+
+std::optional<PdfReference> findEmbeddedFileSpec(
+    const PdfDocument& document, std::string_view name) {
+    const PdfObject& catalogObject = document.GetObject(document.GetCatalogReference());
+    const PdfDictionary* catalog = catalogObject.AsDictionary();
+    if (!catalog) return std::nullopt;
+    const PdfObject* namesObject = catalog->Find(PdfName("Names"));
+    const PdfDictionary* names = namesObject ? namesObject->AsDictionary() : nullptr;
+    if (!names && namesObject && namesObject->AsReference()) {
+        const auto reference = namesObject->AsReference();
+        names = document.GetObject(PdfReference{reference->first, reference->second}).AsDictionary();
+    }
+    if (!names) return std::nullopt;
+    const PdfObject* embeddedObject = names->Find(PdfName("EmbeddedFiles"));
+    const PdfDictionary* embedded = embeddedObject ? embeddedObject->AsDictionary() : nullptr;
+    if (!embedded && embeddedObject && embeddedObject->AsReference()) {
+        const auto reference = embeddedObject->AsReference();
+        embedded = document.GetObject(PdfReference{reference->first, reference->second}).AsDictionary();
+    }
+    if (!embedded) return std::nullopt;
+    const PdfObject* arrayObject = embedded->Find(PdfName("Names"));
+    const PdfArray* array = arrayObject ? arrayObject->AsArray() : nullptr;
+    if (!array && arrayObject && arrayObject->AsReference()) {
+        const auto reference = arrayObject->AsReference();
+        array = document.GetObject(PdfReference{reference->first, reference->second}).AsArray();
+    }
+    if (!array) return std::nullopt;
+    for (std::size_t i = 0; i + 1U < array->size(); i += 2U) {
+        const auto* key = array->at(i).AsString();
+        const auto value = array->at(i + 1U).AsReference();
+        if (key && value && *key == name) return PdfReference{value->first, value->second};
+    }
+    return std::nullopt;
+}
+
 void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation,
                      const std::optional<PdfReference>& replyTarget = std::nullopt,
-                     const std::optional<PdfReference>& popupReference = std::nullopt) {
+                     const std::optional<PdfReference>& popupReference = std::nullopt,
+                     const std::optional<PdfReference>& fileSpecReference = std::nullopt) {
     const PdfRectangle& r = annotation.rectangle;
     output << "<< /Type /Annot /Subtype /" << subtypeName(annotation.type) << "\n"
            << "/Rect [" << r.left << ' ' << r.bottom << ' ' << r.right << ' ' << r.top << "]\n";
     writeQuadPoints(output, annotation);
     writeVertices(output, annotation);
+    writeLine(output, annotation);
     output << "/C [" << annotation.color.red << ' ' << annotation.color.green << ' ' << annotation.color.blue << "]\n";
     if (annotation.interiorColor.red != 0.0 || annotation.interiorColor.green != 0.0 ||
         annotation.interiorColor.blue != 0.0) {
@@ -250,7 +300,7 @@ void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation,
     }
     const bool hasLineEnds = annotation.lineStart != PdfLineEndStyle::None ||
                              annotation.lineEnd != PdfLineEndStyle::None;
-    if (annotation.type == PdfAnnotationType::Polygon && hasLineEnds) {
+    if ((annotation.type == PdfAnnotationType::Polygon || annotation.type == PdfAnnotationType::Line) && hasLineEnds) {
         output << "/LE [/" << lineEndStyleName(annotation.lineStart) << " /"
                << lineEndStyleName(annotation.lineEnd) << "]\n";
     }
@@ -264,6 +314,14 @@ void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation,
     if (annotation.type == PdfAnnotationType::Stamp) {
         const std::string stamp = annotation.stampName.empty() ? "Approved" : annotation.stampName;
         output << "/Name /" << stamp << "\n";
+    }
+    if (annotation.type == PdfAnnotationType::FileAttachment) {
+        if (!fileSpecReference) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "FileAttachment annotation target does not exist.");
+        }
+        output << "/FS " << fileSpecReference->objectNumber << ' '
+               << fileSpecReference->generation << " R\n/Name /PushPin\n";
     }
     if (annotation.type == PdfAnnotationType::Link) {
         if (annotation.uri.empty()) throw PdfException(PdfErrorCode::InvalidArgument, "Link annotation URI cannot be empty.");
@@ -339,8 +397,10 @@ PdfAnnotationEditResult PdfAnnotationEditor::AddAnnotations(
             if (hasPopup[i]) {
                 popupReference = references[refIndex + 1U];
             }
+            const auto fileSpecReference = annotation->type == PdfAnnotationType::FileAttachment
+                ? findEmbeddedFileSpec(document, annotation->attachmentName) : std::nullopt;
             std::ostringstream body;
-            writeAnnotation(body, *annotation, replyTarget, popupReference);
+            writeAnnotation(body, *annotation, replyTarget, popupReference, fileSpecReference);
             writer.WriteRawObject(references[refIndex], body.str());
 
             // Emit the linked Popup annotation object when requested.
@@ -561,6 +621,16 @@ std::string annotationAppearanceCommands(const PdfDictionary& annotation) {
             setFill("f\n");
         }
         stream << "S\n";
+    } else if (type == "Line") {
+        setStroke(std::max(borderWidth, 0.5));
+        const PdfObject* lineObject = annotation.Find(PdfName("L"));
+        const PdfArray* line = lineObject ? lineObject->AsArray() : nullptr;
+        if (line && line->size() >= 4U) {
+            stream << line->at(0U).AsReal().value_or(0.0) << ' '
+                   << line->at(1U).AsReal().value_or(0.0) << " m\n"
+                   << line->at(2U).AsReal().value_or(0.0) << ' '
+                   << line->at(3U).AsReal().value_or(0.0) << " l\nS\n";
+        }
     } else if (type == "Polygon" || type == "Polyline") {
         setStroke(std::max(borderWidth, 0.5));
         const PdfObject* verticesObject = annotation.Find(PdfName("Vertices"));

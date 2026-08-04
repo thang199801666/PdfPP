@@ -648,7 +648,6 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
                         for(std::uint16_t m1=0;m1<mark1Count&&m1<mark1Glyphs.size();++m1){
                             const std::size_t mark1Rec=mark1Array+2U+std::size_t(m1)*4U;
                             if(mark1Rec+4U>gb+gpos->second.length)break;
-                            const std::uint16_t mark1Class=Read16(bytes,mark1Rec);
                             const std::uint16_t mark1AnchorOff=Read16(bytes,mark1Rec+2U);
                             if(mark1AnchorOff==0U)continue;
                             const std::size_t mark1Anchor=mark1Array+mark1AnchorOff;

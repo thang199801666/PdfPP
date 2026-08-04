@@ -393,6 +393,27 @@ void PdfWriter::SetTaggedPdf(const bool tagged) { state_->tagged = tagged; }
 bool PdfWriter::IsTaggedPdf() const noexcept { return state_->tagged; }
 void PdfWriter::SetLanguage(std::string langCode) { state_->language = std::move(langCode); }
 const std::string& PdfWriter::GetLanguage() const noexcept { return state_->language; }
+void PdfWriter::SetTaggedRoleMap(std::string customRole, std::string standardRole) {
+    if (customRole.empty() || standardRole.empty()) {
+        throw std::invalid_argument("Tagged role map entries cannot be empty.");
+    }
+    if (customRole.front() == '/') customRole.erase(0U, 1U);
+    if (standardRole.front() == '/') standardRole.erase(0U, 1U);
+    const auto found = std::find_if(state_->taggedRoleMap.begin(), state_->taggedRoleMap.end(),
+        [&](const auto& entry) { return entry.first == customRole; });
+    if (found == state_->taggedRoleMap.end()) {
+        state_->taggedRoleMap.emplace_back(std::move(customRole), std::move(standardRole));
+    } else {
+        found->second = std::move(standardRole);
+    }
+}
+void PdfWriter::ClearTaggedRoleMap() noexcept { state_->taggedRoleMap.clear(); }
+void PdfWriter::SetTaggedDocumentAlternativeText(std::string altText) {
+    state_->taggedAltText = std::move(altText);
+}
+const std::string& PdfWriter::GetTaggedDocumentAlternativeText() const noexcept {
+    return state_->taggedAltText;
+}
 void PdfWriter::AddPageLabel(std::size_t pageIndex, const PdfPageLabelOptions& options) {
     if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page label index");
     if (options.startNumber == 0U) throw std::invalid_argument("Page label start number must be positive");
@@ -484,6 +505,31 @@ void PdfWriter::AddUriLink(std::size_t pageIndex, std::string uri, const PdfLink
     if (uri.empty()) throw std::invalid_argument("URI cannot be empty");
     if (options.borderWidth < 0.0) throw std::invalid_argument("Link border width cannot be negative");
     state_->pages[pageIndex].links.push_back({Internal::PdfWriterLinkKind::Uri, std::move(uri), options});
+}
+
+void PdfWriter::AddRemoteLink(std::size_t pageIndex, std::string fileName,
+                              std::string destination, const PdfLinkOptions& options) {
+    if (pageIndex >= state_->pages.size() || fileName.empty() || destination.empty()) {
+        throw std::invalid_argument("Remote link requires a page, file name, and destination.");
+    }
+    Internal::PdfWriterLink link;
+    link.kind = Internal::PdfWriterLinkKind::Remote;
+    link.target = std::move(fileName);
+    link.destination = std::move(destination);
+    link.options = options;
+    state_->pages[pageIndex].links.push_back(std::move(link));
+}
+
+void PdfWriter::AddLaunchLink(std::size_t pageIndex, std::string fileName,
+                              const PdfLinkOptions& options) {
+    if (pageIndex >= state_->pages.size() || fileName.empty()) {
+        throw std::invalid_argument("Launch link requires a page and file name.");
+    }
+    Internal::PdfWriterLink link;
+    link.kind = Internal::PdfWriterLinkKind::Launch;
+    link.target = std::move(fileName);
+    link.options = options;
+    state_->pages[pageIndex].links.push_back(std::move(link));
 }
 
 void PdfWriter::ClearLinks(std::size_t pageIndex) {
@@ -686,7 +732,7 @@ void PdfWriter::AddWatermarkToAllPages(const PdfWatermarkOptions& options) {
 
 void PdfWriter::SetEncryption(const PdfEncryptionOptions& options) {
     if (options.userPassword.size() > 32U || options.ownerPassword.size() > 32U) {
-        throw std::invalid_argument("PDF AES-128/RC4-128 passwords are limited to 32 bytes.");
+        throw std::invalid_argument("PDF Standard Security passwords are limited to 32 bytes.");
     }
     state_->encryption = options;
 }
@@ -1125,10 +1171,20 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         objects[type1Ids[i]] += "] >>";
     }
     if (structTreeObject != 0) {
-        // Minimal structure tree: a /StructTreeRoot with an empty /K array and
-        // the default document role map.
-        objects[structTreeObject] = "<< /Type /StructTreeRoot /K [] "
-            "/ParentTree << /Nums [0 []] >> /RoleMap << /Document /Document >> >>";
+        std::ostringstream structure;
+        structure << "<< /Type /StructTreeRoot /K ";
+        if (state_->taggedAltText.empty()) {
+            structure << "[] ";
+        } else {
+            structure << "[<< /Type /StructElem /S /Document /Alt ("
+                      << escapePdfString(state_->taggedAltText) << ") >>] ";
+        }
+        structure << "/ParentTree << /Nums [0 []] >> /RoleMap << /Document /Document";
+        for (const auto& [customRole, standardRole] : state_->taggedRoleMap) {
+            structure << " /" << customRole << " /" << standardRole;
+        }
+        structure << " >> >>";
+        objects[structTreeObject] = structure.str();
     }
     for (std::size_t i = 0; i < state_->cffFonts.size(); ++i) {
         const auto& cff = state_->cffFonts[i].font;
@@ -1213,8 +1269,13 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             }
             if (link.kind == Internal::PdfWriterLinkKind::NamedDestination) {
                 annotation << " /Dest (" << escapePdfString(link.target) << ')';
-            } else {
+            } else if (link.kind == Internal::PdfWriterLinkKind::Uri) {
                 annotation << " /A << /S /URI /URI (" << escapePdfString(link.target) << ") >>";
+            } else if (link.kind == Internal::PdfWriterLinkKind::Remote) {
+                annotation << " /A << /S /GoToR /F (" << escapePdfString(link.target)
+                           << ") /D (" << escapePdfString(link.destination) << ") >>";
+            } else {
+                annotation << " /A << /S /Launch /F (" << escapePdfString(link.target) << ") >>";
             }
             annotation << " >>";
             objects[linkIds[i][j]] = annotation.str();

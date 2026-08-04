@@ -172,7 +172,7 @@ void PdfIncrementalWriter::writeObjectStream(std::uint32_t& size) {
             body, PdfReference{objectStreamNumber_, 0U});
     }
     entries_[objectStreamNumber_] = {
-        static_cast<std::uint64_t>(output_.tellp()), 0U};
+        static_cast<std::uint64_t>(output_.tellp()), static_cast<std::uint16_t>(0U)};
     output_ << objectStreamNumber_ << " 0 obj\n";
     output_.write(body.data(), static_cast<std::streamsize>(body.size()));
     output_ << "\nendobj\n";

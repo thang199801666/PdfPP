@@ -163,6 +163,8 @@ std::string annotationSubtypeToElement(PdfAnnotationType type) {
     case PdfAnnotationType::StrikeOut: return "strikeout";
     case PdfAnnotationType::TextNote: return "text";
     case PdfAnnotationType::Link: return "link";
+    case PdfAnnotationType::Line: return "line";
+    case PdfAnnotationType::FileAttachment: return "fileattachment";
     case PdfAnnotationType::FreeText: return "freetext";
     case PdfAnnotationType::Polygon: return "polygon";
     case PdfAnnotationType::Polyline: return "polyline";
@@ -179,6 +181,8 @@ PdfAnnotationType elementToAnnotationType(std::string_view element) {
     if (element == "underline") return PdfAnnotationType::Underline;
     if (element == "strikeout") return PdfAnnotationType::StrikeOut;
     if (element == "link") return PdfAnnotationType::Link;
+    if (element == "line") return PdfAnnotationType::Line;
+    if (element == "fileattachment") return PdfAnnotationType::FileAttachment;
     if (element == "freetext") return PdfAnnotationType::FreeText;
     if (element == "polygon") return PdfAnnotationType::Polygon;
     if (element == "polyline") return PdfAnnotationType::Polyline;
@@ -224,8 +228,8 @@ PdfXfdf::XfdfExportResult PdfXfdf::ExportAnnotations(
         } else if (const auto reference = annotsObject->AsReference()) {
             const PdfObject& resolved = document.GetObject(
                 PdfReference{reference->first, reference->second});
-            if (const PdfArray* array = resolved.AsArray()) {
-                for (const auto& value : array->values()) {
+            if (const PdfArray* resolvedArray = resolved.AsArray()) {
+                for (const auto& value : resolvedArray->values()) {
                     if (const auto itemReference = value.AsReference()) {
                         const PdfObject& item = document.GetObject(
                             PdfReference{itemReference->first, itemReference->second});
@@ -254,6 +258,8 @@ PdfXfdf::XfdfExportResult PdfXfdf::ExportAnnotations(
             if (subtypeName == "Underline") return std::string("underline");
             if (subtypeName == "StrikeOut") return std::string("strikeout");
             if (subtypeName == "Link") return std::string("link");
+            if (subtypeName == "Line") return std::string("line");
+            if (subtypeName == "FileAttachment") return std::string("fileattachment");
             if (subtypeName == "FreeText") return std::string("freetext");
             if (subtypeName == "Polygon") return std::string("polygon");
             if (subtypeName == "Polyline") return std::string("polyline");
@@ -303,6 +309,18 @@ PdfXfdf::XfdfExportResult PdfXfdf::ExportAnnotations(
                 writeStringAttribute(output, "name", name->value());
             }
         }
+        if (element == "fileattachment") {
+            const PdfObject* fileSpecObject = dictionary->Find(PdfName("FS"));
+            const PdfDictionary* fileSpec = fileSpecObject ? fileSpecObject->AsDictionary() : nullptr;
+            if (!fileSpec && fileSpecObject && fileSpecObject->AsReference()) {
+                const auto reference = fileSpecObject->AsReference();
+                fileSpec = document.GetObject(PdfReference{reference->first, reference->second}).AsDictionary();
+            }
+            const PdfObject* fileNameObject = fileSpec ? fileSpec->Find(PdfName("F")) : nullptr;
+            if (const std::string* fileName = fileNameObject ? fileNameObject->AsString() : nullptr) {
+                writeStringAttribute(output, "name", *fileName);
+            }
+        }
         output << ">\n";
         const PdfObject* contentsObject = dictionary->Find(PdfName("Contents"));
         if (const std::string* contents = contentsObject ? contentsObject->AsString() : nullptr) {
@@ -350,7 +368,7 @@ PdfXfdf::XfdfImportResult PdfXfdf::ImportAnnotations(
         const bool isSelfClosing = !token.empty() && token.back() == '/';
         if (elementName == "text" || elementName == "highlight" || elementName == "underline" ||
             elementName == "strikeout" || elementName == "link" || elementName == "freetext" ||
-            elementName == "polygon" || elementName == "polyline" || elementName == "square" ||
+            elementName == "line" || elementName == "fileattachment" || elementName == "polygon" || elementName == "polyline" || elementName == "square" ||
             elementName == "circle" || elementName == "stamp" || elementName == "ink") {
             const auto attributes = parseAttributes(token);
             PdfAnnotation annotation;
@@ -366,6 +384,7 @@ PdfXfdf::XfdfImportResult PdfXfdf::ImportAnnotations(
             annotation.title = attributeOf(attributes, "title");
             annotation.uri = attributeOf(attributes, "href");
             annotation.stampName = attributeOf(attributes, "name");
+            annotation.attachmentName = attributeOf(attributes, "name");
             if (annotation.type == PdfAnnotationType::Link && annotation.uri.empty()) {
                 position = gt + 1;
                 continue;

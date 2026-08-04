@@ -50,6 +50,14 @@ struct PdfTextRegion {
     bool includeIntersecting{true};
 };
 
+struct PdfMarkedContentSpan final {
+    std::string tag;
+    std::string property;
+    std::optional<std::uint32_t> mcid;
+    std::size_t depth{};
+    std::string encodedText;
+};
+
 struct PdfTextExtractionRequest {
     PdfTextExtractionStrategy strategy{PdfTextExtractionStrategy::Location};
     PdfTextExtractionOptions options{};
@@ -77,6 +85,12 @@ struct PdfExtractedWord final {
 
 class PdfTextExtractor final {
 public:
+    // Extracts BDC/EMC spans, including the optional /MCID property. Text is
+    // retained in its encoded content-stream form so callers can resolve it
+    // with the page's font resources when needed.
+    [[nodiscard]] static std::vector<PdfMarkedContentSpan> ExtractMarkedContent(
+        std::string_view content);
+
     [[nodiscard]] static std::vector<PdfTextChunk> ExtractChunks(
         std::string_view content,
         const PdfTextExtractionRequest& request = {});

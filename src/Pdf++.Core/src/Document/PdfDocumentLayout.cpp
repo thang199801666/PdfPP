@@ -109,7 +109,7 @@ PdfDocumentLayout::LayoutResult PdfDocumentLayout::FlowParagraphs(
             const std::size_t lineCount = std::max<std::size_t>(
                 1U, static_cast<std::size_t>(std::ceil(paragraph.text.size() * paragraph.fontSize * 0.5 / std::max(usableWidth, 1.0))));
             if (y - lineCount * lineHeight < flowBox.bottom) {
-                if (page + 1U >= writer_.GetPageCount()) writer_.AddPage();
+                if (page + 1U >= writer_.GetPageCount()) (void)writer_.AddPage();
                 ++page;
                 y = flowBox.top;
             }
@@ -123,7 +123,7 @@ PdfDocumentLayout::LayoutResult PdfDocumentLayout::FlowParagraphs(
                     .MoveText(flowBox.left + paragraph.leftIndent, cursor).ShowText(line).EndText();
                 cursor -= lineHeight;
                 if (cursor < flowBox.bottom && end < paragraph.text.size()) {
-                    if (page + 1U >= writer_.GetPageCount()) writer_.AddPage();
+                    if (page + 1U >= writer_.GetPageCount()) (void)writer_.AddPage();
                     ++page;
                     cursor = flowBox.top - paragraph.fontSize;
                 }
@@ -135,7 +135,7 @@ PdfDocumentLayout::LayoutResult PdfDocumentLayout::FlowParagraphs(
             const auto lines = SplitLines(paragraph.text, usableWidth, paragraph);
             const double lineHeight = font->GetLineHeight(paragraph.fontSize, paragraph.lineSpacing);
             if (y - lines.size() * lineHeight < flowBox.bottom) {
-                if (page + 1U >= writer_.GetPageCount()) writer_.AddPage();
+                if (page + 1U >= writer_.GetPageCount()) (void)writer_.AddPage();
                 ++page;
                 y = flowBox.top;
             }

@@ -383,7 +383,8 @@ std::string appearanceCommands(
     const FieldNode& node,
     const PdfRectangle& localBox,
     const PdfFormAppearanceOptions& options,
-    const bool absoluteCoordinates) {
+    const bool absoluteCoordinates,
+    const std::optional<bool> buttonSelected = std::nullopt) {
     const double x = absoluteCoordinates ? localBox.left : 0.0;
     const double y = absoluteCoordinates ? localBox.bottom : 0.0;
     const double width = std::max(1.0, localBox.width());
@@ -398,7 +399,8 @@ std::string appearanceCommands(
     }
     if (fieldType(node.fieldType) == PdfFormFieldType::Button) {
         const std::string value = objectTextValue(&node.inheritedValue);
-        if (!value.empty() && value != "Off") {
+        const bool selected = buttonSelected.value_or(!value.empty() && value != "Off");
+        if (selected) {
             const double inset = std::max(2.0, std::min(width, height) * 0.20);
             stream << "1 w " << (x + inset) << ' ' << (y + inset) << " m "
                    << (x + width - inset) << ' ' << (y + height - inset) << " l S\n"
@@ -493,7 +495,18 @@ std::vector<PdfFormFieldInfo> PdfAcroForm::GetFields(const PdfDocument& document
         info.readOnly = (node.flags & 1U) != 0U;
         info.required = (node.flags & 2U) != 0U;
         info.noExport = (node.flags & 4U) != 0U;
+        info.radio = info.type == PdfFormFieldType::Button && (info.flags & 32768U) != 0U;
         info.checked = info.type == PdfFormFieldType::Button && !info.value.empty() && info.value != "Off";
+        if (info.type == PdfFormFieldType::Choice) {
+            if (const PdfArray* selected = node.dictionary.Find(PdfName("I"))
+                    ? node.dictionary.Find(PdfName("I"))->AsArray() : nullptr) {
+                for (const auto& item : selected->values()) {
+                    if (const auto index = item.AsInteger(); index && *index >= 0) {
+                        info.selectedIndices.push_back(static_cast<std::size_t>(*index));
+                    }
+                }
+            }
+        }
         for (const auto& widget : node.widgets) {
             const std::uint64_t key = (static_cast<std::uint64_t>(widget.objectNumber) << 16U) | widget.generation;
             if (const auto found = pageMap.find(key); found != pageMap.end()) {
@@ -545,17 +558,41 @@ PdfFormUpdateResult PdfAcroForm::SetFieldValues(
             throw PdfException(PdfErrorCode::UnsupportedFeature, "Signature field values cannot be set as text.");
         }
         if (type == PdfFormFieldType::Button) {
+            const bool radio = (node.flags & 32768U) != 0U;
             const bool checked = checkedValue(update.value);
             const std::string onState = node.widgets.empty() ? "Yes" : widgetOnState(document, node.widgets.front());
-            revised.Put(PdfName("V"), PdfObject(PdfName(checked ? onState : "Off")));
+            revised.Put(PdfName("V"), PdfObject(PdfName(
+                radio ? (update.value == "Off" ? "Off" : update.value) : (checked ? onState : "Off"))));
             for (const auto& widgetReference : node.widgets) {
                 const PdfDictionary* originalWidget = document.GetObject(widgetReference).AsDictionary();
                 if (!originalWidget) continue;
                 PdfDictionary widget = deepCloneDictionary(*originalWidget);
-                widget.Put(PdfName("AS"), PdfObject(PdfName(checked ? onState : "Off")));
+                const std::string widgetState = radio
+                    ? (update.value != "Off" && widgetOnState(document, widgetReference) == update.value
+                        ? update.value : "Off")
+                    : (checked ? onState : "Off");
+                widget.Put(PdfName("AS"), PdfObject(PdfName(widgetState)));
                 revisions[widgetReference.objectNumber] = {widgetReference, std::move(widget)};
                 ++result.updatedWidgetCount;
             }
+        } else if (type == PdfFormFieldType::Choice && !update.selections.empty()) {
+            if ((node.flags & (1U << 21U)) == 0U) {
+                throw PdfException(PdfErrorCode::InvalidArgument,
+                                   "Multiple selections require a multi-select choice field.");
+            }
+            PdfArray values;
+            PdfArray indices;
+            const auto optionsList = parseOptions(node.dictionary.Find(PdfName("Opt")));
+            for (const auto& selection : update.selections) {
+                const auto option = std::find(optionsList.begin(), optionsList.end(), selection);
+                if (option == optionsList.end()) {
+                    throw PdfException(PdfErrorCode::InvalidArgument, "Choice option not found: " + selection);
+                }
+                values.push_back(PdfObject(selection));
+                indices.push_back(PdfObject(static_cast<std::int64_t>(option - optionsList.begin())));
+            }
+            revised.Put(PdfName("V"), PdfObject(std::move(values)));
+            revised.Put(PdfName("I"), PdfObject(std::move(indices)));
         } else {
             revised.Put(PdfName("V"), PdfObject(update.value));
         }
@@ -628,7 +665,11 @@ PdfFormAppearanceResult PdfAcroForm::GenerateAppearances(
             streamDictionary.Put(PdfName("FormType"), PdfObject(static_cast<std::int64_t>(1)));
             streamDictionary.Put(PdfName("BBox"), rectangleArray(local));
             streamDictionary.Put(PdfName("Resources"), PdfObject(formResources()));
-            const std::string commands = appearanceCommands(node, local, options, false);
+            const std::optional<bool> selected = fieldType(node.fieldType) == PdfFormFieldType::Button
+                ? std::optional<bool>(objectTextValue(&node.inheritedValue) != "Off" &&
+                    objectTextValue(&node.inheritedValue) == widgetOnState(document, widgetReference))
+                : std::nullopt;
+            const std::string commands = appearanceCommands(node, local, options, false, selected);
             const PdfReference appearanceReference{nextObject++, 0U};
             revisions[appearanceReference.objectNumber] = {
                 appearanceReference,

@@ -70,7 +70,7 @@ public:
     template <typename Callable>
     void Run(std::string_view name, Callable&& callable) {
         ++total_;
-        std::cout << "[ RUN      ] " << name << '\n';
+        std::cout << "[ RUN      ] " << name << '\n' << std::flush;
         const auto start = std::chrono::steady_clock::now();
 
         try {

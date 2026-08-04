@@ -459,13 +459,14 @@ PdfCffFont PdfCffParser::ParseFont(const std::span<const std::byte> bytes) {
     PdfCffFont result;
     result.data.assign(bytes.begin(), bytes.end());
     result.isCID = isCID;
+    const std::span<const std::byte> ownedBytes(result.data);
 
     std::size_t offset = headerSize;
-    const auto names = ParseIndex(bytes, offset);
-    const auto tops = ParseIndex(bytes, offset);
-    const auto strings = ParseIndex(bytes, offset);
+    const auto names = ParseIndex(ownedBytes, offset);
+    const auto tops = ParseIndex(ownedBytes, offset);
+    const auto strings = ParseIndex(ownedBytes, offset);
     (void)strings;
-    result.globalSubrs = ParseIndex(bytes, offset);
+    result.globalSubrs = ParseIndex(ownedBytes, offset);
 
     if (names.objects.empty() || tops.objects.empty()) throw std::runtime_error("CFF font indexes are empty.");
     result.name.assign(reinterpret_cast<const char*>(names.objects.front().data()), names.objects.front().size());
@@ -482,7 +483,7 @@ PdfCffFont PdfCffParser::ParseFont(const std::span<const std::byte> bytes) {
     if (result.top.charStringsOffset == 0U || result.top.charStringsOffset >= bytes.size()) throw std::runtime_error("CFF CharStrings offset is invalid.");
 
     std::size_t charStringsOffset = result.top.charStringsOffset;
-    result.charStrings = ParseIndex(bytes, charStringsOffset);
+    result.charStrings = ParseIndex(ownedBytes, charStringsOffset);
     result.glyphCount = static_cast<std::uint32_t>(result.charStrings.objects.size());
     if (result.glyphCount == 0U) throw std::runtime_error("CFF CharStrings INDEX is empty.");
 
@@ -490,7 +491,7 @@ PdfCffFont PdfCffParser::ParseFont(const std::span<const std::byte> bytes) {
     if (result.top.privateSize > 0U && result.top.privateOffset < bytes.size()) {
         const std::size_t privateEnd = std::min(
             static_cast<std::size_t>(result.top.privateOffset) + result.top.privateSize, bytes.size());
-        for (const auto& entry : ParseDict(bytes.subspan(result.top.privateOffset, privateEnd - result.top.privateOffset))) {
+        for (const auto& entry : ParseDict(ownedBytes.subspan(result.top.privateOffset, privateEnd - result.top.privateOffset))) {
             if (entry.operatorCode == 20U && !entry.operands.empty()) result.privateDict.defaultWidthX = entry.operands.front();
             else if (entry.operatorCode == 21U && !entry.operands.empty()) result.privateDict.nominalWidthX = entry.operands.front();
             else if (entry.operatorCode == 19U && entry.operands.size() >= 2U) {
@@ -502,7 +503,7 @@ PdfCffFont PdfCffParser::ParseFont(const std::span<const std::byte> bytes) {
             const std::size_t subrsEnd = std::min(
                 static_cast<std::size_t>(result.privateDict.subrsOffset) + result.privateDict.subrsSize, bytes.size());
             std::size_t subrsOffset = result.privateDict.subrsOffset;
-            result.localSubrs = ParseIndex(bytes.subspan(result.privateDict.subrsOffset, subrsEnd - result.privateDict.subrsOffset), subrsOffset);
+            result.localSubrs = ParseIndex(ownedBytes.subspan(result.privateDict.subrsOffset, subrsEnd - result.privateDict.subrsOffset), subrsOffset);
             result.hasLocalSubrs = !result.localSubrs.objects.empty();
         }
     }

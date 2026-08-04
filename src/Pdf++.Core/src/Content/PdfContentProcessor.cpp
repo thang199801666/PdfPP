@@ -515,7 +515,7 @@ void PdfContentProcessor::Process(
                     pattern = name->value;
                     std::vector<double> tint;
                     for (std::size_t i = 0; i + 1U < operands.size(); ++i) {
-                        if (const auto* number = std::get_if<double>(&operands[i])) tint.push_back(*number);
+                        if (const auto* numericValue = std::get_if<double>(&operands[i])) tint.push_back(*numericValue);
                     }
                     if (tint.empty()) tint = {1.0};
                     Emit(handler_, token == "SCN" ? PdfContentEventType::SetStrokeColor : PdfContentEventType::SetFillColor,
@@ -526,7 +526,7 @@ void PdfContentProcessor::Process(
             // Non-pattern scn: treat as set-color with numeric operands.
             std::vector<double> values;
             for (const auto& operand : operands) {
-                if (const auto* number = std::get_if<double>(&operand)) values.push_back(std::clamp(*number, 0.0, 1.0));
+                if (const auto* numericValue = std::get_if<double>(&operand)) values.push_back(std::clamp(*numericValue, 0.0, 1.0));
             }
             auto& color = token == "SCN" ? textState.strokeColor : textState.fillColor;
             if (values.size() >= 3U) color = {values[0], values[1], values[2]};

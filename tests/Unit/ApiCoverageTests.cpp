@@ -498,7 +498,48 @@ void TestAnnotationsAndHighlight(const std::filesystem::path& base) {
 }
 
 void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
-    // FreeText, Ink, Polygon, Polyline, Square, Circle and Stamp types.
+    const auto attachmentSource = TempPath("pdfpp_api_attachment_source.pdf");
+    const auto attachmentEdited = TempPath("pdfpp_api_attachment_edited.pdf");
+    {
+        PdfWriter attachmentWriter;
+        attachmentWriter.AddPage({0, 0, 300, 400});
+        const std::array<std::byte, 4> attachmentBytes{
+            std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
+        attachmentWriter.AddEmbeddedFile("note.bin", attachmentBytes);
+        attachmentWriter.Save(attachmentSource);
+    }
+    PdfAnnotation fileAttachment;
+    fileAttachment.pageIndex = 0;
+    fileAttachment.type = PdfAnnotationType::FileAttachment;
+    fileAttachment.rectangle = {30, 300, 60, 330};
+    fileAttachment.attachmentName = "note.bin";
+    const auto attachmentResult = PdfAnnotationEditor::AddAnnotations(
+        attachmentSource, attachmentEdited, {fileAttachment});
+    PDFPP_TEST_CHECK(attachmentResult.annotationCount == 1U);
+    const auto attachmentDocument = PdfDocument::Open(attachmentEdited);
+    const auto* attachmentPage = attachmentDocument.GetObject(
+        attachmentDocument.GetPageReference(0U)).AsDictionary();
+    const auto* attachmentAnnotations = attachmentPage
+        ? attachmentPage->GetAsArray(PdfName("Annots")) : nullptr;
+    PDFPP_TEST_CHECK(attachmentAnnotations != nullptr && attachmentAnnotations->size() == 1U);
+    const auto attachmentReference = attachmentAnnotations->at(0U).AsReference();
+    PDFPP_TEST_CHECK(attachmentReference.has_value());
+    const auto* attachmentDictionary = attachmentReference
+        ? attachmentDocument.GetObject(PdfReference{attachmentReference->first, attachmentReference->second}).AsDictionary()
+        : nullptr;
+    PDFPP_TEST_CHECK(attachmentDictionary != nullptr);
+    PDFPP_TEST_CHECK(attachmentDictionary->Find(PdfName("FS")) != nullptr);
+    const auto attachmentXfdf = TempPath("pdfpp_api_attachment.xfdf");
+    const auto attachmentReimported = TempPath("pdfpp_api_attachment_reimported.pdf");
+    const auto attachmentExport = PdfXfdf::ExportAnnotations(
+        attachmentEdited, 0U, attachmentXfdf);
+    PDFPP_TEST_CHECK(attachmentExport.annotationCount == 1U);
+    PDFPP_TEST_CHECK(ReadBytesAsString(attachmentXfdf).find("name=\"note.bin\"") != std::string::npos);
+    const auto attachmentImport = PdfXfdf::ImportAnnotations(
+        attachmentSource, 0U, attachmentXfdf, attachmentReimported);
+    PDFPP_TEST_CHECK(attachmentImport.addedCount == 1U);
+
+    // FreeText, Ink, Line, Polygon, Polyline, Square, Circle and Stamp types.
     const auto advanced = TempPath("pdfpp_api_advanced_annotations.pdf");
     std::vector<PdfAnnotation> annotations;
     {
@@ -555,6 +596,17 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
         annotations.push_back(circle);
     }
     {
+        PdfAnnotation line;
+        line.pageIndex = 0;
+        line.type = PdfAnnotationType::Line;
+        line.rectangle = {140, 210, 280, 250};
+        line.vertices = {{145, 215}, {275, 245}};
+        line.lineStart = PdfLineEndStyle::ClosedArrow;
+        line.lineEnd = PdfLineEndStyle::OpenArrow;
+        line.borderWidth = 2.0;
+        annotations.push_back(line);
+    }
+    {
         PdfAnnotation stamp;
         stamp.pageIndex = 0;
         stamp.type = PdfAnnotationType::Stamp;
@@ -571,10 +623,11 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
         advancedDocument.GetPageReference(0U)).AsDictionary();
     PDFPP_TEST_CHECK(advancedPage != nullptr);
     const PdfArray* advancedAnnots = advancedPage->GetAsArray(PdfName("Annots"));
-    PDFPP_TEST_CHECK(advancedAnnots != nullptr && advancedAnnots->size() == 7U);
+    PDFPP_TEST_CHECK(advancedAnnots != nullptr && advancedAnnots->size() == 8U);
     bool foundFreeText = false;
     bool foundInkList = false;
     bool foundVertices = false;
+    bool foundLine = false;
     bool foundDraft = false;
     for (const auto& value : advancedAnnots->values()) {
         const auto reference = value.AsReference();
@@ -587,6 +640,7 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
         if (subtypeName && subtypeName->value() == "FreeText") foundFreeText = true;
         if (annotation->Find(PdfName("InkList"))) foundInkList = true;
         if (annotation->Find(PdfName("Vertices"))) foundVertices = true;
+        if (subtypeName && subtypeName->value() == "Line" && annotation->Find(PdfName("L"))) foundLine = true;
         const PdfObject* stampName = annotation->Find(PdfName("Name"));
         const auto stamp = stampName ? stampName->AsName() : nullptr;
         if (stamp && stamp->value() == "Draft") foundDraft = true;
@@ -594,6 +648,7 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     PDFPP_TEST_CHECK(foundFreeText);
     PDFPP_TEST_CHECK(foundInkList);
     PDFPP_TEST_CHECK(foundVertices);
+    PDFPP_TEST_CHECK(foundLine);
     PDFPP_TEST_CHECK(foundDraft);
 
     // RemoveAnnotations: drop just the FreeText entry, keep the rest.
@@ -606,12 +661,12 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     const PdfDictionary* removedPage = removedDocument.GetObject(
         removedDocument.GetPageReference(0U)).AsDictionary();
     const PdfArray* keptAnnots = removedPage->GetAsArray(PdfName("Annots"));
-    PDFPP_TEST_CHECK(keptAnnots != nullptr && keptAnnots->size() == 6U);
+    PDFPP_TEST_CHECK(keptAnnots != nullptr && keptAnnots->size() == 7U);
 
     // RemoveAnnotations with no filter removes everything.
     const auto removedAll = TempPath("pdfpp_api_removed_all.pdf");
     const auto removeAllResult = PdfAnnotationEditor::RemoveAnnotations(advanced, removedAll, 0U);
-    PDFPP_TEST_CHECK(removeAllResult.removedCount == 7U);
+    PDFPP_TEST_CHECK(removeAllResult.removedCount == 8U);
     auto removedAllDocument = PdfDocument::Open(removedAll);
     const PdfDictionary* clearedPage = removedAllDocument.GetObject(
         removedAllDocument.GetPageReference(0U)).AsDictionary();
@@ -629,7 +684,7 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     // XFDF export then import round trip.
     const auto xfdfPath = TempPath("pdfpp_api_annotations.xfdf");
     const auto exportResult = PdfXfdf::ExportAnnotations(advanced, 0U, xfdfPath);
-    PDFPP_TEST_CHECK(exportResult.annotationCount == 7U);
+    PDFPP_TEST_CHECK(exportResult.annotationCount == 8U);
     const std::string xfdfBytes = ReadBytesAsString(xfdfPath);
     PDFPP_TEST_CHECK(xfdfBytes.find("<xfdf") != std::string::npos);
     PDFPP_TEST_CHECK(xfdfBytes.find("<freetext") != std::string::npos);
@@ -637,20 +692,20 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
 
     const auto reimported = TempPath("pdfpp_api_xfdf_reimported.pdf");
     const auto importResult = PdfXfdf::ImportAnnotations(base, 0U, xfdfPath, reimported);
-    PDFPP_TEST_CHECK(importResult.addedCount >= 7U);
+    PDFPP_TEST_CHECK(importResult.addedCount >= 8U);
     auto reimportedDocument = PdfDocument::Open(reimported);
     PDFPP_TEST_CHECK(reimportedDocument.GetPageCount() == 2U);
 
     // GenerateAppearances: every annotation gets an /AP /N Form XObject.
     const auto appeared = TempPath("pdfpp_api_appeared_annotations.pdf");
     const auto appearanceResult = PdfAnnotationEditor::GenerateAppearances(advanced, appeared, 0U);
-    PDFPP_TEST_CHECK(appearanceResult.appearanceCount == 7U);
+    PDFPP_TEST_CHECK(appearanceResult.appearanceCount == 8U);
     PDFPP_TEST_CHECK(appearanceResult.modifiedPageCount == 1U);
     auto appearedDocument = PdfDocument::Open(appeared);
     const PdfDictionary* appearedPage = appearedDocument.GetObject(
         appearedDocument.GetPageReference(0U)).AsDictionary();
     const PdfArray* appearedAnnots = appearedPage->GetAsArray(PdfName("Annots"));
-    PDFPP_TEST_CHECK(appearedAnnots != nullptr && appearedAnnots->size() == 7U);
+    PDFPP_TEST_CHECK(appearedAnnots != nullptr && appearedAnnots->size() == 8U);
     std::size_t apCount = 0U;
     for (const auto& value : appearedAnnots->values()) {
         const auto ref = value.AsReference();
@@ -659,14 +714,14 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
             PdfReference{ref->first, ref->second}).AsDictionary();
         if (annotation && annotation->Find(PdfName("AP"))) ++apCount;
     }
-    PDFPP_TEST_CHECK(apCount == 7U);
+    PDFPP_TEST_CHECK(apCount == 8U);
 
     // FlattenAnnotations: burn annotations into the page and remove them from
     // /Annots, then verify the rendered text is preserved.
     const auto flattened = TempPath("pdfpp_api_flattened_annotations.pdf");
     const auto flattenResult = PdfAnnotationEditor::FlattenAnnotations(advanced, flattened, 0U);
-    PDFPP_TEST_CHECK(flattenResult.flattenedCount == 7U);
-    PDFPP_TEST_CHECK(flattenResult.removedCount == 7U);
+    PDFPP_TEST_CHECK(flattenResult.flattenedCount == 8U);
+    PDFPP_TEST_CHECK(flattenResult.removedCount == 8U);
     PDFPP_TEST_CHECK(flattenResult.modifiedPageCount == 1U);
     auto flattenedDocument = PdfDocument::Open(flattened);
     const PdfDictionary* flattenedPage = flattenedDocument.GetObject(
@@ -685,7 +740,7 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     const PdfDictionary* partialPage = partialDocument.GetObject(
         partialDocument.GetPageReference(0U)).AsDictionary();
     const PdfArray* partialAnnots = partialPage->GetAsArray(PdfName("Annots"));
-    PDFPP_TEST_CHECK(partialAnnots != nullptr && partialAnnots->size() == 5U);
+    PDFPP_TEST_CHECK(partialAnnots != nullptr && partialAnnots->size() == 6U);
 
     // Replies and popups: a TextNote with a popup, and a reply targeting it.
     const auto threaded = TempPath("pdfpp_api_threaded.pdf");
@@ -749,6 +804,10 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     std::filesystem::remove(flattened);
     std::filesystem::remove(partialFlattened);
     std::filesystem::remove(threaded);
+    std::filesystem::remove(attachmentSource);
+    std::filesystem::remove(attachmentEdited);
+    std::filesystem::remove(attachmentXfdf);
+    std::filesystem::remove(attachmentReimported);
 }
 
 void TestAcroFormCalculations() {
@@ -806,6 +865,105 @@ void TestAcroFormCalculations() {
     std::filesystem::remove(input);
     std::filesystem::remove(updated);
     std::filesystem::remove(calcOutput);
+}
+
+void TestRadioGroupStates() {
+    std::ostringstream pdf;
+    pdf << "%PDF-1.7\n";
+    std::array<std::size_t, 8> offsets{};
+    const auto object = [&](const std::size_t number, const std::string& body) {
+        offsets[number] = static_cast<std::size_t>(pdf.tellp());
+        pdf << number << " 0 obj\n" << body << "\nendobj\n";
+    };
+    object(1, "<< /Type /Catalog /Pages 2 0 R /AcroForm 7 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Annots [5 0 R 6 0 R] >>");
+    object(4, "<< /FT /Btn /T (choice) /Ff 32768 /V /A /Kids [5 0 R 6 0 R] >>");
+    object(5, "<< /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [20 20 80 40] "
+              "/AP << /N << /A <<>> /Off <<>> >> >> /AS /A >>");
+    object(6, "<< /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [20 50 80 70] "
+              "/AP << /N << /B <<>> /Off <<>> >> >> /AS /Off >>");
+    object(7, "<< /Fields [4 0 R] >>");
+    const auto xref = static_cast<std::size_t>(pdf.tellp());
+    pdf << "xref\n0 8\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i < offsets.size(); ++i) {
+        pdf << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    pdf << "trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n" << xref << "\n%%EOF\n";
+    const auto input = TempPath("pdfpp_api_radio_input.pdf");
+    const auto output = TempPath("pdfpp_api_radio_output.pdf");
+    { std::ofstream file(input, std::ios::binary); file << pdf.str(); }
+    const auto fields = PdfAcroForm::GetFields(input);
+    PDFPP_TEST_CHECK(fields.size() == 1U);
+    PDFPP_TEST_CHECK(fields.front().radio);
+    PDFPP_TEST_CHECK(fields.front().widgetReferences.size() == 2U);
+    const auto update = PdfAcroForm::SetFieldValues(input, output, {{"choice", "B"}});
+    PDFPP_TEST_CHECK(update.updatedFieldCount == 1U && update.updatedWidgetCount == 2U);
+    const auto updated = PdfDocument::Open(output);
+    const auto updatedFields = PdfAcroForm::GetFields(updated);
+    PDFPP_TEST_CHECK(updatedFields.front().value == "B");
+    const auto* first = updated.GetObject(updatedFields.front().widgetReferences[0]).AsDictionary();
+    const auto* second = updated.GetObject(updatedFields.front().widgetReferences[1]).AsDictionary();
+    PDFPP_TEST_CHECK(first && second);
+    PDFPP_TEST_CHECK(first->GetAsName(PdfName("AS"))->value() == "Off");
+    PDFPP_TEST_CHECK(second->GetAsName(PdfName("AS"))->value() == "B");
+    const auto appearancePath = TempPath("pdfpp_api_radio_appearances.pdf");
+    const auto appearance = PdfAcroForm::GenerateAppearances(output, appearancePath);
+    PDFPP_TEST_CHECK(appearance.generatedAppearanceCount == 2U);
+    const auto appeared = PdfDocument::Open(appearancePath);
+    const auto appearedFields = PdfAcroForm::GetFields(appeared);
+    const auto readAppearance = [&](const PdfReference reference) {
+        const auto* widget = appeared.GetObject(reference).AsDictionary();
+        const auto* ap = widget ? widget->GetAsDictionary(PdfName("AP")) : nullptr;
+        const auto n = ap ? ap->Find(PdfName("N")) : nullptr;
+        const auto nReference = n ? n->AsReference() : std::nullopt;
+        const auto* stream = nReference
+            ? appeared.GetObject(PdfReference{nReference->first, nReference->second}).AsStream() : nullptr;
+        return stream ? std::string(reinterpret_cast<const char*>(stream->bytes().data()), stream->bytes().size()) : std::string{};
+    };
+    PDFPP_TEST_CHECK(readAppearance(appearedFields.front().widgetReferences[0]).find("1 w ") == std::string::npos);
+    PDFPP_TEST_CHECK(readAppearance(appearedFields.front().widgetReferences[1]).find("1 w ") != std::string::npos);
+    std::filesystem::remove(input);
+    std::filesystem::remove(output);
+    std::filesystem::remove(appearancePath);
+}
+
+void TestChoiceMultiSelect() {
+    std::ostringstream pdf;
+    pdf << "%PDF-1.7\n";
+    std::array<std::size_t, 6> offsets{};
+    const auto object = [&](const std::size_t number, const std::string& body) {
+        offsets[number] = static_cast<std::size_t>(pdf.tellp());
+        pdf << number << " 0 obj\n" << body << "\nendobj\n";
+    };
+    object(1, "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>");
+    object(4, "<< /FT /Ch /T (colors) /Ff 2097152 /Opt [(Red) (Green) (Blue)] "
+              "/V [(Red)] /I [0] >>");
+    object(5, "<< /Fields [4 0 R] >>");
+    const auto xref = static_cast<std::size_t>(pdf.tellp());
+    pdf << "xref\n0 6\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i < offsets.size(); ++i) {
+        pdf << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    pdf << "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" << xref << "\n%%EOF\n";
+    const auto input = TempPath("pdfpp_api_choice_input.pdf");
+    const auto output = TempPath("pdfpp_api_choice_output.pdf");
+    { std::ofstream file(input, std::ios::binary); file << pdf.str(); }
+    const auto fields = PdfAcroForm::GetFields(input);
+    PDFPP_TEST_CHECK(fields.size() == 1U);
+    PDFPP_TEST_CHECK(fields.front().options.size() == 3U);
+    PDFPP_TEST_CHECK(fields.front().selectedIndices.size() == 1U && fields.front().selectedIndices[0] == 0U);
+    const auto update = PdfAcroForm::SetFieldValues(
+        input, output, {PdfFormFieldUpdate{"colors", {}, {"Red", "Blue"}}});
+    PDFPP_TEST_CHECK(update.updatedFieldCount == 1U);
+    const auto updated = PdfDocument::Open(output);
+    const auto updatedFields = PdfAcroForm::GetFields(updated);
+    PDFPP_TEST_CHECK(updatedFields.front().selectedIndices.size() == 2U);
+    PDFPP_TEST_CHECK(updatedFields.front().selectedIndices[1] == 2U);
+    std::filesystem::remove(input);
+    std::filesystem::remove(output);
 }
 
 void TestCApi() {
@@ -1145,6 +1303,8 @@ int RunApiCoverageTests() {
     runner.Run("API.AnnotationsAndHighlight", [&] { TestAnnotationsAndHighlight(base); });
     runner.Run("API.AdvancedAnnotationsAndXfdf", [&] { TestAdvancedAnnotationsAndXfdf(base); });
     runner.Run("API.AcroFormCalculations", TestAcroFormCalculations);
+    runner.Run("API.RadioGroupStates", TestRadioGroupStates);
+    runner.Run("API.ChoiceMultiSelect", TestChoiceMultiSelect);
     runner.Run("API.CApi", TestCApi);
     std::filesystem::remove(base);
     return runner.PrintSummary("Public API coverage");

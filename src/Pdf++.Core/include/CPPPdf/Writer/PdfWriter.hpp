@@ -268,6 +268,10 @@ public:
     [[nodiscard]] bool IsTaggedPdf() const noexcept;
     void SetLanguage(std::string langCode);
     [[nodiscard]] const std::string& GetLanguage() const noexcept;
+    void SetTaggedRoleMap(std::string customRole, std::string standardRole);
+    void ClearTaggedRoleMap() noexcept;
+    void SetTaggedDocumentAlternativeText(std::string altText);
+    [[nodiscard]] const std::string& GetTaggedDocumentAlternativeText() const noexcept;
     void AddPageLabel(std::size_t pageIndex, const PdfPageLabelOptions& options);
     void RemovePageLabel(std::size_t pageIndex);
     void ClearPageLabels() noexcept;
@@ -284,6 +288,10 @@ public:
     void AddNamedDestinationLink(std::size_t pageIndex, std::string destinationName,
                                  const PdfLinkOptions& options);
     void AddUriLink(std::size_t pageIndex, std::string uri, const PdfLinkOptions& options);
+    void AddRemoteLink(std::size_t pageIndex, std::string fileName,
+                       std::string destination, const PdfLinkOptions& options);
+    void AddLaunchLink(std::size_t pageIndex, std::string fileName,
+                       const PdfLinkOptions& options);
     void ClearLinks(std::size_t pageIndex);
     [[nodiscard]] std::size_t GetLinkCount(std::size_t pageIndex) const;
 

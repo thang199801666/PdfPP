@@ -3212,9 +3212,9 @@ std::optional<PdfResolvedPattern> PdfDocument::ResolveTilingPattern(
     result.tiling.yStep = objectNumberValue(patternDictionary->Find(PdfName("YStep"))
         ? *patternDictionary->Find(PdfName("YStep")) : PdfObject(1.0), 1.0);
     result.tiling.paintType = patternDictionary->Find(PdfName("PaintType")) ?
-        patternDictionary->Find(PdfName("PaintType"))->AsInteger().value_or(1) : 1U;
+        static_cast<std::uint32_t>(patternDictionary->Find(PdfName("PaintType"))->AsInteger().value_or(1)) : 1U;
     result.tiling.tilingType = patternDictionary->Find(PdfName("TilingType")) ?
-        patternDictionary->Find(PdfName("TilingType"))->AsInteger().value_or(1) : 1U;
+        static_cast<std::uint32_t>(patternDictionary->Find(PdfName("TilingType"))->AsInteger().value_or(1)) : 1U;
     if (const auto* matrix = patternDictionary->GetAsArray(PdfName("Matrix")); matrix && matrix->size() >= 6U) {
         for (std::size_t index = 0U; index < 6U; ++index) {
             result.tiling.matrix[index] = objectNumberValue(matrix->at(index), index == 0U || index == 3U ? 1.0 : 0.0);

@@ -1146,6 +1146,7 @@ void PaintTilingPattern(PdfBitmap& bitmap, const PdfResolvedPattern& pattern,
                         const std::vector<Subpath>& paths, const CoordinateMapper& mapper,
                         const ClipRegion& clip, const std::array<double, 6>& ctm,
                         const double alpha, const bool renderPaths) {
+    (void)clip;
     if (!renderPaths) return;
     if (pattern.patternType != 1U) return;
     double minX, minY, maxX, maxY;
@@ -1660,6 +1661,7 @@ std::vector<PdfRenderResult> PdfPageRenderer::RenderAllPagesParallel(
         concurrency = static_cast<std::size_t>(std::thread::hardware_concurrency());
         if (concurrency == 0U) concurrency = 2U;
     }
+    concurrency = std::min(concurrency, count);
 
     std::atomic<std::size_t> next{0U};
     std::vector<std::thread> workers;

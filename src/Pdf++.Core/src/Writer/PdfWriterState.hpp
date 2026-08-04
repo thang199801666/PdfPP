@@ -58,11 +58,12 @@ struct PdfWriterNamedDestination {
     std::optional<double> top{};
     std::optional<double> zoom{};
 };
-enum class PdfWriterLinkKind { NamedDestination, Uri };
+enum class PdfWriterLinkKind { NamedDestination, Uri, Remote, Launch };
 struct PdfWriterLink {
     PdfWriterLinkKind kind{PdfWriterLinkKind::NamedDestination};
     std::string target;
     PdfLinkOptions options{};
+    std::string destination;
 };
 
 struct PdfWriterEmbeddedFile {
@@ -109,6 +110,8 @@ struct PdfWriterState {
     PdfViewerPreferences viewerPreferences{};
     std::optional<PdfDestinationOptions> openAction{};
     bool tagged{false};
+    std::vector<std::pair<std::string, std::string>> taggedRoleMap;
+    std::string taggedAltText;
     bool writeXmpMetadata{false};
     std::string language;
     std::vector<PdfWriterPageLabel> pageLabels;

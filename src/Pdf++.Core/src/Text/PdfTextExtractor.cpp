@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <limits>
+#include <charconv>
 #include <unordered_map>
 #include <utility>
 
@@ -62,6 +63,44 @@ PdfRectangle BoundsFromPoints(const std::array<PdfPoint, 4>& points) noexcept {
 }
 
 } // namespace
+
+std::vector<PdfMarkedContentSpan> PdfTextExtractor::ExtractMarkedContent(
+    const std::string_view content) {
+    std::vector<PdfMarkedContentSpan> spans;
+    std::vector<std::size_t> active;
+    PdfContentProcessor processor;
+    processor.SetHandler([&](const PdfContentEvent& event) {
+        if (event.type == PdfContentEventType::BeginMarkedContent) {
+            PdfMarkedContentSpan span;
+            span.tag = event.text;
+            span.property = event.markedContentProperty;
+            span.depth = active.size();
+            const auto marker = span.property.find("/MCID");
+            if (marker != std::string::npos) {
+                std::size_t begin = marker + 5U;
+                while (begin < span.property.size() &&
+                       std::isspace(static_cast<unsigned char>(span.property[begin]))) ++begin;
+                std::uint32_t value{};
+                const auto parsed = std::from_chars(
+                    span.property.data() + begin,
+                    span.property.data() + span.property.size(), value);
+                if (parsed.ec == std::errc{}) span.mcid = value;
+            }
+            spans.push_back(std::move(span));
+            active.push_back(spans.size() - 1U);
+            return;
+        }
+        if (event.type == PdfContentEventType::EndMarkedContent) {
+            if (!active.empty()) active.pop_back();
+            return;
+        }
+        if (event.type == PdfContentEventType::RenderText && !event.text.empty()) {
+            for (const auto index : active) spans[index].encodedText += event.text;
+        }
+    });
+    processor.Process(content);
+    return spans;
+}
 
 std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
     const std::string_view content,
@@ -148,6 +187,8 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
             return;
         }
         if (event.type != PdfContentEventType::RenderText || event.text.empty()) return;
+
+        const bool invisibleText = event.textState.renderingMode == 3;
 
         if (!hasPosition) {
             currentX = event.textState.textMatrix[4];
@@ -257,6 +298,12 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
                 currentX += width;
                 return;
             }
+        }
+        if (invisibleText && request.options.ignoreInvisibleText) {
+            // Invisible text still advances the text matrix, but is not
+            // exposed as extracted content by default.
+            currentX += width;
+            return;
         }
         chunks.push_back(std::move(chunk));
         currentX += width;

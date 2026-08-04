@@ -15,6 +15,8 @@ enum class PdfAnnotationType {
     StrikeOut,
     TextNote,
     Link,
+    Line,
+    FileAttachment,
     FreeText,
     Ink,
     Polygon,
@@ -76,6 +78,8 @@ struct PdfAnnotation final {
     int textAlignment{0};
     // Stamp name (e.g. /Approved, /Draft, /Confidential).
     std::string stampName;
+    // Existing embedded-file name used by FileAttachment annotations.
+    std::string attachmentName;
     // Reply thread: set inReplyTo to the 1-based annotation index on the same
     // page to make this annotation a reply to that annotation.
     std::size_t inReplyTo{0U};

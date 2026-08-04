@@ -239,7 +239,9 @@ void TestNamedDestinationsAndLinks() {
     link.borderWidth = 2;
     writer.AddNamedDestinationLink(0, "details", link);
     writer.AddUriLink(0, "https://example.com", link);
-    PDFPP_TEST_CHECK(writer.GetLinkCount(0) == 2);
+    writer.AddRemoteLink(0, "details.pdf", "details", link);
+    writer.AddLaunchLink(0, "viewer.exe", link);
+    PDFPP_TEST_CHECK(writer.GetLinkCount(0) == 4);
     writer.Save(output);
 
     const auto pdf = ReadText(output);
@@ -248,6 +250,10 @@ void TestNamedDestinationsAndLinks() {
     PDFPP_TEST_CHECK(pdf.find("/Subtype /Link") != std::string::npos);
     PDFPP_TEST_CHECK(pdf.find("/S /URI") != std::string::npos);
     PDFPP_TEST_CHECK(pdf.find("(https://example.com)") != std::string::npos);
+    PDFPP_TEST_CHECK(pdf.find("/S /GoToR") != std::string::npos);
+    PDFPP_TEST_CHECK(pdf.find("(details.pdf)") != std::string::npos);
+    PDFPP_TEST_CHECK(pdf.find("/S /Launch") != std::string::npos);
+    PDFPP_TEST_CHECK(pdf.find("(viewer.exe)") != std::string::npos);
 
     writer.ClearLinks(0);
     PDFPP_TEST_CHECK(writer.GetLinkCount(0) == 0);
@@ -357,7 +363,7 @@ void TestShadingRenderingAndSoftMask() {
     // mask has a different size than the image itself.
     std::ostringstream pdf;
     pdf << "%PDF-1.4\n";
-    std::array<std::size_t, 9> offsets{};
+    std::array<std::size_t, 10> offsets{};
     const auto object = [&](const std::size_t number, const std::string& body) {
         offsets[number] = static_cast<std::size_t>(pdf.tellp());
         pdf << number << " 0 obj\n" << body << "\nendobj\n";
@@ -1282,6 +1288,34 @@ void TestPngOutput() {
     std::filesystem::remove(jpegPath);
 }
 
+void TestImageTypeDetection() {
+    const std::array<std::byte, 8> pngSignature{
+        std::byte{0x89}, std::byte{'P'}, std::byte{'N'}, std::byte{'G'},
+        std::byte{'\r'}, std::byte{'\n'}, std::byte{0x1A}, std::byte{'\n'}};
+    const std::array<std::byte, 3> jpegSignature{std::byte{0xFF}, std::byte{0xD8}, std::byte{0xFF}};
+    const std::array<std::byte, 2> bmpSignature{std::byte{'B'}, std::byte{'M'}};
+    const std::array<std::byte, 4> jpxSignature{std::byte{0xFF}, std::byte{0x4F}, std::byte{0xFF}, std::byte{0x51}};
+    const std::array<std::byte, 2> unknownSignature{std::byte{0x01}, std::byte{0x02}};
+
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(pngSignature) == PdfImageType::Png);
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(jpegSignature) == PdfImageType::Jpeg);
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(bmpSignature) == PdfImageType::Bmp);
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(jpxSignature) == PdfImageType::Jpeg2000);
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(unknownSignature) == PdfImageType::Unknown);
+
+    const std::array<std::byte, 12> rgb{
+        std::byte{255}, std::byte{0}, std::byte{0},
+        std::byte{0}, std::byte{255}, std::byte{0},
+        std::byte{0}, std::byte{0}, std::byte{255},
+        std::byte{255}, std::byte{255}, std::byte{255}};
+    const auto png = PdfImage::EncodePng(2U, 2U, rgb);
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(png) == PdfImageType::Png);
+    const auto bmp = PdfImage::EncodeBmp(2U, 2U, rgb);
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(bmp) == PdfImageType::Bmp);
+    const auto jpeg = PdfImage::EncodeJpeg(2U, 2U, rgb, 90);
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(jpeg) == PdfImageType::Jpeg);
+}
+
 void TestPageContentStream() {
     const auto output = TempPath("pdfpp_feature_content.pdf");
     PdfWriter writer;
@@ -1351,6 +1385,25 @@ void TestTextStateOperators() {
     PDFPP_TEST_CHECK(content.find(" Tw") != std::string::npos);
     PDFPP_TEST_CHECK(content.find(" Tz") != std::string::npos);
     PDFPP_TEST_CHECK(content.find(" Ts") != std::string::npos);
+    const std::string textContent =
+        "BT /F1 12 Tf 3 Tr 20 100 Td (hidden) Tj 0 Tr (visible) Tj ET";
+    const auto visibleChunks = PdfTextExtractor::ExtractChunks(textContent);
+    PDFPP_TEST_CHECK(visibleChunks.size() == 1U);
+    PDFPP_TEST_CHECK(visibleChunks.front().utf8Text == "visible");
+    PdfTextExtractionRequest includeInvisible;
+    includeInvisible.options.ignoreInvisibleText = false;
+    const auto allChunks = PdfTextExtractor::ExtractChunks(textContent, includeInvisible);
+    PDFPP_TEST_CHECK(allChunks.size() == 2U);
+    PDFPP_TEST_CHECK(allChunks.front().renderingMode == 3);
+    PDFPP_TEST_CHECK(allChunks.back().renderingMode == 0);
+    PDFPP_TEST_CHECK(allChunks.back().start.x > allChunks.front().start.x);
+    const auto marked = PdfTextExtractor::ExtractMarkedContent(
+        "/P << /MCID 7 /Lang (en-US) >> BDC BT (marked text) Tj ET EMC");
+    PDFPP_TEST_CHECK(marked.size() == 1U);
+    PDFPP_TEST_CHECK(marked.front().tag == "P");
+    PDFPP_TEST_CHECK(marked.front().mcid.has_value() && *marked.front().mcid == 7U);
+    PDFPP_TEST_CHECK(marked.front().depth == 0U);
+    PDFPP_TEST_CHECK(marked.front().encodedText == "marked text");
     PdfRenderOptions options;
     options.dpi = 72.0;
     const auto bitmap = PdfPageRenderer::Render(document, 0U, options);
@@ -1385,12 +1438,17 @@ void TestTaggedPdf() {
     PDFPP_TEST_CHECK(writer.IsTaggedPdf());
     writer.SetLanguage("en-US");
     PDFPP_TEST_CHECK(writer.GetLanguage() == "en-US");
+    writer.SetTaggedRoleMap("CustomParagraph", "P");
+    writer.SetTaggedDocumentAlternativeText("Accessible document content");
+    PDFPP_TEST_CHECK(writer.GetTaggedDocumentAlternativeText() == "Accessible document content");
     writer.Save(output);
     const std::string bytes = ReadText(output);
     PDFPP_TEST_CHECK(bytes.find("/MarkInfo") != std::string::npos);
     PDFPP_TEST_CHECK(bytes.find("/Marked true") != std::string::npos);
     PDFPP_TEST_CHECK(bytes.find("/Lang (en-US)") != std::string::npos);
     PDFPP_TEST_CHECK(bytes.find("/StructTreeRoot") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/CustomParagraph /P") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Alt (Accessible document content)") != std::string::npos);
     auto document = PdfDocument::Open(output);
     const PdfDictionary* catalog = document.GetObject(document.GetCatalogReference()).AsDictionary();
     PDFPP_TEST_CHECK(catalog != nullptr);
@@ -1912,6 +1970,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.TilingPatternWrite", TestTilingPatternWrite);
     runner.Run("Feature.PageContentStream", TestPageContentStream);
     runner.Run("Feature.PngOutput", TestPngOutput);
+    runner.Run("Feature.ImageTypeDetection", TestImageTypeDetection);
     runner.Run("Feature.PolygonAndBezierPaths", TestPolygonAndBezierPaths);
     runner.Run("Feature.CffFontEmbedding", TestCffFontEmbedding);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);

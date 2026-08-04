@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <regex>
+#include <unordered_map>
 #include <zlib.h>
 
 namespace CPPPdf {
@@ -104,6 +105,54 @@ std::vector<std::byte> ApplyPredictor(
     }
     return output;
 }
+
+std::vector<std::byte> EncodePredictor(
+    std::span<const std::byte> input,
+    const std::string& parameters) {
+    const int predictor = Parameter(parameters, "Predictor", 1);
+    if (predictor <= 1) return std::vector<std::byte>(input.begin(), input.end());
+    const int colors = Parameter(parameters, "Colors", 1);
+    const int bits = Parameter(parameters, "BitsPerComponent", 8);
+    const int columns = Parameter(parameters, "Columns", 1);
+    if (colors <= 0 || bits <= 0 || columns <= 0) {
+        throw PdfException(PdfErrorCode::MalformedObject, "Invalid predictor parameters.");
+    }
+    if (bits % 8 != 0) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Predictor encoding requires byte-aligned samples.");
+    }
+    const std::size_t rowBytes = static_cast<std::size_t>(colors) *
+        static_cast<std::size_t>(columns) * static_cast<std::size_t>(bits / 8);
+    const std::size_t bytesPerPixel = static_cast<std::size_t>(colors) *
+        static_cast<std::size_t>(bits / 8);
+    if (rowBytes == 0U || input.size() % rowBytes != 0U) {
+        throw PdfException(PdfErrorCode::MalformedObject, "Predictor input row length is invalid.");
+    }
+    if (predictor == 2) {
+        std::vector<std::byte> output(input.begin(), input.end());
+        for (std::size_t row = 0; row < output.size(); row += rowBytes) {
+            for (std::size_t i = rowBytes; i-- > bytesPerPixel;) {
+                output[row + i] = static_cast<std::byte>(
+                    std::to_integer<unsigned char>(output[row + i]) -
+                    std::to_integer<unsigned char>(output[row + i - bytesPerPixel]));
+            }
+        }
+        return output;
+    }
+    if (predictor < 10 || predictor > 15) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature, "Unsupported predictor value.");
+    }
+    std::vector<std::byte> output;
+    output.reserve(input.size() + input.size() / rowBytes);
+    for (std::size_t row = 0; row < input.size(); row += rowBytes) {
+        // Filter type 0 is valid for every PNG predictor mode and keeps the
+        // encoder deterministic without needing to optimize each scanline.
+        output.push_back(std::byte{0});
+        output.insert(output.end(), input.begin() + static_cast<std::ptrdiff_t>(row),
+                      input.begin() + static_cast<std::ptrdiff_t>(row + rowBytes));
+    }
+    return output;
+}
 }
 
 std::vector<std::byte> PdfFilterPipeline::Decode(std::span<const std::byte> input,const std::vector<PdfFilterSpec>& filters) const {
@@ -124,6 +173,26 @@ std::vector<std::byte> PdfFilterPipeline::Decode(std::span<const std::byte> inpu
         }
         else throw PdfException(PdfErrorCode::UnsupportedFeature,"Unsupported PDF filter: "+f.name);
         Check(data.size(),maxDecodedSize_);
+    }
+    return data;
+}
+
+std::vector<std::byte> PdfFilterPipeline::Encode(
+    std::span<const std::byte> input, const std::vector<PdfFilterSpec>& filters) const {
+    std::vector<std::byte> data(input.begin(), input.end());
+    for (const auto& f : filters) {
+        if (f.name == "FlateDecode" || f.name == "Fl") {
+            data = EncodeFlate(EncodePredictor(data, f.decodeParameters));
+        }
+        else if (f.name == "ASCIIHexDecode" || f.name == "AHx") data = EncodeAsciiHex(data);
+        else if (f.name == "ASCII85Decode" || f.name == "A85") data = EncodeAscii85(data);
+        else if (f.name == "RunLengthDecode" || f.name == "RL") data = EncodeRunLength(data);
+        else if (f.name == "LZWDecode" || f.name == "LZW") {
+            const bool earlyChange = Parameter(f.decodeParameters, "EarlyChange", 1) != 0;
+            data = EncodeLzw(EncodePredictor(data, f.decodeParameters), earlyChange);
+        }
+        else throw PdfException(PdfErrorCode::UnsupportedFeature, "Unsupported PDF filter for encoding: " + f.name);
+        Check(data.size(), maxDecodedSize_);
     }
     return data;
 }
@@ -317,5 +386,171 @@ std::vector<std::byte> PdfFilterPipeline::DecodeLzw(
         }
     }
     return output;
+}
+
+std::vector<std::byte> PdfFilterPipeline::EncodeFlate(std::span<const std::byte> input) {
+    if (input.size() > static_cast<std::size_t>(std::numeric_limits<uInt>::max())) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "FlateDecode input exceeds the zlib input limit.");
+    }
+    uLongf bound = compressBound(static_cast<uLong>(input.size()));
+    std::vector<std::byte> out(bound);
+    const int rc = compress2(reinterpret_cast<Bytef*>(out.data()), &bound,
+        reinterpret_cast<const Bytef*>(input.data()), static_cast<uLong>(input.size()),
+        Z_BEST_COMPRESSION);
+    if (rc != Z_OK) throw PdfException(PdfErrorCode::UnsupportedFeature, "FlateDecode compression failed.");
+    out.resize(bound);
+    return out;
+}
+
+std::vector<std::byte> PdfFilterPipeline::EncodeAsciiHex(std::span<const std::byte> input) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::vector<std::byte> out;
+    out.reserve(input.size() * 2U + 2U);
+    for (const auto b : input) {
+        const auto value = std::to_integer<unsigned char>(b);
+        out.push_back(static_cast<std::byte>(kHex[value >> 4U]));
+        out.push_back(static_cast<std::byte>(kHex[value & 0x0FU]));
+    }
+    out.push_back(std::byte{'>'});
+    return out;
+}
+
+std::vector<std::byte> PdfFilterPipeline::EncodeAscii85(std::span<const std::byte> input) {
+    static constexpr char kBase[] = "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                    "[\\]^_`abcdefghijklmnopqrstu";
+    std::vector<std::byte> out;
+    out.reserve(input.size() + input.size() / 4U + 8U);
+    std::size_t i = 0;
+    while (i + 4U <= input.size()) {
+        std::uint32_t tuple = 0;
+        for (int j = 0; j < 4; ++j) tuple = (tuple << 8U) | std::to_integer<unsigned>(input[i++]);
+        if (tuple == 0U) {
+            out.push_back(std::byte{'z'});
+            continue;
+        }
+        std::byte digits[5];
+        for (int j = 4; j >= 0; --j) { digits[j] = static_cast<std::byte>(kBase[tuple % 85U]); tuple /= 85U; }
+        out.insert(out.end(), digits, digits + 5);
+    }
+    const std::size_t remaining = input.size() - i;
+    if (remaining > 0U) {
+        std::uint32_t tuple = 0;
+        for (std::size_t j = 0; j < remaining; ++j) tuple = (tuple << 8U) | std::to_integer<unsigned>(input[i++]);
+        for (std::size_t j = remaining; j < 4U; ++j) tuple = (tuple << 8U) | 0U;
+        std::byte digits[5];
+        for (int j = 4; j >= 0; --j) { digits[j] = static_cast<std::byte>(kBase[tuple % 85U]); tuple /= 85U; }
+        out.insert(out.end(), digits, digits + remaining + 1U);
+    }
+    out.push_back(std::byte{'~'});
+    out.push_back(std::byte{'>'});
+    return out;
+}
+
+std::vector<std::byte> PdfFilterPipeline::EncodeRunLength(std::span<const std::byte> input) {
+    std::vector<std::byte> out;
+    out.reserve(input.size());
+    std::size_t i = 0;
+    while (i < input.size()) {
+        std::size_t run = 1U;
+        while (i + run < input.size() && run < 128U &&
+               std::to_integer<unsigned char>(input[i]) == std::to_integer<unsigned char>(input[i + run])) {
+            ++run;
+        }
+        if (run >= 2U) {
+            out.push_back(static_cast<std::byte>(257U - run));
+            out.push_back(input[i]);
+            i += run;
+            continue;
+        }
+        std::size_t literalEnd = i;
+        while (literalEnd + 1U < input.size() && literalEnd - i < 127U &&
+               std::to_integer<unsigned char>(input[literalEnd]) != std::to_integer<unsigned char>(input[literalEnd + 1U])) {
+            ++literalEnd;
+        }
+        if (literalEnd - i + 1U >= 128U) literalEnd = i + 127U;
+        const std::size_t literalCount = literalEnd - i + 1U;
+        out.push_back(static_cast<std::byte>(literalCount - 1U));
+        out.insert(out.end(), input.begin() + static_cast<std::ptrdiff_t>(i),
+                   input.begin() + static_cast<std::ptrdiff_t>(i + literalCount));
+        i += literalCount;
+    }
+    out.push_back(std::byte{128});
+    return out;
+}
+
+std::vector<std::byte> PdfFilterPipeline::EncodeLzw(std::span<const std::byte> input, bool earlyChange) {
+    constexpr std::uint32_t kClear = 256U;
+    constexpr std::uint32_t kEndOfData = 257U;
+    constexpr std::size_t kTableSize = 4096U;
+    constexpr int kMaxCodeWidth = 12;
+
+    std::unordered_map<std::string, std::uint32_t> table;
+    for (std::uint32_t i = 0U; i < 256U; ++i) {
+        table.emplace(std::string(1, static_cast<char>(static_cast<unsigned char>(i))), i);
+    }
+    std::uint32_t nextCode = 258U;
+    int codeWidth = 9;
+
+    std::vector<std::uint32_t> codes;
+    codes.push_back(kClear);
+    std::string current;
+    for (const auto b : input) {
+        const std::string next = current + static_cast<char>(std::to_integer<unsigned char>(b));
+        const auto it = table.find(next);
+        if (it != table.end()) {
+            current = std::move(next);
+            continue;
+        }
+        codes.push_back(table.at(current));
+        if (nextCode < kTableSize) {
+            table.emplace(next, nextCode++);
+        }
+        if (codeWidth < kMaxCodeWidth) {
+            const std::uint32_t threshold = earlyChange ? (1U << codeWidth) - 1U : (1U << codeWidth);
+            if (nextCode == threshold) ++codeWidth;
+        }
+        current.assign(1, static_cast<char>(std::to_integer<unsigned char>(b)));
+    }
+    if (!current.empty()) codes.push_back(table.at(current));
+    codes.push_back(kEndOfData);
+
+    std::vector<std::byte> packed;
+    packed.reserve(codes.size());
+    std::uint64_t bitBuffer = 0;
+    std::size_t bitCount = 0;
+    std::uint32_t tableSize = 258U;
+    int width = 9;
+    for (std::size_t ci = 0; ci < codes.size(); ++ci) {
+        const std::uint32_t code = codes[ci];
+        if (code == kClear) {
+            tableSize = 258U;
+            width = 9;
+        }
+        bitBuffer |= static_cast<std::uint64_t>(code) << bitCount;
+        bitCount += static_cast<std::size_t>(width);
+        while (bitCount >= 8U) {
+            packed.push_back(static_cast<std::byte>(bitBuffer & 0xFFU));
+            bitBuffer >>= 8U;
+            bitCount -= 8U;
+        }
+        if (code != kClear) {
+            const std::uint32_t threshold = earlyChange ? (1U << width) - 1U : (1U << width);
+            if (tableSize == threshold && width < kMaxCodeWidth) {
+                if (ci + 1U < codes.size() && codes[ci + 1U] == kClear) {
+                    // EOD/CLEAR resets the width; do not grow.
+                } else {
+                    ++width;
+                }
+                ++tableSize;
+            } else {
+                ++tableSize;
+            }
+        }
+    }
+    if (bitCount > 0U) {
+        packed.push_back(static_cast<std::byte>(bitBuffer & 0xFFU));
+    }
+    return packed;
 }
 } // namespace CPPPdf

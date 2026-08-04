@@ -155,7 +155,7 @@ PdfFontResource PdfFontResource::Create(const PdfDictionary& dictionary, const R
                 filters.push_back({name->value(), {}});
             } else if (const auto* array = object->AsArray()) {
                 for (const auto& item : array->values()) {
-                    if (const auto* name = item.AsName()) filters.push_back({name->value(), {}});
+                    if (const auto* filterName = item.AsName()) filters.push_back({filterName->value(), {}});
                 }
             }
         };
@@ -197,7 +197,7 @@ PdfFontResource PdfFontResource::Create(const PdfDictionary& dictionary, const R
                 if (const auto* name = filterObject->AsName()) filters.push_back({name->value(), {}});
                 else if (const auto* array = filterObject->AsArray()) {
                     for (const auto& item : array->values())
-                        if (const auto* name = item.AsName()) filters.push_back({name->value(), {}});
+                         if (const auto* filterName = item.AsName()) filters.push_back({filterName->value(), {}});
                 }
             }
             try {
@@ -228,7 +228,7 @@ PdfFontResource PdfFontResource::Create(const PdfDictionary& dictionary, const R
                     if (const auto* name = filterObject->AsName()) filters.push_back({name->value(), {}});
                     else if (const auto* array = filterObject->AsArray()) {
                         for (const auto& item : array->values())
-                            if (const auto* name = item.AsName()) filters.push_back({name->value(), {}});
+                         if (const auto* filterName = item.AsName()) filters.push_back({filterName->value(), {}});
                     }
                 }
                 try {

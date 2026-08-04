@@ -268,7 +268,7 @@ PdfKeywordHighlightResult PdfKeywordHighlighter::HighlightFile(
         for (const PdfKeywordHighlightMatch* match : pageMatches) {
             const std::uint32_t annotationObject = newObjectNumber++;
             const std::uint64_t offset = static_cast<std::uint64_t>(output.tellp());
-            xrefEntries[annotationObject] = {offset, 0U};
+            xrefEntries[annotationObject] = {offset, static_cast<std::uint16_t>(0U)};
             references.push_back(PdfReference{annotationObject, 0U});
 
             const auto& r = match->rectangle;

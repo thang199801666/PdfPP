@@ -677,6 +677,35 @@ PdfImage PdfImage::FromJpegFile(const std::filesystem::path& path) {    std::ifs
     return FromJpeg(bytes);
 }
 
+PdfImageType PdfImage::DetectImageType(const std::span<const std::byte> bytes) {
+    if (bytes.size() >= 8U &&
+        std::to_integer<std::uint8_t>(bytes[0]) == 0x89U &&
+        std::to_integer<std::uint8_t>(bytes[1]) == 0x50U &&
+        std::to_integer<std::uint8_t>(bytes[2]) == 0x4EU &&
+        std::to_integer<std::uint8_t>(bytes[3]) == 0x47U) {
+        return PdfImageType::Png;
+    }
+    if (bytes.size() >= 3U &&
+        std::to_integer<std::uint8_t>(bytes[0]) == 0xFFU &&
+        std::to_integer<std::uint8_t>(bytes[1]) == 0xD8U &&
+        std::to_integer<std::uint8_t>(bytes[2]) == 0xFFU) {
+        return PdfImageType::Jpeg;
+    }
+    if (bytes.size() >= 2U &&
+        std::to_integer<std::uint8_t>(bytes[0]) == 'B' &&
+        std::to_integer<std::uint8_t>(bytes[1]) == 'M') {
+        return PdfImageType::Bmp;
+    }
+    if (bytes.size() >= 4U &&
+        std::to_integer<std::uint8_t>(bytes[0]) == 0xFFU &&
+        std::to_integer<std::uint8_t>(bytes[1]) == 0x4FU &&
+        std::to_integer<std::uint8_t>(bytes[2]) == 0xFFU &&
+        std::to_integer<std::uint8_t>(bytes[3]) == 0x51U) {
+        return PdfImageType::Jpeg2000;
+    }
+    return PdfImageType::Unknown;
+}
+
 PdfImage PdfImage::FromFile(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open image file.");

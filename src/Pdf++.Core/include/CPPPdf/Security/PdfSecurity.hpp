@@ -8,6 +8,7 @@ namespace CPPPdf {
 
 enum class PdfEncryptionAlgorithm {
     Aes128,
+    Rc4_40,
     Rc4_128
 };
 
