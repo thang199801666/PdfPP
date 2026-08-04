@@ -1,3 +1,10 @@
+## 0.148.0
+
+- Line splitting: `PdfTextLayout::SplitLines` splits on \n, \r\n, and lone \r
+  while preserving empty lines.
+- Tests: `API.TextSearch` splits "a\r\nb\n\nc" into four lines. All suites
+  green.
+
 ## 0.147.0
 
 - Region search: `PdfDocument::SearchTextInRegion` filters matches whose

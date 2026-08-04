@@ -637,4 +637,24 @@ std::string PdfTextLayout::TrimWhitespace(const std::string_view utf8) {
     return out;
 }
 
+std::vector<std::string> PdfTextLayout::SplitLines(const std::string_view utf8) {
+    std::vector<std::string> lines;
+    std::size_t start = 0;
+    for (std::size_t i = 0; i < utf8.size(); ++i) {
+        const char c = utf8[i];
+        if (c == '\n') {
+            lines.push_back(std::string(utf8.substr(start, i - start)));
+            start = i + 1U;
+        } else if (c == '\r') {
+            // Handle \r\n and lone \r.
+            const bool hasLf = i + 1U < utf8.size() && utf8[i + 1U] == '\n';
+            lines.push_back(std::string(utf8.substr(start, i - start)));
+            start = i + (hasLf ? 2U : 1U);
+            if (hasLf) ++i;
+        }
+    }
+    lines.push_back(std::string(utf8.substr(start)));
+    return lines;
+}
+
 } // namespace CPPPdf

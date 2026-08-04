@@ -68,6 +68,9 @@ public:
 
     // Removes leading and trailing Unicode whitespace.
     [[nodiscard]] static std::string TrimWhitespace(std::string_view utf8);
+
+    // Splits text into lines on \n and \r\n (keeps empty lines).
+    [[nodiscard]] static std::vector<std::string> SplitLines(std::string_view utf8);
 };
 
 } // namespace CPPPdf
