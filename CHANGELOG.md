@@ -1,3 +1,10 @@
+## 0.122.0
+
+- BMP output: `PdfBitmap::SaveBmp` writes a 32-bit bottom-up uncompressed BMP
+  with no external libraries.
+- Tests: `Feature.PngOutput` checks the 'BM' signature and exact file size. All
+  suites green.
+
 ## 0.121.0
 
 - Annotation listing: `PdfDocument::GetAnnotations` reads a page's `/Annots`

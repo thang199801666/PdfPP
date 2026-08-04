@@ -58,6 +58,8 @@ public:
     void SavePng(const std::filesystem::path& path) const;
     // Writes a baseline JPEG (DCT, quality 1-100) without external libraries.
     void SaveJpeg(const std::filesystem::path& path, int quality = 85) const;
+    // Writes a 32-bit BMP (uncompressed, bottom-up) without external libraries.
+    void SaveBmp(const std::filesystem::path& path) const;
 
     // Returns a scaled copy (bilinear). Empty width/height keeps aspect ratio.
     [[nodiscard]] PdfBitmap Resize(std::size_t width, std::size_t height) const;

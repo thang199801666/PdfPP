@@ -298,6 +298,63 @@ void PdfBitmap::SaveJpeg(const std::filesystem::path& path, const int quality) c
     }
 }
 
+void PdfBitmap::SaveBmp(const std::filesystem::path& path) const {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        throw PdfException(PdfErrorCode::FileOpenFailed, "Unable to create rendered BMP image.");
+    }
+    // 32-bit bottom-up BMP: 14-byte BITMAPFILEHEADER + 40-byte BITMAPINFOHEADER.
+    const std::uint32_t rowSize = static_cast<std::uint32_t>(width_ * 4U);
+    const std::uint32_t dataSize = rowSize * static_cast<std::uint32_t>(height_);
+    const std::uint32_t fileSize = 54U + dataSize;
+    const auto le = [](std::uint32_t value, const std::size_t size) {
+        std::vector<std::uint8_t> out(size);
+        for (std::size_t i = 0; i < size; ++i) { out[i] = static_cast<std::uint8_t>(value & 0xFFU); value >>= 8U; }
+        return out;
+    };
+    // BITMAPFILEHEADER.
+    std::vector<std::uint8_t> header;
+    const auto fileSig = le(0x4D42U, 2U); header.insert(header.end(), fileSig.begin(), fileSig.end()); // 'BM'
+    const auto fs = le(fileSize, 4U); header.insert(header.end(), fs.begin(), fs.end());
+    auto reserved = le(0U, 4U); header.insert(header.end(), reserved.begin(), reserved.end());
+    const auto dataOffset = le(54U, 4U); header.insert(header.end(), dataOffset.begin(), dataOffset.end());
+    output.write(reinterpret_cast<const char*>(header.data()), static_cast<std::streamsize>(header.size()));
+    // BITMAPINFOHEADER (40 bytes).
+    std::vector<std::uint8_t> info;
+    const auto appendLe = [&](const std::uint32_t value, const std::size_t size) {
+        const auto bytes = le(value, size);
+        info.insert(info.end(), bytes.begin(), bytes.end());
+    };
+    appendLe(40U, 4U);            // biSize
+    appendLe(static_cast<std::uint32_t>(width_), 4U);
+    appendLe(static_cast<std::uint32_t>(height_), 4U);
+    appendLe(1U, 2U);             // planes
+    appendLe(32U, 2U);            // bit count
+    appendLe(0U, 4U);             // compression (BI_RGB)
+    appendLe(dataSize, 4U);
+    appendLe(2835U, 4U);          // xPelsPerMeter
+    appendLe(2835U, 4U);          // yPelsPerMeter
+    appendLe(0U, 4U);
+    appendLe(0U, 4U);
+    output.write(reinterpret_cast<const char*>(info.data()), static_cast<std::streamsize>(info.size()));
+    // Pixel data bottom-up, BGRX.
+    std::vector<std::uint8_t> row(rowSize);
+    for (std::size_t y = 0; y < height_; ++y) {
+        const std::size_t sourceRow = height_ - 1U - y;
+        for (std::size_t x = 0; x < width_; ++x) {
+            const auto color = GetPixel(x, sourceRow);
+            row[x * 4U] = color.blue;
+            row[x * 4U + 1U] = color.green;
+            row[x * 4U + 2U] = color.red;
+            row[x * 4U + 3U] = 0U;
+        }
+        output.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size()));
+    }
+    if (!output) {
+        throw PdfException(PdfErrorCode::FileOpenFailed, "Unable to write rendered BMP image.");
+    }
+}
+
 PdfBitmap PdfBitmap::Resize(const std::size_t width, const std::size_t height) const {
     if (width_ == 0U || height_ == 0U) return {};
     std::size_t outWidth = width;

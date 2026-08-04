@@ -1196,6 +1196,14 @@ void TestPngOutput() {
     PDFPP_TEST_CHECK(pngImage.GetHeight() == 30U);
     PDFPP_TEST_CHECK(pngImage.GetColorSpace() == PdfImageColorSpace::DeviceRGB);
     PDFPP_TEST_CHECK(pngImage.GetBytes().size() == 40U * 30U * 3U);
+    // BMP output has the 'BM' signature and expected file size.
+    const auto bmpPath = TempPath("pdfpp_feature_out.bmp");
+    bitmap.SaveBmp(bmpPath);
+    const std::string bmpBytes = ReadText(bmpPath);
+    PDFPP_TEST_CHECK(bmpBytes.size() >= 54U);
+    PDFPP_TEST_CHECK(bmpBytes[0] == 'B' && bmpBytes[1] == 'M');
+    PDFPP_TEST_CHECK(bmpBytes.size() == 54U + 40U * 30U * 4U);
+    std::filesystem::remove(bmpPath);
     std::filesystem::remove(pdfPath);
     std::filesystem::remove(pngPath);
     std::filesystem::remove(jpegPath);
