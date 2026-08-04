@@ -1296,9 +1296,12 @@ void TestTextStateOperators() {
         .EndText();
     canvas.BeginText().SetTextRise(5.0).SetFontAndSize("Helvetica", 14)
         .MoveText(30, 200).ShowText("Rise").EndText();
+    canvas.BeginText().SetTextRenderMode(2).SetFontAndSize("Helvetica", 14)
+        .MoveText(30, 150).ShowText("Filled stroke").EndText();
     writer.Save(output);
     auto document = PdfDocument::Open(output);
     const std::string content = document.GetPageContentStream(0U);
+    PDFPP_TEST_CHECK(content.find("2 Tr") != std::string::npos);
     PDFPP_TEST_CHECK(content.find(" TL") != std::string::npos);
     PDFPP_TEST_CHECK(content.find(" Tc") != std::string::npos);
     PDFPP_TEST_CHECK(content.find(" Tw") != std::string::npos);

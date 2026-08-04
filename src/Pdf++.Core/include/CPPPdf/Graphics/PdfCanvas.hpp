@@ -110,6 +110,9 @@ public:
     PdfCanvas& SetEmbeddedCffFontAndSize(const PdfCffFont& font, double size);
     PdfCanvas& SetTextMatrix(double a, double b, double c, double d, double e, double f);
     PdfCanvas& MoveText(double x, double y);
+    // Sets the text rendering mode (0 fill, 1 stroke, 2 fill+stroke,
+    // 3 invisible, 4..7 with clipping).
+    PdfCanvas& SetTextRenderMode(std::uint8_t mode);
     PdfCanvas& SetTextLeading(double leading);
     PdfCanvas& SetTextRise(double rise);
     PdfCanvas& SetHorizontalScaling(double scale);

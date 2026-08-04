@@ -1,3 +1,10 @@
+## 0.134.0
+
+- Text rendering mode: `PdfCanvas::SetTextRenderMode` sets the `Tr` operator
+  (0 fill, 1 stroke, 2 fill+stroke, 3 invisible, 4..7 clipping variants).
+- Tests: `Feature.TextStateOperators` writes and reads mode 2. All suites
+  green.
+
 ## 0.133.0
 
 - CFF glyph-to-Unicode: `PdfCffParser::GetGlyphUnicode` maps a glyph name
