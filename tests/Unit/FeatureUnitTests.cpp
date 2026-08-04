@@ -1048,8 +1048,13 @@ void TestJpxImageWrite() {
     // Indexed palette optimization: a 2-color RGB image writes /Indexed.
     std::vector<std::byte> twoColor(4 * 4 * 3U, std::byte{0});
     for (std::size_t i = 0; i < twoColor.size(); i += 3U) twoColor[i] = std::byte{0xFF};
-    const auto indexedImage = PdfImage::FromRgb(4U, 4U, twoColor);
-    const auto indexedPdf = TempPath("pdfpp_feature_indexed.pdf");
+    // Gray -> RGB conversion.
+    const std::vector<std::byte> grayPixels{std::byte{0x80}, std::byte{0x80}};
+    const auto grayImage = PdfImage::FromGray(2U, 1U, grayPixels);
+    const auto rgbImage = grayImage.ConvertToRgb();
+    PDFPP_TEST_CHECK(rgbImage.GetColorSpace() == PdfImageColorSpace::DeviceRGB);
+    PDFPP_TEST_CHECK(rgbImage.GetBytes().size() == 2U * 3U);
+    const auto indexedImage = PdfImage::FromRgb(4U, 4U, twoColor);    const auto indexedPdf = TempPath("pdfpp_feature_indexed.pdf");
     PdfWriter indexedWriter;
     const auto indexedPage = indexedWriter.AddPage({0, 0, 100, 100});
     indexedWriter.GetCanvas(indexedPage).DrawImage(indexedImage, {10, 10, 50, 50});

@@ -1,3 +1,10 @@
+## 0.137.0
+
+- Image color conversion: `PdfImage::ConvertToRgb` converts raw Gray and CMYK
+  samples to DeviceRGB (other encodings pass through).
+- Tests: `Feature.JpxImageWrite` converts a gray image and checks size. All
+  suites green.
+
 ## 0.136.0
 
 - Word wrapping: `PdfTextLayout::WordWrap` fits UTF-8 text into lines of a

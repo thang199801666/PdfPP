@@ -149,6 +149,10 @@ public:
     [[nodiscard]] PdfImageEncoding GetEncoding() const noexcept { return encoding_; }
     [[nodiscard]] std::uint16_t GetBitsPerComponent() const noexcept { return bitsPerComponent_; }
 
+    // Returns a DeviceRGB copy, converting Gray/CMYK/Indexed samples. Other
+    // encodings (JPEG/JPX/CCITT) are returned unchanged.
+    [[nodiscard]] PdfImage ConvertToRgb() const;
+
 private:
     PdfImage(std::uint32_t width,
              std::uint32_t height,

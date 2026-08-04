@@ -120,6 +120,40 @@ PdfImage PdfImage::FromGray(
                     std::vector<std::byte>(grayBytes.begin(), grayBytes.end()));
 }
 
+PdfImage PdfImage::ConvertToRgb() const {
+    if (colorSpace_ == PdfImageColorSpace::DeviceRGB || encoding_ != PdfImageEncoding::Raw) {
+        return *this;
+    }
+    const auto channel = [](const std::uint8_t value) {
+        return static_cast<std::uint8_t>(std::lround(std::clamp(value / 255.0, 0.0, 1.0) * 255.0));
+    };
+    std::vector<std::byte> rgb;
+    if (colorSpace_ == PdfImageColorSpace::DeviceGray && bitsPerComponent_ == 8U) {
+        rgb.reserve(bytes_.size() * 3U);
+        for (const std::byte b : bytes_) {
+            const std::uint8_t g = std::to_integer<std::uint8_t>(b);
+            rgb.push_back(std::byte{g});
+            rgb.push_back(std::byte{g});
+            rgb.push_back(std::byte{g});
+        }
+    } else if (colorSpace_ == PdfImageColorSpace::DeviceCMYK && bitsPerComponent_ == 8U) {
+        rgb.reserve(bytes_.size() / 4U * 3U);
+        for (std::size_t i = 0; i + 3U < bytes_.size(); i += 4U) {
+            const double c = std::to_integer<std::uint8_t>(bytes_[i]) / 255.0;
+            const double m = std::to_integer<std::uint8_t>(bytes_[i + 1U]) / 255.0;
+            const double yv = std::to_integer<std::uint8_t>(bytes_[i + 2U]) / 255.0;
+            const double k = std::to_integer<std::uint8_t>(bytes_[i + 3U]) / 255.0;
+            rgb.push_back(std::byte{channel(static_cast<std::uint8_t>((1.0 - c) * (1.0 - k) * 255.0))});
+            rgb.push_back(std::byte{channel(static_cast<std::uint8_t>((1.0 - m) * (1.0 - k) * 255.0))});
+            rgb.push_back(std::byte{channel(static_cast<std::uint8_t>((1.0 - yv) * (1.0 - k) * 255.0))});
+        }
+    } else {
+        return *this;
+    }
+    return PdfImage(width_, height_, PdfImageColorSpace::DeviceRGB,
+                    PdfImageEncoding::Raw, 8U, std::move(rgb));
+}
+
 PdfImage PdfImage::FromJpeg(const std::span<const std::byte> jpegBytes) {
     const auto info = parseJpeg(jpegBytes);
     PdfImageColorSpace colorSpace = PdfImageColorSpace::Unknown;
