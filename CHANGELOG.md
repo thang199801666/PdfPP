@@ -1,3 +1,10 @@
+## 0.106.0
+
+- CFF advance widths: `PdfCffParser::GetAdvanceWidth` returns a glyph's width
+  in font units (charstring width operand or the private dict default).
+- Tests: `Feature.CffFontEmbedding` resolves a width for the minimal font. All
+  suites green.
+
 ## 0.105.0
 
 - Page resizing: `PdfWriter::SetPageSize` changes an existing page's media box

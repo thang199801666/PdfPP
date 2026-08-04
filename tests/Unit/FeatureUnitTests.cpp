@@ -1084,6 +1084,8 @@ void TestType1FontEmbedding() {
 void TestCffFontEmbedding() {
     const auto cffBytes = CPPPdfTest::BuildMinimalCff();
     const auto font = PdfCffParser::ParseFont(std::span<const std::byte>(cffBytes));
+    // Width resolves to the parsed charstring width or the private dict default.
+    PDFPP_TEST_CHECK(PdfCffParser::GetAdvanceWidth(font, 0U) >= 0.0);
     PDFPP_TEST_CHECK(font.name == "Test");
     const auto output = TempPath("pdfpp_feature_cff.pdf");
     PdfWriter writer;

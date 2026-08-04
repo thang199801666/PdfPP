@@ -79,6 +79,9 @@ public:
     static std::vector<PdfCffDictEntry> ParseDict(std::span<const std::byte> bytes);
     static PdfCffFont ParseFont(std::span<const std::byte> bytes);
     static PdfCffGlyphOutline GetGlyphOutline(const PdfCffFont& font, std::uint32_t glyphId);
+    // Returns the glyph's advance width in font units (from the charstring
+    // width operand, or the private dict default).
+    static double GetAdvanceWidth(const PdfCffFont& font, std::uint32_t glyphId);
 };
 
 } // namespace CPPPdf

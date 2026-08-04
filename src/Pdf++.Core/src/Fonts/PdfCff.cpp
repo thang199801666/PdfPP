@@ -570,4 +570,13 @@ PdfCffGlyphOutline PdfCffParser::GetGlyphOutline(const PdfCffFont& font, const s
     return finalizeOutline(interpreter);
 }
 
+double PdfCffParser::GetAdvanceWidth(const PdfCffFont& font, const std::uint32_t glyphId) {
+    if (glyphId >= font.charStrings.objects.size()) return font.privateDict.defaultWidthX;
+    Type2Interpreter interpreter;
+    interpreter.font = &font;
+    interpreter.Run(font.charStrings.objects[glyphId]);
+    if (interpreter.widthParsed && interpreter.width > 0.0) return interpreter.width;
+    return font.privateDict.defaultWidthX;
+}
+
 } // namespace CPPPdf
