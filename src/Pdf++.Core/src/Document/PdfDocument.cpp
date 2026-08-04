@@ -3601,6 +3601,20 @@ PdfEncryptionInfo PdfDocument::GetEncryptionInfo() const noexcept {
     return info;
 }
 
+std::optional<std::string> PdfDocument::GetTrailerValue(const PdfName& key) const {
+    const PdfObject parsed = Internal::PdfObjectParser::Parse(
+        trailerDictionary_, readerOptions_.limits.maxRecursionDepth);
+    const PdfDictionary* dict = parsed.AsDictionary();
+    if (!dict) return std::nullopt;
+    const PdfObject* value = dict->Find(key);
+    if (!value) return std::nullopt;
+    std::ostringstream body;
+    Internal::PdfObjectSerializer::WriteObject(body, *value, [](const PdfReference& reference) {
+        return PdfReference{reference.objectNumber, reference.generation};
+    });
+    return body.str();
+}
+
 std::string PdfDocument::GetAllPagesText() const {
     std::string all;
     const auto count = pageCount();

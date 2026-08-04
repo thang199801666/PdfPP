@@ -861,7 +861,9 @@ void TestWriterDocumentInfo() {
     const auto info = document.GetDocumentInfo();
     PDFPP_TEST_CHECK(info.title == "Pdf++ metadata (test)");
     PDFPP_TEST_CHECK(info.author == "Thang Nguyen");
-    PDFPP_TEST_CHECK(info.subject == "Writer document information API");
+    const auto sizeValue = document.GetTrailerValue(PdfName("Size"));
+    PDFPP_TEST_CHECK(sizeValue.has_value());
+    PDFPP_TEST_CHECK(!document.GetTrailerValue(PdfName("DoesNotExist")).has_value());    PDFPP_TEST_CHECK(info.subject == "Writer document information API");
     PDFPP_TEST_CHECK(info.keywords == "pdf, metadata, cpp");
     PDFPP_TEST_CHECK(info.creator == "Pdf++.UnitTests");
     PDFPP_TEST_CHECK(info.producer == "Pdf++ Core");
@@ -1108,7 +1110,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 151U);
+    static_assert(CPPPdf::VersionMinor == 152U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1118,7 +1120,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.151.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.152.0");
 }
 
 int RunApiCoverageTests() {

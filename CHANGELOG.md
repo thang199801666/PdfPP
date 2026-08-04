@@ -1,3 +1,10 @@
+## 0.152.0
+
+- Trailer introspection: `PdfDocument::GetTrailerValue` parses a trailer
+  dictionary entry by key.
+- Tests: `API.WriterDocumentInfo` reads /Size and a missing key. All suites
+  green.
+
 ## 0.151.0
 
 - Title casing: `PdfTextLayout::TitleCase` uppercases the first letter of each

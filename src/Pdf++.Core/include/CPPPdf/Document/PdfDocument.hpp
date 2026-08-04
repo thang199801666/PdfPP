@@ -107,6 +107,8 @@ class PdfDocument final {public:
     [[nodiscard]] std::size_t xrefEntryCount() const noexcept { return GetXrefEntryCount(); }
     [[nodiscard]] std::size_t pageCount() const;
     [[nodiscard]] const std::string& GetTrailerDictionary() const noexcept { return trailerDictionary_; }
+    // Parses a trailer dictionary value by key (as a compact string).
+    [[nodiscard]] std::optional<std::string> GetTrailerValue(const PdfName& key) const;
     [[nodiscard]] bool IsEncrypted() const noexcept { return encryption_ != nullptr; }
     // Encryption details (algorithm, permissions) for an encrypted document.
     [[nodiscard]] PdfEncryptionInfo GetEncryptionInfo() const noexcept;
