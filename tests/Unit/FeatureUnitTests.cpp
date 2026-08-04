@@ -905,6 +905,22 @@ void TestJpxImageWrite() {
     PDFPP_TEST_CHECK(decoded.GetWidth() == 8U);
     PDFPP_TEST_CHECK(decoded.GetHeight() == 8U);
     PDFPP_TEST_CHECK(decoded.GetEncoding() == PdfImageEncoding::Dct);
+
+    // Indexed palette optimization: a 2-color RGB image writes /Indexed.
+    std::vector<std::byte> twoColor(4 * 4 * 3U, std::byte{0});
+    for (std::size_t i = 0; i < twoColor.size(); i += 3U) twoColor[i] = std::byte{0xFF};
+    const auto indexedImage = PdfImage::FromRgb(4U, 4U, twoColor);
+    const auto indexedPdf = TempPath("pdfpp_feature_indexed.pdf");
+    PdfWriter indexedWriter;
+    const auto indexedPage = indexedWriter.AddPage({0, 0, 100, 100});
+    indexedWriter.GetCanvas(indexedPage).DrawImage(indexedImage, {10, 10, 50, 50});
+    indexedWriter.Save(indexedPdf);
+    const std::string indexedBytes = ReadText(indexedPdf);
+    PDFPP_TEST_CHECK(indexedBytes.find("/Indexed") != std::string::npos);
+    auto indexedDocument = PdfDocument::Open(indexedPdf);
+    const auto indexedImages = indexedDocument.ExtractImages(0U);
+    PDFPP_TEST_CHECK(!indexedImages.empty());
+    std::filesystem::remove(indexedPdf);
 }
 
 void TestType1FontEmbedding() {

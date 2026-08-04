@@ -9,10 +9,12 @@
 #include "Internal/Writer/PdfObjectSerializer.hpp"
 #include <zlib.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -200,6 +202,18 @@ void appendInfoEntry(std::ostringstream& dictionary, const char* key, const std:
     case PdfImageColorSpace::DeviceCMYK: return "/DeviceCMYK";
     default: throw std::runtime_error("PdfWriter supports DeviceGray, DeviceRGB, and DeviceCMYK images only.");
     }
+}
+
+// Encodes a byte string as a hex `<...>` literal (PDF string form).
+std::string hexLookup(const std::string& bytes) {
+    static constexpr char h[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(bytes.size() * 2U);
+    for (const unsigned char c : bytes) {
+        out.push_back(h[c >> 4U]);
+        out.push_back(h[c & 0x0FU]);
+    }
+    return out;
 }
 
 } // namespace
@@ -954,6 +968,45 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         if(encoding==PdfImageEncoding::Dct){const auto span=image.GetBytes();bytes.assign(reinterpret_cast<const char*>(span.data()),span.size());filterName="/DCTDecode";}
         else if(encoding==PdfImageEncoding::Jpx){const auto span=image.GetBytes();bytes.assign(reinterpret_cast<const char*>(span.data()),span.size());filterName="/JPXDecode";}
         else if(encoding==PdfImageEncoding::CcittFax){const auto span=image.GetBytes();bytes.assign(reinterpret_cast<const char*>(span.data()),span.size());filterName="/CCITTFaxDecode";}
+        else if(encoding==PdfImageEncoding::Raw && image.GetColorSpace()==PdfImageColorSpace::DeviceRGB &&
+                image.GetBitsPerComponent()==8U){
+            // Indexed palette optimization: convert RGB images with <=256 unique
+            // colors to an /Indexed color space with a compressed index plane.
+            const auto raw=image.GetBytes();
+            const std::uint32_t w=image.GetWidth(), h=image.GetHeight();
+            if(w>0U && h>0U && raw.size()>=static_cast<std::size_t>(w)*h*3U){
+                std::map<std::array<std::uint8_t,3>,std::uint8_t> palette;
+                std::vector<std::uint8_t> indices;
+                indices.reserve(static_cast<std::size_t>(w)*h);
+                bool tooMany=false;
+                for(std::size_t p=0;p<static_cast<std::size_t>(w)*h;++p){
+                    const std::array<std::uint8_t,3> rgb{
+                        std::to_integer<std::uint8_t>(raw[p*3U]),
+                        std::to_integer<std::uint8_t>(raw[p*3U+1U]),
+                        std::to_integer<std::uint8_t>(raw[p*3U+2U])};
+                    auto it=palette.find(rgb);
+                    if(it==palette.end()){
+                        if(palette.size()>=32U){tooMany=true;break;} // keep RGB unless clearly palette-friendly
+                        palette[rgb]=static_cast<std::uint8_t>(palette.size());
+                    }
+                    indices.push_back(palette[rgb]);
+                }
+                if(!tooMany && !palette.empty()){
+                    // Build the /Indexed lookup (palette RGB bytes).
+                    std::string lookup;
+                    for(const auto& [rgb,unused]:palette){lookup.push_back(static_cast<char>(rgb[0]));lookup.push_back(static_cast<char>(rgb[1]));lookup.push_back(static_cast<char>(rgb[2]));}
+                    bytes=compressBytes(std::span<const std::byte>(reinterpret_cast<const std::byte*>(indices.data()),indices.size()));
+                    filterName="/FlateDecode";
+                    std::ostringstream d; d<<"<< /Type /XObject /Subtype /Image /Width "<<w<<" /Height "<<h
+                        <<" /ColorSpace [/Indexed /DeviceRGB "<<palette.size()-1U<<" <"<<hexLookup(lookup)<<">]"
+                        <<" /BitsPerComponent 8 /Filter /FlateDecode /Length "<<bytes.size()<<" >>\nstream\n"
+                        <<bytes<<"\nendstream";
+                    objects[imageIds[i]]=d.str();
+                    continue;
+                }
+            }
+            bytes=compressBytes(image.GetBytes());filterName="/FlateDecode";
+        }
         else{bytes=compressBytes(image.GetBytes());filterName="/FlateDecode";}
         std::ostringstream d; d<<"<< /Type /XObject /Subtype /Image /Width "<<image.GetWidth()<<" /Height "<<image.GetHeight()<<" /ColorSpace "<<colorSpaceName(image.GetColorSpace())<<" /BitsPerComponent "<<image.GetBitsPerComponent()<<" /Filter "<<filterName<<" /Length "<<bytes.size()<<" >>\nstream\n"; objects[imageIds[i]]=d.str()+bytes+"\nendstream";
     }

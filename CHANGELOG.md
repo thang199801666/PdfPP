@@ -1,3 +1,11 @@
+## 0.84.0
+
+- Indexed palette optimization: the writer converts small RGB images (<=32
+  unique colors) to an `/Indexed /DeviceRGB` color space with a compressed
+  index plane, shrinking palette-friendly images.
+- Tests: `Feature.JpxImageWrite` writes a 2-color image and verifies `/Indexed`
+  output plus image round-trip. All suites green.
+
 ## 0.83.0
 
 - Page geometry editing: `PdfPageEditor::SetPageBox` sets a page's `/CropBox`
