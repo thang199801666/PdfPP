@@ -270,6 +270,101 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
                         }
                     }
                 }
+                // MarkBasePos (lookup type 4): mark-to-base anchor attachments for
+                // combining marks. MarkBasePosFormat1 subtables map a mark class
+                // to anchors on each base glyph.
+                if (lookupType == 4U) {
+                    for(std::uint16_t s=0;s<subCount;++s){
+                        const std::uint16_t subOff4=Read16(bytes,lookup+6U+std::size_t(s)*2U);
+                        if(subOff4==0U||lookup+subOff4+4U>gb+gpos->second.length)continue;
+                        const std::size_t sub4=lookup+subOff4;
+                        const std::uint16_t format=Read16(bytes,sub4);
+                        if(format!=1U)continue; // MarkBasePosFormat1
+                        const std::uint16_t markCoverageOff=Read16(bytes,sub4+2U);
+                        const std::uint16_t baseCoverageOff=Read16(bytes,sub4+4U);
+                        const std::uint16_t classCount=Read16(bytes,sub4+6U);
+                        if(markCoverageOff==0U||baseCoverageOff==0U||classCount==0U)continue;
+                        if(classCount>8U)continue;
+                        const std::size_t markCoverage=sub4+markCoverageOff;
+                        const std::size_t baseCoverage=sub4+baseCoverageOff;
+                        // markArray: markCount, then markRecords {class, anchorOffset}.
+                        const std::size_t markArrayOff=Read16(bytes,sub4+8U);
+                        const std::size_t baseArrayOff=Read16(bytes,sub4+10U);
+                        if(markArrayOff==0U||baseArrayOff==0U)continue;
+                        const std::size_t markArray=sub4+markArrayOff;
+                        const std::size_t baseArray=sub4+baseArrayOff;
+                        const std::uint16_t markCount=Read16(bytes,markArray);
+                        const std::uint16_t baseCount=Read16(bytes,baseArray);
+                        // Collect mark glyphs (from mark coverage) and base glyphs.
+                        std::vector<std::uint16_t> markGlyphs;
+                        const std::uint16_t markCovFormat=Read16(bytes,markCoverage);
+                        const std::uint16_t markCovCount=Read16(bytes,markCoverage+2U);
+                        for(std::uint16_t m=0;m<markCovCount;++m){
+                            if(markCovFormat==1U){
+                                markGlyphs.push_back(Read16(bytes,markCoverage+4U+std::size_t(m)*2U));
+                            } else if(markCovFormat==2U){
+                                const std::uint16_t rc=Read16(bytes,markCoverage+2U);
+                                const std::size_t at=markCoverage+4U;
+                                for(std::uint16_t r=0;r<rc;++r){
+                                    const std::uint16_t start=Read16(bytes,at+std::size_t(r)*6U);
+                                    const std::uint16_t end=Read16(bytes,at+std::size_t(r)*6U+2U);
+                                    const std::uint16_t sg=Read16(bytes,at+std::size_t(r)*6U+4U);
+                                    if(m>=start&&m<end){markGlyphs.push_back(static_cast<std::uint16_t>(sg+(m-start)));break;}
+                                }
+                            }
+                        }
+                        // baseArray: baseCount records of classCount anchors each.
+                        // Each anchor (format 1) is {x, y} int16.
+                        for(std::uint16_t b=0;b<baseCount;++b){
+                            const std::size_t baseRec=baseArray+2U+std::size_t(b)*classCount*2U;
+                            if(baseRec+classCount*2U>gb+gpos->second.length)break;
+                            // base glyph from base coverage.
+                            const std::uint16_t baseCovFormat=Read16(bytes,baseCoverage);
+                            const std::uint16_t baseCovCount=Read16(bytes,baseCoverage+2U);
+                            std::uint16_t baseGlyph=0;
+                            if(baseCovFormat==1U&&b<baseCovCount){
+                                baseGlyph=Read16(bytes,baseCoverage+4U+std::size_t(b)*2U);
+                            } else if(baseCovFormat==2U){
+                                const std::uint16_t rc=Read16(bytes,baseCoverage+2U);
+                                const std::size_t at=baseCoverage+4U;
+                                for(std::uint16_t r=0;r<rc;++r){
+                                    const std::uint16_t start=Read16(bytes,at+std::size_t(r)*6U);
+                                    const std::uint16_t end=Read16(bytes,at+std::size_t(r)*6U+2U);
+                                    const std::uint16_t sg=Read16(bytes,at+std::size_t(r)*6U+4U);
+                                    if(b>=start&&b<end){baseGlyph=static_cast<std::uint16_t>(sg+(b-start));break;}
+                                }
+                            }
+                            for(std::uint16_t c=0;c<classCount;++c){
+                                const std::uint16_t anchorOff=Read16(bytes,baseRec+std::size_t(c)*2U);
+                                if(anchorOff==0U)continue;
+                                const std::size_t anchor=baseRec+anchorOff;
+                                if(anchor+4U>gb+gpos->second.length)continue;
+                                const std::uint16_t anchorFormat=Read16(bytes,anchor);
+                                if(anchorFormat!=1U)continue;
+                                const std::int16_t anchorX=ReadS16(bytes,anchor+2U);
+                                const std::int16_t anchorY=ReadS16(bytes,anchor+4U);
+                                // markArray records: {class, markAnchorOffset}.
+                                for(std::uint16_t m=0;m<markCount&&m<markGlyphs.size();++m){
+                                    const std::size_t markRec=markArray+2U+std::size_t(m)*4U;
+                                    if(markRec+4U>gb+gpos->second.length)break;
+                                    const std::uint16_t markClass=Read16(bytes,markRec);
+                                    if(markClass!=c)continue;
+                                    const std::uint16_t markAnchorOff=Read16(bytes,markRec+2U);
+                                    if(markAnchorOff==0U)continue;
+                                    const std::size_t markAnchor=markArray+markAnchorOff;
+                                    if(markAnchor+4U>gb+gpos->second.length)continue;
+                                    const std::uint16_t markAnchorFormat=Read16(bytes,markAnchor);
+                                    if(markAnchorFormat!=1U)continue;
+                                    const std::int16_t markX=ReadS16(bytes,markAnchor+2U);
+                                    const std::int16_t markY=ReadS16(bytes,markAnchor+4U);
+                                    // Attachment offset = base anchor - mark anchor.
+                                    f.markBase_.emplace((std::uint64_t(markGlyphs[m])<<32U)|
+                                        std::uint64_t(baseGlyph), AnchorPair{markX, markY, anchorX, anchorY});
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -326,6 +421,14 @@ double PdfTrueTypeFont::GetKerning(const std::uint16_t left, const std::uint16_t
     const auto it = kerning_.find((std::uint64_t(left) << 16U) | right);
     if (it == kerning_.end()) return 0.0;
     return double(it->second) * size / metrics_.unitsPerEm;
+}
+
+std::optional<PdfTrueTypeFont::MarkBaseAttachment> PdfTrueTypeFont::GetMarkBasePosition(
+    const std::uint16_t markGlyph, const std::uint16_t baseGlyph) const {
+    const auto it = markBase_.find((std::uint64_t(markGlyph) << 32U) | baseGlyph);
+    if (it == markBase_.end()) return std::nullopt;
+    return MarkBaseAttachment{it->second.markX, it->second.markY,
+                              it->second.baseX, it->second.baseY};
 }
 
 double PdfTrueTypeFont::GetCachedKerning(const std::uint16_t left, const std::uint16_t right,

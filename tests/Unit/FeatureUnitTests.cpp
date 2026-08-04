@@ -726,6 +726,20 @@ void TestTextLayoutAndFallback() {
             PDFPP_TEST_CHECK(substituted[0] != *gidF);
             PDFPP_TEST_CHECK(font.GetLigatureCount() > 0U);
         }
+        // GPOS mark positioning: combining acute (U+0301) attaches to "e".
+        if (font.HasMarkBase()) {
+            const auto gidE = font.GetGlyphId(U'e');
+            const auto gidAcute = font.GetGlyphId(U'\u0301');
+            if (gidE && gidAcute) {
+                const auto attachment = font.GetMarkBasePosition(*gidAcute, *gidE);
+                PDFPP_TEST_CHECK(attachment.has_value());
+                if (attachment) {
+                    PDFPP_TEST_CHECK(attachment->markX >= -1000);
+                    PDFPP_TEST_CHECK(attachment->markY >= -1000);
+                }
+            }
+            PDFPP_TEST_CHECK(font.GetMarkBaseCount() > 0U);
+        }
         // Kerning applied at render time: "AV" and "AA" produce different pixels.
         if (gidA && gidV && font.HasKerning()) {            const auto kernPdf = TempPath("pdfpp_feature_render_kern.pdf");
             PdfWriter writer;

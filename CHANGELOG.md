@@ -1,3 +1,11 @@
+## 0.87.0
+
+- GPOS MarkBasePos: the TrueType parser reads lookup-type-4 mark-to-base anchor
+  attachments (format 1) and `GetMarkBasePosition` returns the anchor pair for
+  a combining-mark/base-glyph pair, enabling positioned combining diacritics.
+- Tests: `Feature.TextLayoutAndFallback` verifies Arial's GPOS mark anchors for
+  `e` + combining acute. All suites green.
+
 ## 0.86.0
 
 - Outline reading: `PdfDocument::GetOutlines` walks the `/Outlines` tree and

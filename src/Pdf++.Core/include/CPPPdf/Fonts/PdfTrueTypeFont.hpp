@@ -92,6 +92,20 @@ public:
         std::span<const std::uint16_t> glyphs) const;
     [[nodiscard]] bool HasLigatures() const noexcept { return !ligatures_.empty(); }
     [[nodiscard]] std::size_t GetLigatureCount() const noexcept { return ligatures_.size(); }
+
+    // Returns the anchor attachment (mark anchor + base anchor) for a combining
+    // mark glyph placed over a base glyph, when the font has a GPOS
+    // MarkBasePos table for the pair.
+    struct MarkBaseAttachment final {
+        std::int16_t markX{};
+        std::int16_t markY{};
+        std::int16_t baseX{};
+        std::int16_t baseY{};
+    };
+    [[nodiscard]] std::optional<MarkBaseAttachment> GetMarkBasePosition(
+        std::uint16_t markGlyph, std::uint16_t baseGlyph) const;
+    [[nodiscard]] bool HasMarkBase() const noexcept { return !markBase_.empty(); }
+    [[nodiscard]] std::size_t GetMarkBaseCount() const noexcept { return markBase_.size(); }
     [[nodiscard]] PdfTrueTypeGlyphOutline GetGlyphOutline(std::uint16_t glyphId) const;
     [[nodiscard]] const PdfTrueTypeGlyphOutline& GetGlyphOutlineCached(std::uint16_t glyphId) const;
     [[nodiscard]] std::size_t GetCachedOutlineCount() const noexcept { return outlineCache_.size(); }
@@ -116,6 +130,15 @@ private:
         std::uint16_t ligatureGlyph{};
     };
     std::vector<LigatureEntry> ligatures_;
+    // OpenType GPOS mark-to-base anchors: (markGlyph<<32 | baseGlyph) ->
+    // (mark anchor x/y, base anchor x/y) in font units.
+    struct AnchorPair final {
+        std::int16_t markX{};
+        std::int16_t markY{};
+        std::int16_t baseX{};
+        std::int16_t baseY{};
+    };
+    std::unordered_map<std::uint64_t, AnchorPair> markBase_;
     using KerningCacheEntry = std::pair<const std::uint64_t, double>;
     mutable std::list<KerningCacheEntry> kerningLru_;
     mutable std::unordered_map<std::uint64_t, std::list<KerningCacheEntry>::iterator> kerningCache_;
