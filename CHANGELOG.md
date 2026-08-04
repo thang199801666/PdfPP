@@ -1,3 +1,10 @@
+## 0.117.0
+
+- Combining-mark stripping: `PdfTextLayout::StripCombiningMarks` removes
+  combining marks and variation selectors for accent-insensitive matching.
+- Tests: `API.TextSearch` strips `he` + combining acute to "hello". All
+  suites green.
+
 ## 0.116.0
 
 - UTF-8 helpers: `PdfTextLayout::CountCodePoints` and `TruncateUtf8` (with an

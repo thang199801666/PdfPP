@@ -36,6 +36,10 @@ public:
         std::string_view utf8,
         std::size_t maxCodePoints,
         std::string_view ellipsis = "...");
+
+    // Removes combining marks and variation selectors, returning base-only
+    // text (useful for accent-insensitive matching and normalization).
+    [[nodiscard]] static std::string StripCombiningMarks(std::string_view utf8);
 };
 
 } // namespace CPPPdf

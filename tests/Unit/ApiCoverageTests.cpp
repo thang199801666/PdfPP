@@ -203,6 +203,7 @@ void TestTextSearch() {
     PDFPP_TEST_CHECK(PdfTextLayout::CountCodePoints("he\u0301llo") == 6);
     PDFPP_TEST_CHECK(PdfTextLayout::TruncateUtf8("hello world", 5) == "hello...");
     PDFPP_TEST_CHECK(PdfTextLayout::TruncateUtf8("he\u0301llo", 3) == "he\u0301...");
+    PDFPP_TEST_CHECK(PdfTextLayout::StripCombiningMarks("he\u0301llo") == "hello");
 
     PdfRegexSearchOptions limitedRegex;
     limitedRegex.maxMatches = 1;
@@ -1035,7 +1036,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 116U);
+    static_assert(CPPPdf::VersionMinor == 117U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1045,7 +1046,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.116.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.117.0");
 }
 
 int RunApiCoverageTests() {

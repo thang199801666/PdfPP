@@ -253,4 +253,15 @@ std::string PdfTextLayout::TruncateUtf8(
     return out;
 }
 
+std::string PdfTextLayout::StripCombiningMarks(const std::string_view utf8) {
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    std::string out;
+    for (const std::uint32_t cp : cps) {
+        if (isCombiningMark(cp)) continue;
+        appendUtf8(out, cp);
+    }
+    return out;
+}
+
 } // namespace CPPPdf
