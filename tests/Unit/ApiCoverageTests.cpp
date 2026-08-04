@@ -204,6 +204,10 @@ void TestTextSearch() {
     PDFPP_TEST_CHECK(PdfTextLayout::TruncateUtf8("hello world", 5) == "hello...");
     PDFPP_TEST_CHECK(PdfTextLayout::TruncateUtf8("he\u0301llo", 3) == "he\u0301...");
     PDFPP_TEST_CHECK(PdfTextLayout::StripCombiningMarks("he\u0301llo") == "hello");
+    // NFC normalization composes base + combining mark.
+    PDFPP_TEST_CHECK(PdfTextLayout::NormalizeNfc("e\u0301") == "\u00e9");
+    PDFPP_TEST_CHECK(PdfTextLayout::NormalizeNfc("o\u0308") == "\u00f6");
+    PDFPP_TEST_CHECK(PdfTextLayout::NormalizeNfc("c\u0327") == "\u00e7");
 
     PdfRegexSearchOptions limitedRegex;
     limitedRegex.maxMatches = 1;
@@ -1049,7 +1053,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 122U);
+    static_assert(CPPPdf::VersionMinor == 123U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1059,7 +1063,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.122.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.123.0");
 }
 
 int RunApiCoverageTests() {

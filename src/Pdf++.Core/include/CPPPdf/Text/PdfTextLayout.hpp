@@ -40,6 +40,10 @@ public:
     // Removes combining marks and variation selectors, returning base-only
     // text (useful for accent-insensitive matching and normalization).
     [[nodiscard]] static std::string StripCombiningMarks(std::string_view utf8);
+
+    // Normalizes combining sequences to precomposed characters (NFC) for the
+    // common Latin block (e.g. "e" + combining acute -> U+00E9).
+    [[nodiscard]] static std::string NormalizeNfc(std::string_view utf8);
 };
 
 } // namespace CPPPdf

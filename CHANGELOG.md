@@ -1,3 +1,9 @@
+## 0.123.0
+
+- NFC normalization: `PdfTextLayout::NormalizeNfc` composes common Latin base +
+  combining-mark pairs (e + acute -> U+00E9, o + diaeresis -> U+00F6, ...).
+- Tests: `API.TextSearch` composes three pairs. All suites green.
+
 ## 0.122.0
 
 - BMP output: `PdfBitmap::SaveBmp` writes a 32-bit bottom-up uncompressed BMP
