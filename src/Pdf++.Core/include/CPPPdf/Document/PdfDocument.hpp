@@ -42,6 +42,15 @@ struct PdfXrefEntry {
     bool inUse{};
 };
 
+// A single outline (bookmark) item read from the document's /Outlines tree.
+struct PdfOutlineEntry final {
+    std::string title;
+    std::optional<std::size_t> destinationPageIndex;
+    std::uint32_t objectNumber{};
+    std::size_t depth{};
+    bool isOpen{};
+};
+
 class PdfDocument final {
 public:
     PdfDocument();
@@ -167,7 +176,12 @@ public:
         std::size_t pageIndex,
         const PdfImageExtractionOptions& options = {}) const;
 
+    // Reads the document outline (/Outlines tree) as a flat list of bookmarks.
+    [[nodiscard]] std::vector<PdfOutlineEntry> GetOutlines() const;
+
 private:
+    [[nodiscard]] std::optional<std::size_t> ResolveDestination(const PdfObject& destination) const;
+
     struct DecodedObjectStream {
         std::string decoded;
         std::size_t first{};

@@ -3412,4 +3412,87 @@ std::vector<std::string> PdfDocument::ExtractAllPageTextParallel(
     return result;
 }
 
+std::vector<PdfOutlineEntry> PdfDocument::GetOutlines() const {
+    std::vector<PdfOutlineEntry> result;
+    const auto catalogRef = GetTrailerReference(PdfName("Root"));
+    if (!catalogRef) return result;
+    const auto& catalog = GetObject(*catalogRef);
+    const auto* catalogDict = catalog.AsDictionary();
+    if (!catalogDict) return result;
+    const auto outlinesValue = catalogDict->Find(PdfName("Outlines"));
+    const auto outlinesRef = outlinesValue ? outlinesValue->AsReference() : std::nullopt;
+    if (!outlinesRef) return result;
+    const auto& outlines = GetObject(PdfReference{outlinesRef->first, outlinesRef->second});
+    const auto* outlinesDict = outlines.AsDictionary();
+    if (!outlinesDict) return result;
+    const auto* firstValue = outlinesDict->Find(PdfName("First"));
+    const auto firstRef = firstValue ? firstValue->AsReference() : std::nullopt;
+    if (!firstRef) return result;
+    // DFS through First/Next with a visited set and depth map to support nesting
+    // while guarding against cyclic trees.
+    std::unordered_map<std::uint32_t, std::size_t> depthOf;
+    std::unordered_set<std::uint32_t> visited;
+    std::function<void(const PdfReference&, std::size_t)> walk =
+        [&](const PdfReference& item, const std::size_t depth) {
+        if (!visited.insert(item.objectNumber).second) return;
+        depthOf[item.objectNumber] = depth;
+        const auto& obj = GetObject(item);
+        const auto* dict = obj.AsDictionary();
+        if (!dict) return;
+        PdfOutlineEntry entry;
+        if (const auto* title = dict->Find(PdfName("Title"))->AsString()) entry.title = *title;
+        entry.objectNumber = item.objectNumber;
+        entry.depth = depth;
+        entry.isOpen = true;
+        if (const auto* dest = dict->Find(PdfName("Dest"))) {
+            if (const auto target = ResolveDestination(*dest)) entry.destinationPageIndex = target;
+        }
+        if (const auto* action = dict->Find(PdfName("A"))) {
+            if (const auto* actionDict = action->AsDictionary()) {
+                if (const auto* dest = actionDict->Find(PdfName("D"))) {
+                    if (const auto target = ResolveDestination(*dest)) entry.destinationPageIndex = target;
+                }
+            }
+        }
+        result.push_back(std::move(entry));
+        const auto* firstChildValue = dict->Find(PdfName("First"));
+        const auto firstChildRef = firstChildValue ? firstChildValue->AsReference() : std::nullopt;
+        if (firstChildRef) {
+            walk(PdfReference{firstChildRef->first, firstChildRef->second}, depth + 1U);
+        }
+        const auto* nextValue = dict->Find(PdfName("Next"));
+        const auto nextRef = nextValue ? nextValue->AsReference() : std::nullopt;
+        if (nextRef) {
+            const auto found = depthOf.find(nextRef->first);
+            if (found == depthOf.end() || found->second == depth) {
+                walk(PdfReference{nextRef->first, nextRef->second}, depth);
+            }
+        }
+    };
+    walk(PdfReference{firstRef->first, firstRef->second}, 0U);
+    return result;
+}
+
+std::optional<std::size_t> PdfDocument::ResolveDestination(const PdfObject& destination) const {
+    // Dest is either an array [page /Fit ...] or a name reference.
+    const auto resolvePageIndex = [&](const PdfReference& page) {
+        const auto& pages = pageReferences();
+        for (std::size_t i = 0; i < pages.size(); ++i) {
+            if (pages[i].objectNumber == page.objectNumber) return std::optional<std::size_t>(i);
+        }
+        return std::optional<std::size_t>();
+    };
+    if (const auto* array = destination.AsArray()) {
+        if (!array->empty()) {
+            const auto ref = array->at(0U).AsReference();
+            if (ref) return resolvePageIndex(PdfReference{ref->first, ref->second});
+        }
+    }
+    const auto ref = destination.AsReference();
+    if (ref) {
+        return resolvePageIndex(PdfReference{ref->first, ref->second});
+    }
+    return std::nullopt;
+}
+
 } // namespace CPPPdf

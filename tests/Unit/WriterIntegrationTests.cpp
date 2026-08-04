@@ -259,6 +259,10 @@ void TestObjectStreamRoundTrip() {
         PDFPP_TEST_CHECK(objectStreamDocument.GetPageCount() == 2U);
         PDFPP_TEST_CHECK(objectStreamDocument.GetPageText(0U).find("Object stream round trip") != std::string::npos);
         PDFPP_TEST_CHECK(objectStreamDocument.GetPageText(1U).find("Second label page") != std::string::npos);
+        const auto outlines = objectStreamDocument.GetOutlines();
+        PDFPP_TEST_CHECK(outlines.size() == 1U);
+        PDFPP_TEST_CHECK(outlines[0].title == "ObjStm bookmark");
+        PDFPP_TEST_CHECK(outlines[0].destinationPageIndex == 0U);
         std::size_t compressedCount = 0U;
         bool compressedObjectReadable = false;
         for (std::uint32_t number = 1U; number < 80U; ++number) {

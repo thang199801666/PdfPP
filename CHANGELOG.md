@@ -1,3 +1,11 @@
+## 0.86.0
+
+- Outline reading: `PdfDocument::GetOutlines` walks the `/Outlines` tree and
+  returns flat `PdfOutlineEntry` bookmarks (title, destination page, depth)
+  with cycle protection.
+- Tests: `Writer.ObjectStreamAndPageLabels` round-trips an `AddBookmark` outline
+  and verifies title/destination through `GetOutlines`. All suites green.
+
 ## 0.85.0
 
 - GPOS PairPos kerning: the TrueType parser now reads OpenType `GPOS`
