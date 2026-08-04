@@ -627,6 +627,34 @@ PdfImage PdfImage::FromJpegFile(const std::filesystem::path& path) {    std::ifs
     return FromJpeg(bytes);
 }
 
+PdfImage PdfImage::FromFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open image file.");
+    input.seekg(0, std::ios::end);
+    const auto size = input.tellg();
+    input.seekg(0, std::ios::beg);
+    if (size <= 0) throw PdfException(PdfErrorCode::InvalidArgument, "Image file is empty.");
+    std::vector<std::byte> bytes(static_cast<std::size_t>(size));
+    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!input) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot read image file.");
+    // Detect by signature: PNG (89 50 4E 47), JPEG (FF D8 FF).
+    if (bytes.size() >= 8U &&
+        std::to_integer<std::uint8_t>(bytes[0]) == 0x89U &&
+        std::to_integer<std::uint8_t>(bytes[1]) == 0x50U &&
+        std::to_integer<std::uint8_t>(bytes[2]) == 0x4EU &&
+        std::to_integer<std::uint8_t>(bytes[3]) == 0x47U) {
+        return FromPng(bytes);
+    }
+    if (bytes.size() >= 3U &&
+        std::to_integer<std::uint8_t>(bytes[0]) == 0xFFU &&
+        std::to_integer<std::uint8_t>(bytes[1]) == 0xD8U &&
+        std::to_integer<std::uint8_t>(bytes[2]) == 0xFFU) {
+        return FromJpeg(bytes);
+    }
+    throw PdfException(PdfErrorCode::UnsupportedFeature,
+                       "Unsupported image format (expected PNG or JPEG): " + path.string());
+}
+
 std::vector<std::byte> PdfImage::EncodeJpeg(
     const std::uint32_t width, const std::uint32_t height,
     const std::span<const std::byte> rgbBytes, const int quality) {

@@ -1228,6 +1228,10 @@ void TestPngOutput() {
     PDFPP_TEST_CHECK(pngImage.GetHeight() == 30U);
     PDFPP_TEST_CHECK(pngImage.GetColorSpace() == PdfImageColorSpace::DeviceRGB);
     PDFPP_TEST_CHECK(pngImage.GetBytes().size() == 40U * 30U * 3U);
+    // FromFile auto-detects the PNG format.
+    const auto fileImage = PdfImage::FromFile(pngPath);
+    PDFPP_TEST_CHECK(fileImage.GetWidth() == 40U);
+    PDFPP_TEST_CHECK(fileImage.GetHeight() == 30U);
     // BMP output has the 'BM' signature and expected file size.
     const auto bmpPath = TempPath("pdfpp_feature_out.bmp");
     bitmap.SaveBmp(bmpPath);

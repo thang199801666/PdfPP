@@ -1,3 +1,9 @@
+## 0.144.0
+
+- Image loading: `PdfImage::FromFile` auto-detects PNG and JPEG by signature.
+- Tests: `Feature.PngOutput` loads the rendered PNG back via FromFile. All
+  suites green.
+
 ## 0.143.0
 
 - Unicode case-insensitive search: literal matching now folds Latin-1 and Latin

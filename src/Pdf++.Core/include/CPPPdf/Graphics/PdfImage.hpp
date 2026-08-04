@@ -137,6 +137,10 @@ public:
 
     static PdfImage FromJpegFile(const std::filesystem::path& path);
 
+    // Loads an image file, auto-detecting the format (PNG, JPEG, or raw RGB
+    // data with a .rgb extension).
+    static PdfImage FromFile(const std::filesystem::path& path);
+
     static PdfImage FromGray(
         std::uint32_t width,
         std::uint32_t height,
