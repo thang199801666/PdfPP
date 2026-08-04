@@ -1,3 +1,10 @@
+## 0.88.0
+
+- Convenience search: `PdfDocument::SearchText` runs the shared literal search
+  over a page's extracted chunks and returns matches with bounding boxes.
+- Tests: `API.TextSearch` round-trips a written page and verifies a
+  case-insensitive hit plus out-of-range rejection. All suites green.
+
 ## 0.87.0
 
 - GPOS MarkBasePos: the TrueType parser reads lookup-type-4 mark-to-base anchor

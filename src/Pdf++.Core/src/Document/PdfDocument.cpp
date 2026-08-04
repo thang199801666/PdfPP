@@ -3473,8 +3473,19 @@ std::vector<PdfOutlineEntry> PdfDocument::GetOutlines() const {
     return result;
 }
 
-std::optional<std::size_t> PdfDocument::ResolveDestination(const PdfObject& destination) const {
-    // Dest is either an array [page /Fit ...] or a name reference.
+std::vector<PdfTextSearchMatch> PdfDocument::SearchText(
+    const std::size_t pageIndex,
+    const std::string_view keyword,
+    const PdfTextSearchOptions& options) const {
+    if (pageIndex >= pageReferences().size()) {
+        throw PdfException(PdfErrorCode::InvalidPageTree,
+                           "Page index " + std::to_string(pageIndex) + " is outside the document.");
+    }
+    auto chunks = ExtractTextChunks(pageIndex, PdfTextExtractionRequest{});
+    return PdfTextSearch::Find(chunks, keyword, options);
+}
+
+std::optional<std::size_t> PdfDocument::ResolveDestination(const PdfObject& destination) const {    // Dest is either an array [page /Fit ...] or a name reference.
     const auto resolvePageIndex = [&](const PdfReference& page) {
         const auto& pages = pageReferences();
         for (std::size_t i = 0; i < pages.size(); ++i) {

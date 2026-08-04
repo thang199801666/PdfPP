@@ -19,6 +19,7 @@
 #include <CPPPdf/Content/PdfContentProcessor.hpp>
 #include <CPPPdf/Rendering/PdfBitmap.hpp>
 #include <CPPPdf/Objects/PdfObject.hpp>
+#include <CPPPdf/Text/PdfTextSearch.hpp>
 #include <CPPPdf/Text/PdfTextExtractor.hpp>
 #include <CPPPdf/Graphics/PdfImage.hpp>
 #include <CPPPdf/Rendering/PdfShading.hpp>
@@ -175,6 +176,13 @@ public:
     [[nodiscard]] std::vector<PdfExtractedImage> ExtractImages(
         std::size_t pageIndex,
         const PdfImageExtractionOptions& options = {}) const;
+
+    // Convenience: searches a page's text with the shared literal search
+    // implementation. Returns matches with their bounding boxes.
+    [[nodiscard]] std::vector<PdfTextSearchMatch> SearchText(
+        std::size_t pageIndex,
+        std::string_view keyword,
+        const PdfTextSearchOptions& options = {}) const;
 
     // Reads the document outline (/Outlines tree) as a flat list of bookmarks.
     [[nodiscard]] std::vector<PdfOutlineEntry> GetOutlines() const;

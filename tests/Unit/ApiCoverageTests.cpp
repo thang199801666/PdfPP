@@ -204,6 +204,20 @@ void TestTextSearch() {
 
     ExpectThrows([&] { (void)PdfTextSearch::Find(chunks, ""); });
     ExpectThrows([&] { (void)PdfTextSearch::FindRegex(chunks, "["); });
+
+    // PdfDocument::SearchText convenience over a written page.
+    const auto searchPath = TempPath("pdfpp_api_search.pdf");
+    PdfWriter writer;
+    const auto searchPage = writer.AddPage({0, 0, 200, 200});
+    writer.GetCanvas(searchPage).BeginText().SetFontAndSize("Helvetica", 12)
+        .MoveText(20, 150).ShowText("Gamma rays shine").EndText();
+    writer.Save(searchPath);
+    const auto searchDocument = PdfDocument::Open(searchPath);
+    const auto pageMatches = searchDocument.SearchText(0U, "gamma");
+    PDFPP_TEST_CHECK(pageMatches.size() == 1);
+    PDFPP_TEST_CHECK(pageMatches[0].matchedText == "Gamma");
+    ExpectThrows([&] { (void)searchDocument.SearchText(9U, "x"); });
+    std::filesystem::remove(searchPath);
 }
 
 void TestContentCommands() {
@@ -957,7 +971,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 87U);
+    static_assert(CPPPdf::VersionMinor == 88U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -967,7 +981,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.87.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.88.0");
 }
 
 int RunApiCoverageTests() {
