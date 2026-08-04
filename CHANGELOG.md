@@ -1,3 +1,11 @@
+## 0.82.0
+
+- Renderer kerning: `DrawTextChunk` applies the embedded font's cached kern
+  pairs between consecutive glyphs, so TrueType text renders with proper
+  horizontal adjustments.
+- Tests: `Feature.TextLayoutAndFallback` renders a kerning-enabled font through
+  `PdfPageRenderer`. All suites green.
+
 ## 0.81.0
 
 - Embedded CFF (Type1C) font writing: `PdfCanvas::SetEmbeddedCffFontAndSize`

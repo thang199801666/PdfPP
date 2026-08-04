@@ -528,6 +528,7 @@ void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
         }
     }
     double embeddedAdvance = 0.0;
+    std::uint16_t previousGlyph = 0xFFFFU;
     std::size_t byteIndex = 0;
     for (std::size_t characterIndex = 0; byteIndex < chunk.utf8Text.size(); ++characterIndex) {
         if (cffResource && characterIndex < chunk.glyphIds.size() &&
@@ -567,6 +568,13 @@ void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
             } catch (const std::exception&) {
                 // Fall back to the lightweight glyph below for malformed outlines.
             }
+            // Apply kerning with the previous glyph when a kern pair is defined.
+            if (previousGlyph != 0xFFFFU) {
+                const double kern = embeddedFont->GetCachedKerning(
+                    previousGlyph, chunk.glyphIds[characterIndex], 1.0) * cellWidth;
+                embeddedAdvance += kern;
+            }
+            previousGlyph = chunk.glyphIds[characterIndex];
             embeddedAdvance += glyphAdvance;
             if (outlineRendered) {
                 byteIndex += codePointLength(byteIndex);

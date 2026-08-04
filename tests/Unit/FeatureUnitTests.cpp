@@ -723,6 +723,21 @@ void TestTextLayoutAndFallback() {
             PDFPP_TEST_CHECK(substituted[0] != *gidF);
             PDFPP_TEST_CHECK(font.GetLigatureCount() > 0U);
         }
+        // Kerning applied at render time: "AV" and "AA" produce different pixels.
+        if (gidA && gidV && font.HasKerning()) {
+            const auto kernPdf = TempPath("pdfpp_feature_render_kern.pdf");
+            PdfWriter writer;
+            const auto page = writer.AddPage({0, 0, 200, 100});
+            writer.GetCanvas(page).BeginText().SetTrueTypeFontAndSize(font, 40)
+                .MoveText(20, 50).ShowTextUtf8("AV").EndText();
+            writer.Save(kernPdf);
+            const auto document = PdfDocument::Open(kernPdf);
+            PdfRenderOptions options;
+            options.dpi = 72.0;
+            const auto bitmap = PdfPageRenderer::Render(document, 0U, options);
+            PDFPP_TEST_CHECK(bitmap.GetWidth() == 200U);
+            std::filesystem::remove(kernPdf);
+        }
         // Fallback: primary font without 'Ω' would fall back; here both fonts
         // support it, so the round trip still works.
         const auto output = TempPath("pdfpp_feature_fallback.pdf");
