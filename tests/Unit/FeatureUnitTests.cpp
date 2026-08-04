@@ -787,6 +787,8 @@ void TestTextLayoutAndFallback() {
             // Arial and DejaVu place "AV" pairs in the GPOS table; ensure the
             // parser merged them into the kern store.
             PDFPP_TEST_CHECK(kern != 0.0);
+            // Reverse cmap: glyph for 'A' maps back to 'A'.
+            PDFPP_TEST_CHECK(font.GetUnicodeForGlyph(*gidA) == U'A');
         }
         // Ligature substitution: fi -> fi ligature glyph when the font has GSUB.
         const auto gidF = font.GetGlyphId(U'f');

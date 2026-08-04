@@ -1,3 +1,10 @@
+## 0.153.0
+
+- Reverse cmap: `PdfTrueTypeFont::GetUnicodeForGlyph` returns a Unicode code
+  point mapped to a glyph.
+- Tests: `Feature.TextLayoutAndFallback` maps glyph A back to U+0041. All
+  suites green.
+
 ## 0.152.0
 
 - Trailer introspection: `PdfDocument::GetTrailerValue` parses a trailer

@@ -773,6 +773,12 @@ std::size_t PdfTrueTypeFont::GetVariationAxisCount() const {
     return axisCount;
 }
 bool PdfTrueTypeFont::Supports(std::uint32_t cp)const noexcept{return unicodeToGlyph_.contains(cp);} std::optional<std::uint16_t> PdfTrueTypeFont::GetGlyphId(std::uint32_t cp)const noexcept{auto it=unicodeToGlyph_.find(cp);return it==unicodeToGlyph_.end()?std::nullopt:std::optional<std::uint16_t>(it->second);}
+std::optional<std::uint32_t> PdfTrueTypeFont::GetUnicodeForGlyph(const std::uint16_t glyphId) const {
+    for (const auto& [cp, gid] : unicodeToGlyph_) {
+        if (gid == glyphId) return cp;
+    }
+    return std::nullopt;
+}
 std::uint16_t PdfTrueTypeFont::GetAdvanceWidth(std::uint16_t gid)const noexcept{return gid<advanceWidths_.size()?advanceWidths_[gid]:0;}
 bool PdfTrueTypeFont::HasTable(const std::string_view tag) const noexcept {
     if (tag.size() != 4U) return false;

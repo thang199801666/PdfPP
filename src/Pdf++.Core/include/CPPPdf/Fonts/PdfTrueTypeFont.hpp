@@ -79,6 +79,9 @@ public:
     [[nodiscard]] std::size_t GetGlyphMappingCount() const noexcept;
     [[nodiscard]] bool Supports(std::uint32_t unicodeCodePoint) const noexcept;
     [[nodiscard]] std::optional<std::uint16_t> GetGlyphId(std::uint32_t unicodeCodePoint) const noexcept;
+    // Returns a Unicode code point that maps to the glyph (first cmap hit), or
+    // std::nullopt when the glyph is unmapped.
+    [[nodiscard]] std::optional<std::uint32_t> GetUnicodeForGlyph(std::uint16_t glyphId) const;
     [[nodiscard]] std::uint16_t GetAdvanceWidth(std::uint16_t glyphId) const noexcept;
     [[nodiscard]] double GetAdvanceWidth(std::uint16_t glyphId, double fontSize) const;
     [[nodiscard]] double GetCachedAdvanceWidth(std::uint16_t glyphId, double fontSize) const;
