@@ -1111,6 +1111,7 @@ void TestCffFontEmbedding() {
     PDFPP_TEST_CHECK(PdfCffParser::GetAdvanceWidth(font, 0U) >= 0.0);
     // Glyph 0 is .notdef (SID 0).
     PDFPP_TEST_CHECK(PdfCffParser::GetGlyphName(font, 0U) == ".notdef");
+    PDFPP_TEST_CHECK(PdfCffParser::GetGlyphUnicode(font, 0U) == 0U);
     PDFPP_TEST_CHECK(font.name == "Test");
     const auto output = TempPath("pdfpp_feature_cff.pdf");
     PdfWriter writer;

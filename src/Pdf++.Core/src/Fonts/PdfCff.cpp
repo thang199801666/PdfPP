@@ -5,6 +5,8 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 
 namespace CPPPdf {
 namespace {
@@ -647,6 +649,53 @@ std::string PdfCffParser::GetGlyphName(const PdfCffFont& font, const std::uint32
         return kCffStandardStrings[sid];
     }
     return "gid" + std::to_string(glyphId);
+}
+
+std::uint32_t PdfCffParser::GetGlyphUnicode(const PdfCffFont& font, const std::uint32_t glyphId) {
+    if (font.isCID || glyphId >= font.charset.size()) return 0U;
+    const std::uint32_t sid = font.charset[glyphId];
+    if (sid >= static_cast<std::uint32_t>(kCffStandardStringCount)) return 0U;
+    const std::string_view name = kCffStandardStrings[sid];
+    // Single-character Latin names map directly.
+    if (name.size() == 1U) {
+        const unsigned char c = static_cast<unsigned char>(name[0]);
+        if (c >= 0x21U && c <= 0x7EU) return c;
+        return 0U;
+    }
+    // Named Latin letters.
+    static const std::unordered_map<std::string_view, std::uint32_t> latinNames{
+        {"eacute", 0x00E9}, {"egrave", 0x00E8}, {"ecircumflex", 0x00EA}, {"edieresis", 0x00EB},
+        {"aacute", 0x00E1}, {"agrave", 0x00E0}, {"acircumflex", 0x00E2}, {"atilde", 0x00E3},
+        {"adieresis", 0x00E4}, {"aring", 0x00E5}, {"ccedilla", 0x00E7},
+        {"iacute", 0x00ED}, {"igrave", 0x00EC}, {"icircumflex", 0x00EE}, {"idieresis", 0x00EF},
+        {"oacute", 0x00F3}, {"ograve", 0x00F2}, {"ocircumflex", 0x00F4}, {"otilde", 0x00F5},
+        {"odieresis", 0x00F6}, {"uacute", 0x00FA}, {"ugrave", 0x00F9}, {"ucircumflex", 0x00FB},
+        {"udieresis", 0x00FC}, {"ntilde", 0x00F1}, {"yacute", 0x00FD}, {"ydieresis", 0x00FF},
+        {"Aacute", 0x00C1}, {"Agrave", 0x00C0}, {"Acircumflex", 0x00C2}, {"Atilde", 0x00C3},
+        {"Adieresis", 0x00C4}, {"Aring", 0x00C5}, {"Ccedilla", 0x00C7},
+        {"Eacute", 0x00C9}, {"Egrave", 0x00C8}, {"Ecircumflex", 0x00CA}, {"Edieresis", 0x00CB},
+        {"Iacute", 0x00CD}, {"Igrave", 0x00CC}, {"Icircumflex", 0x00CE}, {"Idieresis", 0x00CF},
+        {"Oacute", 0x00D3}, {"Ograve", 0x00D2}, {"Ocircumflex", 0x00D4}, {"Otilde", 0x00D5},
+        {"Odieresis", 0x00D6}, {"Uacute", 0x00DA}, {"Ugrave", 0x00D9}, {"Ucircumflex", 0x00DB},
+        {"Udieresis", 0x00DC}, {"Ntilde", 0x00D1}, {"Yacute", 0x00DD}, {"Ydieresis", 0x0178},
+        {"oe", 0x0153}, {"OE", 0x0152}, {"ae", 0x00E6}, {"AE", 0x00C6},
+        {"oslash", 0x00F8}, {"Oslash", 0x00D8}, {"lslash", 0x0142}, {"Lslash", 0x0141},
+        {"germandbls", 0x00DF}, {"eth", 0x00F0}, {"Eth", 0x00D0}, {"thorn", 0x00FE}, {"Thorn", 0x00DE},
+        {"scaron", 0x0161}, {"Scaron", 0x0160}, {"zcaron", 0x017E}, {"Zcaron", 0x017D},
+        {"quotesingle", 0x0027}, {"quotedblleft", 0x201C}, {"quotedblright", 0x201D},
+        {"endash", 0x2013}, {"emdash", 0x2014}, {"ellipsis", 0x2026}, {"bullet", 0x2022},
+        {"dagger", 0x2020}, {"daggerdbl", 0x2021}, {"exclamdown", 0x00A1}, {"questiondown", 0x00BF},
+        {"cent", 0x00A2}, {"sterling", 0x00A3}, {"currency", 0x00A4}, {"yen", 0x00A5},
+        {"brokenbar", 0x00A6}, {"section", 0x00A7}, {"dieresis", 0x00A8}, {"copyright", 0x00A9},
+        {"ordfeminine", 0x00AA}, {"guillemotleft", 0x00AB}, {"logicalnot", 0x00AC}, {"registered", 0x00AE},
+        {"macron", 0x00AF}, {"degree", 0x00B0}, {"plusminus", 0x00B1}, {"twosuperior", 0x00B2},
+        {"threesuperior", 0x00B3}, {"acute", 0x00B4}, {"mu", 0x00B5}, {"paragraph", 0x00B6},
+        {"periodcentered", 0x00B7}, {"cedilla", 0x00B8}, {"onesuperior", 0x00B9},
+        {"ordmasculine", 0x00BA}, {"guillemotright", 0x00BB}, {"onequarter", 0x00BC},
+        {"onehalf", 0x00BD}, {"threequarters", 0x00BE}, {"questiondown", 0x00BF},
+    };
+    const auto it = latinNames.find(name);
+    return it == latinNames.end() ? 0U : it->second;
 }
 
 } // namespace CPPPdf

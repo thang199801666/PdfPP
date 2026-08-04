@@ -85,6 +85,9 @@ public:
     // Returns the glyph's name from the CFF Standard Strings (SID), or "gidN"
     // for SIDs beyond the standard table.
     static std::string GetGlyphName(const PdfCffFont& font, std::uint32_t glyphId);
+    // Returns the Unicode code point for a glyph name (Latin block), or 0 when
+    // the name is not a known Latin character.
+    static std::uint32_t GetGlyphUnicode(const PdfCffFont& font, std::uint32_t glyphId);
 };
 
 } // namespace CPPPdf

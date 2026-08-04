@@ -1,3 +1,10 @@
+## 0.133.0
+
+- CFF glyph-to-Unicode: `PdfCffParser::GetGlyphUnicode` maps a glyph name
+  (Latin block) to its code point, supporting CFF text extraction.
+- Tests: `Feature.CffFontEmbedding` verifies .notdef maps to zero. All suites
+  green.
+
 ## 0.132.0
 
 - Sequential all-pages rendering: `PdfPageRenderer::RenderAllPages` renders an
