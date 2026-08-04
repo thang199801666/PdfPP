@@ -76,6 +76,16 @@ public:
         std::string content,
         PdfContentLayer layer = PdfContentLayer::Foreground);
 
+    // Sets a page's /CropBox (crop) or /MediaBox (resize) via an incremental
+    // update. Returns the modified page count.
+    [[nodiscard]] static std::size_t SetPageBox(
+        const std::filesystem::path& inputPath,
+        const std::filesystem::path& outputPath,
+        std::size_t pageIndex,
+        const PdfRectangle& box,
+        bool cropBox,
+        const PdfReaderOptions& readerOptions = {});
+
     [[nodiscard]] static PdfPageEditResult AddTextStamp(
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,

@@ -1,3 +1,10 @@
+## 0.83.0
+
+- Page geometry editing: `PdfPageEditor::SetPageBox` sets a page's `/CropBox`
+  or `/MediaBox` via an incremental update.
+- Tests: `API.PageEditingAndOrganization` crops a page and reads back the box,
+  and checks out-of-range rejection. All suites green.
+
 ## 0.82.0
 
 - Renderer kerning: `DrawTextChunk` applies the embedded font's cached kern

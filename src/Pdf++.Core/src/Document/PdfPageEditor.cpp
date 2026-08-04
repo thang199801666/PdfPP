@@ -684,4 +684,32 @@ PdfPageEditResult PdfPageEditor::ApplyEdits(
     return result;
 }
 
+std::size_t PdfPageEditor::SetPageBox(
+    const std::filesystem::path& inputPath,
+    const std::filesystem::path& outputPath,
+    const std::size_t pageIndex,
+    const PdfRectangle& box,
+    const bool cropBox,
+    const PdfReaderOptions& readerOptions) {
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (pageIndex >= document.GetPageCount()) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Page index is out of range.");
+    }
+    const PdfReference pageReference = document.GetPageReference(pageIndex);
+    const PdfObject& pageObject = document.GetObject(pageReference);
+    const PdfDictionary* dictionary = pageObject.AsDictionary();
+    if (!dictionary) throw PdfException(PdfErrorCode::MalformedObject, "Page is not a dictionary.");
+    PdfDictionary updated = *dictionary;
+    PdfArray rect;
+    rect.push_back(PdfObject(box.left));
+    rect.push_back(PdfObject(box.bottom));
+    rect.push_back(PdfObject(box.right));
+    rect.push_back(PdfObject(box.top));
+    updated.Put(PdfName(cropBox ? "CropBox" : "MediaBox"), PdfObject(std::move(rect)));
+    Internal::PdfIncrementalWriter writer(inputPath, outputPath, document);
+    writer.WriteDictionary(pageReference, updated);
+    writer.Finish(Internal::PdfIncrementalWriter::NextObjectNumber(document));
+    return 1U;
+}
+
 } // namespace CPPPdf

@@ -325,6 +325,15 @@ void TestPageEditingAndOrganization(const std::filesystem::path& base) {
     PDFPP_TEST_CHECK(duplicateResult.outputPageCount == 3U);
     PDFPP_TEST_CHECK(PdfDocument::Open(duplicated).GetPageCount() == 3U);
 
+    // Crop and resize a page box.
+    const auto cropped = TempPath("pdfpp_api_cropped.pdf");
+    PDFPP_TEST_CHECK(PdfPageEditor::SetPageBox(base, cropped, 0U,
+        PdfRectangle{0, 0, 200, 300}, true) == 1U);
+    auto croppedDocument = PdfDocument::Open(cropped);
+    PDFPP_TEST_CHECK(croppedDocument.GetPageInfo(0U).cropBox.right == 200);
+    PDFPP_TEST_CHECK(croppedDocument.GetPageInfo(0U).cropBox.top == 300);
+    ExpectThrows([&] { (void)PdfPageEditor::SetPageBox(base, cropped, 99U, PdfRectangle{}, true); });
+
     const auto splitDirectory = TempPath("pdfpp_api_split");
     std::filesystem::remove_all(splitDirectory);
     const auto split = PdfPageOrganizer::SplitEvery(base, splitDirectory, 1, "api");
@@ -948,7 +957,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 82U);
+    static_assert(CPPPdf::VersionMinor == 83U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -958,7 +967,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.82.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.83.0");
 }
 
 int RunApiCoverageTests() {
