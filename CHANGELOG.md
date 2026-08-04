@@ -1,3 +1,10 @@
+## 0.101.0
+
+- Regex redaction: `PdfRedactor::RedactRegex` covers every text occurrence
+  matching a regular expression (case-insensitive by default) per page.
+- Tests: `Feature.Redaction` redacts two phone numbers via one pattern. All
+  suites green.
+
 ## 0.100.0
 
 - Page label reading: `PdfDocument::GetPageLabels` parses the catalog

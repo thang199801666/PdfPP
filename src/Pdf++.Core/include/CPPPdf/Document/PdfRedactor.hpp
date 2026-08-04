@@ -20,6 +20,13 @@ public:
         double padding{1.0};
     };
 
+    struct RegexRedactionRequest final {
+        std::size_t pageIndex{};
+        std::string pattern; // regular expression to match and redact
+        bool caseInsensitive{true};
+        double padding{1.0};
+    };
+
     struct RedactionResult final {
         std::filesystem::path outputPath;
         std::size_t redactionCount{};
@@ -32,6 +39,13 @@ public:
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
         const std::vector<RedactionRequest>& requests,
+        const PdfReaderOptions& readerOptions = {});
+
+    // Redacts every occurrence matching a regular expression per page.
+    [[nodiscard]] static RedactionResult RedactRegex(
+        const std::filesystem::path& inputPath,
+        const std::filesystem::path& outputPath,
+        const std::vector<RegexRedactionRequest>& requests,
         const PdfReaderOptions& readerOptions = {});
 };
 

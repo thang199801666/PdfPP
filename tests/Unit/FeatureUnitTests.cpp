@@ -917,6 +917,23 @@ void TestRedaction() {
     PDFPP_TEST_CHECK(pageBytes.find("/Contents") != std::string::npos);
     std::filesystem::remove(input);
     std::filesystem::remove(output);
+
+    // Regex redaction covers both words matching the pattern.
+    const auto regexInput = TempPath("pdfpp_feature_redact_regex_input.pdf");
+    PdfWriter regexWriter;
+    const auto regexPage = regexWriter.AddPage({0, 0, 300, 300});
+    regexWriter.GetCanvas(regexPage).BeginText().SetFontAndSize("Helvetica", 12)
+        .MoveText(30, 200).ShowText("Call 555-0100 now or email 555-0101").EndText();
+    regexWriter.Save(regexInput);
+    const auto regexOutput = TempPath("pdfpp_feature_redact_regex_output.pdf");
+    const auto regexResult = PdfRedactor::RedactRegex(regexInput, regexOutput,
+        {PdfRedactor::RegexRedactionRequest{0U, R"(\d{3}-\d{4})"}});
+    PDFPP_TEST_CHECK(regexResult.redactionCount == 2U);
+    PDFPP_TEST_CHECK(regexResult.modifiedPageCount == 1U);
+    const auto regexDocument = PdfDocument::Open(regexOutput);
+    PDFPP_TEST_CHECK(regexDocument.GetPageCount() == 1U);
+    std::filesystem::remove(regexInput);
+    std::filesystem::remove(regexOutput);
 }
 
 void TestParallelRendering() {
