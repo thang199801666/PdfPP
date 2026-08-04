@@ -1,3 +1,9 @@
+## 0.135.0
+
+- Unicode case conversion: `PdfTextLayout::ToUpper`/`ToLower` handle ASCII and
+  Latin-1/Latin Extended-A letters.
+- Tests: `API.TextSearch` converts caf\u00e9 both directions. All suites green.
+
 ## 0.134.0
 
 - Text rendering mode: `PdfCanvas::SetTextRenderMode` sets the `Tr` operator

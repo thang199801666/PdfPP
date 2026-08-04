@@ -48,6 +48,11 @@ public:
     // Replaces Latin precomposed letters with their ASCII base (é -> e, ö -> o,
     // ç -> c, ...), keeping non-Latin code points unchanged.
     [[nodiscard]] static std::string RemoveDiacritics(std::string_view utf8);
+
+    // Unicode-aware case conversion for ASCII and Latin-1 letters; other code
+    // points are preserved.
+    [[nodiscard]] static std::string ToUpper(std::string_view utf8);
+    [[nodiscard]] static std::string ToLower(std::string_view utf8);
 };
 
 } // namespace CPPPdf
