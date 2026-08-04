@@ -232,6 +232,10 @@ class PdfDocument final {public:
     // Reads the catalog /PageLabels /Nums entries, sorted by page index.
     [[nodiscard]] std::vector<PdfPageLabelEntry> GetPageLabels() const;
 
+    // Returns the catalog /Metadata stream contents (XMP packet), or an empty
+    // string when the document has none.
+    [[nodiscard]] std::string GetXmpMetadata() const;
+
     // Lists the annotations on a page.
     [[nodiscard]] std::vector<PdfAnnotationInfo> GetAnnotations(std::size_t pageIndex) const;
 

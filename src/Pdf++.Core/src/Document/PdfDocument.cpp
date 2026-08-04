@@ -3509,6 +3509,23 @@ std::vector<PdfPageLabelEntry> PdfDocument::GetPageLabels() const {
     return result;
 }
 
+std::string PdfDocument::GetXmpMetadata() const {
+    const auto catalogRef = GetTrailerReference(PdfName("Root"));
+    if (!catalogRef) return {};
+    const auto& catalog = GetObject(*catalogRef);
+    const auto* catalogDict = catalog.AsDictionary();
+    if (!catalogDict) return {};
+    const auto* metadataValue = catalogDict->Find(PdfName("Metadata"));
+    const auto metadataRef = metadataValue ? metadataValue->AsReference() : std::nullopt;
+    if (!metadataRef) return {};
+    const auto& metadata = GetObject(PdfReference{metadataRef->first, metadataRef->second});
+    if (const auto* stream = metadata.AsStream()) {
+        const auto bytes = stream->bytes();
+        return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    }
+    return {};
+}
+
 std::vector<PdfAnnotationInfo> PdfDocument::GetAnnotations(const std::size_t pageIndex) const {
     std::vector<PdfAnnotationInfo> result;
     const auto& pages = pageReferences();

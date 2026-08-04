@@ -1,3 +1,10 @@
+## 0.125.0
+
+- XMP reading: `PdfDocument::GetXmpMetadata` returns the catalog `/Metadata`
+  stream, round-tripping `PdfWriter::SetXmpMetadata`.
+- Tests: `API.WriterDocumentInfo` reads back the embedded packet. All suites
+  green.
+
 ## 0.124.0
 
 - Accent-insensitive search: `PdfTextSearchOptions::ignoreAccents` matches
