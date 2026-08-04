@@ -1,3 +1,11 @@
+## 0.85.0
+
+- GPOS PairPos kerning: the TrueType parser now reads OpenType `GPOS`
+  lookup-type-2 PairPosFormat1 subtables (xAdvance only) and merges the pairs
+  into the kern store, covering modern fonts that omit the legacy `kern` table.
+- Tests: `Feature.TextLayoutAndFallback` asserts a non-zero "AV" kern from the
+  system font (Arial/DejaVu place it in GPOS). All suites green.
+
 ## 0.84.0
 
 - Indexed palette optimization: the writer converts small RGB images (<=32

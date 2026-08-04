@@ -202,6 +202,77 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
             }
         }
     }
+    if(const auto gpos=tables.find("GPOS");gpos!=tables.end()&&gpos->second.length>=10U){
+        // GPOS header: version, scriptListOffset, featureListOffset, lookupListOffset.
+        const std::size_t gb=gpos->second.offset;
+        const std::uint32_t lookupListOff=Read32(bytes,gb+8U);
+        if(lookupListOff+6U<=gpos->second.length){
+            const std::size_t ll=gb+lookupListOff;
+            const std::uint16_t lookupCount=Read16(bytes,ll);
+            for(std::uint16_t l=0;l<lookupCount;++l){
+                const std::uint16_t lookupOff=Read16(bytes,ll+2U+std::size_t(l)*2U);
+                if(lookupOff==0U||ll+lookupOff+10U>gb+gpos->second.length)continue;
+                const std::size_t lookup=ll+lookupOff;
+                const std::uint16_t lookupType=Read16(bytes,lookup);
+                const std::uint16_t subCount=Read16(bytes,lookup+4U);
+                // PairPos (lookup type 2) supplies horizontal kerning for fonts
+                // that place pairs in GPOS rather than the legacy kern table.
+                for(std::uint16_t s=0;s<subCount&&lookupType==2U;++s){
+                    const std::uint16_t subOff=Read16(bytes,lookup+6U+std::size_t(s)*2U);
+                    if(subOff==0U||lookup+subOff+6U>gb+gpos->second.length)continue;
+                    const std::size_t sub=lookup+subOff;
+                    const std::uint16_t format=Read16(bytes,sub);
+                    if(format!=1U)continue; // PairPosFormat1
+                    const std::uint16_t coverageOff=Read16(bytes,sub+2U);
+                    const std::uint16_t valueFormat1=Read16(bytes,sub+4U);
+                    const std::uint16_t valueFormat2=Read16(bytes,sub+6U);
+                    const std::uint16_t pairSetCount=Read16(bytes,sub+8U);
+                    // We only consume the xAdvance field (bit 2) of value1.
+                    const bool hasXAdvance1=(valueFormat1&0x0004U)!=0U;
+                    if(!hasXAdvance1||coverageOff==0U||coverageOff+4U>gpos->second.length)continue;
+                    // Fields appear in order of set bits; each is 2 bytes.
+                    const std::size_t value1Size=std::popcount(valueFormat1)*2U;
+                    const std::size_t value2Size=std::popcount(valueFormat2)*2U;
+                    // Offset of xAdvance within value1 (bits 0..1 come first).
+                    const std::size_t xAdvanceOffset=std::popcount(valueFormat1&0x0003U)*2U;
+                    const std::size_t cov=sub+coverageOff;
+                    const std::uint16_t covFormat=Read16(bytes,cov);
+                    const std::uint16_t covCount=Read16(bytes,cov+2U);
+                    for(std::uint16_t p=0;p<pairSetCount;++p){
+                        const std::size_t pairOffAt=sub+10U+std::size_t(p)*2U;
+                        if(pairOffAt+2U>gb+gpos->second.length)break;
+                        const std::uint16_t pairOff=Read16(bytes,pairOffAt);
+                        if(pairOff==0U||sub+pairOff+2U>gb+gpos->second.length)continue;
+                        const std::size_t pairSet=sub+pairOff;
+                        const std::uint16_t pairValueCount=Read16(bytes,pairSet);
+                        // First glyph from coverage (format 1) or array (format 2).
+                        std::uint16_t firstGlyph=0;
+                        if(covFormat==1U&&p<covCount){
+                            firstGlyph=Read16(bytes,cov+2U+std::size_t(p)*2U);
+                        } else if(covFormat==2U){
+                            // Format 2: sorted [start,end) ranges; find the range holding p.
+                            const std::uint16_t rangeCount=Read16(bytes,cov+2U);
+                            for(std::uint16_t r=0;r<rangeCount;++r){
+                                const std::size_t at=cov+4U+std::size_t(r)*6U;
+                                if(at+6U>gb+gpos->second.length)break;
+                                const std::uint16_t start=Read16(bytes,at);
+                                const std::uint16_t end=Read16(bytes,at+2U);
+                                if(p>=start&&p<end){firstGlyph=Read16(bytes,at+4U)+(p-start);break;}
+                            }
+                        }
+                        for(std::uint16_t v=0;v<pairValueCount;++v){
+                            // Record layout: secondGlyph (2) + value1 + value2.
+                            const std::size_t rec=pairSet+2U+std::size_t(v)*(2U+value1Size+value2Size);
+                            if(rec+2U+value1Size+value2Size>gb+gpos->second.length)break;
+                            const std::uint16_t secondGlyph=Read16(bytes,rec);
+                            const std::int16_t xAdvance=ReadS16(bytes,rec+2U+xAdvanceOffset);
+                            if(xAdvance!=0)f.kerning_.emplace((std::uint64_t(firstGlyph)<<16U)|secondGlyph,xAdvance);
+                        }
+                    }
+                }
+            }
+        }
+    }
     f.bytes_=std::move(bytes);return f;
 }
 const std::string& PdfTrueTypeFont::GetSourceName()const noexcept{return sourceName_;} const std::vector<std::uint8_t>& PdfTrueTypeFont::GetBytes()const noexcept{return bytes_;}

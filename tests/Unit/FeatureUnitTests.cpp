@@ -712,6 +712,9 @@ void TestTextLayoutAndFallback() {
             const double kern = font.GetKerning(*gidA, *gidV, 100.0);
             PDFPP_TEST_CHECK(std::abs(kern) < 100.0);
             PDFPP_TEST_CHECK(font.GetCachedKerning(*gidA, *gidV, 100.0) == kern);
+            // Arial and DejaVu place "AV" pairs in the GPOS table; ensure the
+            // parser merged them into the kern store.
+            PDFPP_TEST_CHECK(kern != 0.0);
         }
         // Ligature substitution: fi -> fi ligature glyph when the font has GSUB.
         const auto gidF = font.GetGlyphId(U'f');
@@ -724,8 +727,7 @@ void TestTextLayoutAndFallback() {
             PDFPP_TEST_CHECK(font.GetLigatureCount() > 0U);
         }
         // Kerning applied at render time: "AV" and "AA" produce different pixels.
-        if (gidA && gidV && font.HasKerning()) {
-            const auto kernPdf = TempPath("pdfpp_feature_render_kern.pdf");
+        if (gidA && gidV && font.HasKerning()) {            const auto kernPdf = TempPath("pdfpp_feature_render_kern.pdf");
             PdfWriter writer;
             const auto page = writer.AddPage({0, 0, 200, 100});
             writer.GetCanvas(page).BeginText().SetTrueTypeFontAndSize(font, 40)
