@@ -714,6 +714,14 @@ void TestTextLayoutAndFallback() {
         const std::array<PdfTrueTypeFont, 1> fallbacks{font};
         writer.GetCanvas(page).BeginText().SetTrueTypeFontAndSize(font, 12)
             .MoveText(20, 250).ShowTextUtf8WithFallback("AB", fallbacks).EndText();
+        // Vertical writing produces a rotated text matrix.
+        writer.GetCanvas(page).BeginText().SetTrueTypeFontAndSize(font, 12)
+            .MoveText(60, 250).ShowTextVertical("vertical").EndText();
+        PDFPP_TEST_CHECK(!writer.GetCanvas(page).IsVerticalWriting());
+        writer.GetCanvas(page).SetVerticalWriting(true);
+        PDFPP_TEST_CHECK(writer.GetCanvas(page).IsVerticalWriting());
+        writer.GetCanvas(page).SetVerticalWriting(false);
+        PDFPP_TEST_CHECK(!writer.GetCanvas(page).IsVerticalWriting());
         writer.Save(output);
         const auto document = PdfDocument::Open(output);
         PDFPP_TEST_CHECK(document.GetPageCount() == 1U);

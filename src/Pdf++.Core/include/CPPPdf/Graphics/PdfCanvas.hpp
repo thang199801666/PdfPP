@@ -87,6 +87,13 @@ public:
     PdfCanvas& ShowTextUtf8WithFallback(std::string utf8Text,
                                         std::span<const PdfTrueTypeFont> fallbackFonts);
     PdfCanvas& DrawTextUtf8(const PdfTrueTypeFont& font, std::string utf8Text, const PdfTextLayoutOptions& options);
+    // Vertical writing: rotates the text matrix 90° counter-clockwise so
+    // subsequent text runs top-to-bottom. `SetVerticalWriting(false)` restores
+    // horizontal writing.
+    PdfCanvas& SetVerticalWriting(bool vertical);
+    [[nodiscard]] bool IsVerticalWriting() const noexcept;
+    // Shows text in vertical (top-to-bottom) direction using the active font.
+    PdfCanvas& ShowTextVertical(std::string utf8Text);
     [[nodiscard]] static PdfTextLayoutResult MeasureTextLayout(
         const PdfTrueTypeFont& font, std::string_view utf8Text,
         const PdfTextLayoutOptions& options);

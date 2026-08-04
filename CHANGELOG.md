@@ -1,3 +1,11 @@
+## 0.66.0
+
+- Vertical writing: `PdfCanvas::SetVerticalWriting` rotates the text matrix 90°
+  for top-to-bottom runs, `IsVerticalWriting` reports the state, and
+  `ShowTextVertical` draws a single vertical run. Useful for CJK text.
+- Tests: `Feature.TextLayoutAndFallback` covers vertical-mode toggling and a
+  vertical text run. All suites green.
+
 ## 0.65.0
 
 - Parallel rendering: `PdfPageRenderer::RenderAllPagesParallel` renders every

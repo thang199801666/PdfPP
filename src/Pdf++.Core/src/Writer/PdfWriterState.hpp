@@ -78,6 +78,7 @@ struct PdfWriterPage {
     std::string content;
     std::string fontName{"Helvetica"};
     double currentFontSize{0.0};
+    bool verticalWriting{false};
     std::vector<std::size_t> imageIndices;
     std::vector<std::size_t> extGStateIndices;
     std::vector<std::size_t> embeddedFontIndices;

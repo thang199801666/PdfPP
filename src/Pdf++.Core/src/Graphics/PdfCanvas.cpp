@@ -131,6 +131,33 @@ double PdfCanvas::GetCurrentFontSize() const noexcept {
     if (!state_ || pageIndex_ >= state_->pages.size()) return 0.0;
     return state_->pages[pageIndex_].currentFontSize;
 }
+
+PdfCanvas& PdfCanvas::SetVerticalWriting(const bool vertical) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& page = state_->pages[pageIndex_];
+    if (vertical == page.verticalWriting) return *this;
+    page.verticalWriting = vertical;
+    // Rotate the text line matrix 90° CCW (horizontal baseline -> vertical).
+    if (vertical) {
+        SetTextMatrix(0, -1, 1, 0, 0, 0);
+    } else {
+        SetTextMatrix(1, 0, 0, 1, 0, 0);
+    }
+    return *this;
+}
+
+bool PdfCanvas::IsVerticalWriting() const noexcept {
+    if (!state_ || pageIndex_ >= state_->pages.size()) return false;
+    return state_->pages[pageIndex_].verticalWriting;
+}
+
+PdfCanvas& PdfCanvas::ShowTextVertical(std::string utf8Text) {
+    const bool wasVertical = IsVerticalWriting();
+    SetVerticalWriting(true);
+    ShowTextUtf8(std::move(utf8Text));
+    SetVerticalWriting(wasVertical);
+    return *this;
+}
 PdfCanvas& PdfCanvas::SetTextMatrix(double a,double b,double c,double d,double e,double f){Append(number(a)+" "+number(b)+" "+number(c)+" "+number(d)+" "+number(e)+" "+number(f)+" Tm\n");return *this;}
 PdfCanvas& PdfCanvas::MoveText(double x,double y){Append(number(x)+" "+number(y)+" Td\n");return *this;}
 PdfCanvas& PdfCanvas::ShowText(std::string text){Append("("+escape(text)+") Tj\n");return *this;}
