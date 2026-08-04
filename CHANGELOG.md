@@ -1,3 +1,11 @@
+## 0.98.0
+
+- Word extraction: `PdfTextExtractor::ExtractWords` groups text chunks into
+  words (splitting on whitespace and horizontal gaps) and returns each word's
+  bounding box, useful for text selection.
+- Tests: `API.TextSearch` verifies "Hello World" yields two words with correct
+  boxes. All suites green.
+
 ## 0.97.0
 
 - Renderer GPOS mark positioning: combining marks whose anchor is defined over

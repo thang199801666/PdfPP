@@ -1,8 +1,8 @@
 #include <CPPPdf/Text/PdfTextExtractor.hpp>
 #include <CPPPdf/Content/PdfContentProcessor.hpp>
 #include <CPPPdf/Fonts/PdfFontResource.hpp>
-
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <unordered_map>
@@ -308,6 +308,59 @@ std::string PdfTextExtractor::ExtractText(
     const std::string_view content,
     const PdfTextExtractionRequest& request) {
     return BuildText(ExtractChunks(content, request), request);
+}
+
+std::vector<PdfExtractedWord> PdfTextExtractor::ExtractWords(
+    const std::vector<PdfTextChunk>& chunks,
+    const double wordGapThreshold) {
+    std::vector<PdfExtractedWord> words;
+    PdfExtractedWord current;
+    bool hasCurrent = false;
+    for (std::size_t i = 0; i < chunks.size(); ++i) {
+        const auto& chunk = chunks[i];
+        if (chunk.utf8Text.empty() || chunk.boundingBox.empty()) continue;
+        // A whitespace-only chunk terminates the current word.
+        const bool isWhitespace = std::all_of(chunk.utf8Text.begin(), chunk.utf8Text.end(),
+            [](const unsigned char c) { return std::isspace(c) != 0; });
+        if (isWhitespace) {
+            if (hasCurrent) {
+                words.push_back(current);
+                current = PdfExtractedWord{};
+                hasCurrent = false;
+            }
+            continue;
+        }
+        if (!hasCurrent) {
+            current.text = chunk.utf8Text;
+            current.boundingBox = chunk.boundingBox;
+            current.firstChunkIndex = i;
+            current.chunkCount = 1U;
+            hasCurrent = true;
+            continue;
+        }
+        // Start a new word when there is a horizontal gap or a vertical break.
+        const double gap = chunk.boundingBox.left - current.boundingBox.right;
+        const double sameLine = std::abs(chunk.boundingBox.bottom - current.boundingBox.bottom);
+        const bool separated = gap > std::max(wordGapThreshold, 0.0) ||
+            sameLine > std::max(current.boundingBox.height(), chunk.boundingBox.height()) * 0.5;
+        if (separated) {
+            words.push_back(current);
+            current = PdfExtractedWord{};
+            current.text = chunk.utf8Text;
+            current.boundingBox = chunk.boundingBox;
+            current.firstChunkIndex = i;
+            current.chunkCount = 1U;
+            continue;
+        }
+        current.text += chunk.utf8Text;
+        current.boundingBox.right = std::max(current.boundingBox.right, chunk.boundingBox.right);
+        current.boundingBox.top = std::max(current.boundingBox.top, chunk.boundingBox.top);
+        current.boundingBox.left = std::min(current.boundingBox.left, chunk.boundingBox.left);
+        current.boundingBox.bottom = std::min(current.boundingBox.bottom, chunk.boundingBox.bottom);
+        ++current.chunkCount;
+    }
+    if (hasCurrent) words.push_back(current);
+    return words;
 }
 
 } // namespace CPPPdf

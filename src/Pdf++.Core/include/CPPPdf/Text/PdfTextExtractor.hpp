@@ -66,6 +66,15 @@ struct PdfTextExtractionRequest {
         std::vector<PdfTextChunk>&)> xObjectHandler;
 };
 
+// A single word assembled from contiguous text chunks (grouped by horizontal
+// gaps) with its bounding box.
+struct PdfExtractedWord final {
+    std::string text;
+    PdfRectangle boundingBox;
+    std::size_t firstChunkIndex{};
+    std::size_t chunkCount{};
+};
+
 class PdfTextExtractor final {
 public:
     [[nodiscard]] static std::vector<PdfTextChunk> ExtractChunks(
@@ -79,6 +88,12 @@ public:
     [[nodiscard]] static std::string ExtractText(
         std::string_view content,
         const PdfTextExtractionRequest& request = {});
+
+    // Groups chunks into words based on the horizontal gap threshold
+    // (wordGapThreshold in the request options).
+    [[nodiscard]] static std::vector<PdfExtractedWord> ExtractWords(
+        const std::vector<PdfTextChunk>& chunks,
+        double wordGapThreshold = 3.0);
 };
 
 } // namespace CPPPdf

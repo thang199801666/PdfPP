@@ -205,6 +205,14 @@ void TestTextSearch() {
     ExpectThrows([&] { (void)PdfTextSearch::Find(chunks, ""); });
     ExpectThrows([&] { (void)PdfTextSearch::FindRegex(chunks, "["); });
 
+    // Word extraction groups chunks into words by horizontal gaps.
+    const auto words = PdfTextExtractor::ExtractWords(chunks, 3.0);
+    PDFPP_TEST_CHECK(words.size() == 2);
+    PDFPP_TEST_CHECK(words[0].text == "Hello");
+    PDFPP_TEST_CHECK(words[1].text == "World");
+    PDFPP_TEST_CHECK(words[0].boundingBox.right == 25);
+    PDFPP_TEST_CHECK(words[1].boundingBox.left == 28);
+
     // PdfDocument::SearchText convenience over a written page.
     const auto searchPath = TempPath("pdfpp_api_search.pdf");
     PdfWriter writer;
@@ -985,7 +993,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 97U);
+    static_assert(CPPPdf::VersionMinor == 98U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -995,7 +1003,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.97.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.98.0");
 }
 
 int RunApiCoverageTests() {
