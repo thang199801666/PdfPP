@@ -209,6 +209,17 @@ double PdfCanvas::GetCurrentFontSize() const noexcept {
     return state_->pages[pageIndex_].currentFontSize;
 }
 
+double PdfCanvas::MeasureTextUtf8(const std::string_view utf8Text) const {
+    if (!state_ || pageIndex_ >= state_->pages.size()) return 0.0;
+    const auto& page = state_->pages[pageIndex_];
+    if (!page.activeEmbeddedFontIndex || *page.activeEmbeddedFontIndex >= state_->embeddedFonts.size()) {
+        return 0.0;
+    }
+    const auto& font = state_->embeddedFonts[*page.activeEmbeddedFontIndex].font;
+    if (page.currentFontSize <= 0.0) return 0.0;
+    return font.MeasureTextUtf8(utf8Text, page.currentFontSize);
+}
+
 PdfCanvas& PdfCanvas::SetType1FontAndSize(const PdfType1Font& font, const double size) {
     if (size <= 0.0 || !std::isfinite(size)) throw std::invalid_argument("Font size must be positive and finite.");
     if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");

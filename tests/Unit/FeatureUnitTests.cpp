@@ -842,6 +842,18 @@ void TestTextLayoutAndFallback() {
             PDFPP_TEST_CHECK(bitmap.GetWidth() == 200U);
             std::filesystem::remove(markPdf);
         }
+        // Measure text with the active TrueType font.
+        {
+            PdfWriter measureWriter;
+            const auto measurePage = measureWriter.AddPage({0, 0, 300, 200});
+            auto measureCanvas = measureWriter.GetCanvas(measurePage);
+            PDFPP_TEST_CHECK(measureCanvas.MeasureTextUtf8("x") == 0.0);
+            measureCanvas.SetTrueTypeFontAndSize(font, 20.0);
+            const double measured = measureCanvas.MeasureTextUtf8("Hello");
+            PDFPP_TEST_CHECK(measured > 0.0);
+            const double measuredTwo = measureCanvas.MeasureTextUtf8("Hello World");
+            PDFPP_TEST_CHECK(measuredTwo > measured);
+        }
         // Kerning applied at render time: "AV" and "AA" produce different pixels.
         if (gidA && gidV && font.HasKerning()) {            const auto kernPdf = TempPath("pdfpp_feature_render_kern.pdf");
             PdfWriter writer;

@@ -1,3 +1,10 @@
+## 0.139.0
+
+- Canvas text measurement: `PdfCanvas::MeasureTextUtf8` returns the advance
+  width of UTF-8 text using the active TrueType font and size.
+- Tests: `Feature.TextLayoutAndFallback` measures "Hello" and the longer
+  "Hello World". All suites green.
+
 ## 0.138.0
 
 - Page moving: `PdfPageOrganizer::MovePage` relocates a page to a new index.

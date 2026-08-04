@@ -100,6 +100,9 @@ public:
     PdfCanvas& SetFontAndSize(std::string base14Font, double size);
     PdfCanvas& SetTrueTypeFontAndSize(const PdfTrueTypeFont& font, double size);
     [[nodiscard]] double GetCurrentFontSize() const noexcept;
+    // Measures UTF-8 text with the active TrueType font and size. Returns 0
+    // when no TrueType font is active.
+    [[nodiscard]] double MeasureTextUtf8(std::string_view utf8Text) const;
     // Selects an embedded Type1 font for subsequent text. The font program is
     // stored in the document and written as a /FontFile stream.
     PdfCanvas& SetType1FontAndSize(const PdfType1Font& font, double size);
