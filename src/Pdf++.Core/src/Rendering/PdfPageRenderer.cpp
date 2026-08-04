@@ -1628,6 +1628,17 @@ PdfBitmap PdfPageRenderer::Render(
     return Downsample(bitmap, options.antiAliasSamples, options.background);
 }
 
+std::vector<PdfRenderResult> PdfPageRenderer::RenderAllPages(
+    const PdfDocument& document,
+    const PdfRenderOptions& options) {
+    std::vector<PdfRenderResult> result;
+    result.reserve(document.GetPageCount());
+    for (std::size_t i = 0; i < document.GetPageCount(); ++i) {
+        result.push_back({Render(document, i, options), i});
+    }
+    return result;
+}
+
 std::vector<PdfRenderResult> PdfPageRenderer::RenderAllPagesParallel(
     const std::filesystem::path& path,
     const PdfRenderOptions& options,

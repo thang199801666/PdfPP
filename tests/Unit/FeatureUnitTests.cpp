@@ -980,6 +980,8 @@ void TestParallelRendering() {
     }
     // The parallel result must match a sequential render pixel-for-pixel.
     const auto document = PdfDocument::Open(output);
+    const auto allSequential = PdfPageRenderer::RenderAllPages(document, options);
+    PDFPP_TEST_CHECK(allSequential.size() == 3U);
     for (std::size_t i = 0U; i < parallel.size(); ++i) {
         const auto sequential = PdfPageRenderer::Render(document, i, options);
         PDFPP_TEST_CHECK(sequential.GetWidth() == parallel[i].bitmap.GetWidth());

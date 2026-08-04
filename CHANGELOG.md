@@ -1,3 +1,10 @@
+## 0.132.0
+
+- Sequential all-pages rendering: `PdfPageRenderer::RenderAllPages` renders an
+  already-open document's pages in order.
+- Tests: `Feature.ParallelRendering` verifies the sequential path matches
+  parallel output. All suites green.
+
 ## 0.131.0
 
 - GPOS CursivePos: the TrueType parser reads lookup-type-3 entry/exit anchors

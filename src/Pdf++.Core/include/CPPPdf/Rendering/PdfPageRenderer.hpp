@@ -35,6 +35,11 @@ public:
         std::size_t pageIndex,
         const PdfRenderOptions& options = {});
 
+    // Renders every page of an already-open document sequentially.
+    [[nodiscard]] static std::vector<PdfRenderResult> RenderAllPages(
+        const PdfDocument& document,
+        const PdfRenderOptions& options = {});
+
     // Renders every page in parallel. Each worker opens an independent
     // PdfDocument from `path` (so no mutable resolver/cache state is shared).
     // Falls back to sequential rendering when the file cannot be reopened or
