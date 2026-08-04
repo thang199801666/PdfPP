@@ -822,6 +822,43 @@ void TestParallelRendering() {
     std::filesystem::remove(output);
 }
 
+void TestJpxImageWrite() {
+    // Build a minimal JPEG 2000 codestream header (SOC + SIZ) for a 2x1 image
+    // and write it through the writer; the output must carry /JPXDecode.
+    const std::vector<std::byte> jpx = {
+        std::byte{0xFF}, std::byte{0x4F}, std::byte{0xFF}, std::byte{0x51}, // SOC
+        std::byte{0xFF}, std::byte{0x51},                                 // SIZ
+        std::byte{0x00}, std::byte{0x29},                                 // Lsiz = 41
+        std::byte{0x00}, std::byte{0x00},                                 // Rsiz
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x02}, // Xsiz = 2
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x01}, // Ysiz = 1
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, // XOsiz
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, // YOsiz
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x02}, // XTsiz
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x01}, // YTsiz
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, // XTOsiz
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, // YTOsiz
+        std::byte{0x00}, std::byte{0x03},                                 // Csiz = 3 components
+        std::byte{0x01}, std::byte{0x01}, std::byte{0x00},                 // Ssiz
+        std::byte{0x01}, std::byte{0x01}, std::byte{0x00},
+        std::byte{0x01}, std::byte{0x01}, std::byte{0x00},
+    };
+    const auto image = PdfImage::FromJpeg2000(2U, 1U, jpx);
+    PDFPP_TEST_CHECK(image.GetEncoding() == PdfImageEncoding::Jpx);
+    const auto output = TempPath("pdfpp_feature_jpx.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 100, 100});
+    writer.GetCanvas(page).DrawImage(image, {10, 10, 50, 30});
+    writer.Save(output);
+    const std::string bytes = ReadText(output);
+    PDFPP_TEST_CHECK(bytes.find("/JPXDecode") != std::string::npos);
+    auto document = PdfDocument::Open(output);
+    const auto images = document.ExtractImages(0U);
+    PDFPP_TEST_CHECK(!images.empty());
+    PDFPP_TEST_CHECK(images[0].info.encoding == PdfImageEncoding::Jpx);
+    std::filesystem::remove(output);
+}
+
 void TestPortfolio() {
     const auto output = TempPath("pdfpp_feature_portfolio.pdf");
     PdfWriter writer;
@@ -1326,6 +1363,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.Portfolio", TestPortfolio);
     runner.Run("Feature.Redaction", TestRedaction);
     runner.Run("Feature.ParallelRendering", TestParallelRendering);
+    runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

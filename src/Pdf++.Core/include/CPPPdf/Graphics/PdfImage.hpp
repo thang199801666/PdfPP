@@ -100,6 +100,17 @@ public:
 
     static PdfImage FromJpeg(std::span<const std::byte> jpegBytes);
 
+    // Creates an image whose payload is a JPEG 2000 (JPX) codestream; the
+    // width/height are read from the SOC (FF 4F FF 51) + SIZ markers when
+    // present, otherwise they must be supplied via the later overload.
+    static PdfImage FromJpeg2000(std::span<const std::byte> jpxBytes);
+    static PdfImage FromJpeg2000(std::uint32_t width, std::uint32_t height,
+                                 std::span<const std::byte> jpxBytes);
+
+    // Creates an image from a CCITT Group 4 fax codestream (K=1).
+    static PdfImage FromCcitt(std::uint32_t width, std::uint32_t height,
+                              std::span<const std::byte> faxBytes);
+
     static PdfImage FromJpegFile(const std::filesystem::path& path);
 
     static PdfImage FromGray(

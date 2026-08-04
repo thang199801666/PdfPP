@@ -1,3 +1,15 @@
+## 0.67.0
+
+- Image encoding on write: the writer now keeps JPEG (DCT), JPEG 2000 (JPX)
+  and CCITT fax sources in their native encoding (`/DCTDecode`, `/JPXDecode`,
+  `/CCITTFaxDecode`) instead of re-compressing with Flate, and a
+  `PdfSaveOptions::preserveImageEncodings` flag controls the behavior.
+- `PdfImage::FromJpeg2000` parses the JPX SIZ marker for width/height and
+  `PdfImage::FromCcitt` wraps CCITT Group 4 payloads.
+- Tests: `Feature.JpxImageWrite` writes a minimal JPEG 2000 image and verifies
+  the `/JPXDecode` filter and extraction. All suites green (30 feature
+  subtests).
+
 ## 0.66.0
 
 - Vertical writing: `PdfCanvas::SetVerticalWriting` rotates the text matrix 90°

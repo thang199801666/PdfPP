@@ -41,7 +41,7 @@ secondary scope.
 - Implement tiling patterns, shadings and output intents.
 - Tiling patterns are parsed (`/Pattern cs` + `scn/SCN`) and rendered: the tile content stream is replayed for every tile intersecting the filled region, honoring `/BBox`, `/XStep`, `/YStep`, and `/Matrix`.
 - Improve image masks, interpolation, downsampling and caching.
-- The renderer caches decoded images per object number within a render pass and supersamples via `Downsample` when `antiAliasSamples > 1`.
+- The renderer caches decoded images per object number within a render pass and supersamples via `Downsample` when `antiAliasSamples > 1`. The writer preserves JPEG/JPX/CCITT encodings (`preserveImageEncodings`) and `PdfImage::FromJpeg2000`/`FromCcitt` create native payloads.
 - Add rendering comparison tests against independent reference renderers.
 
 ## Phase 3: Fonts, Text and Layout

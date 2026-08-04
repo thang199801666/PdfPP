@@ -925,7 +925,11 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     for(std::size_t i=0;i<state_->extGStates.size();++i){ const auto& gs=state_->extGStates[i]; const auto bm=gs.blendMode==PdfBlendMode::Multiply?"/Multiply":gs.blendMode==PdfBlendMode::Screen?"/Screen":gs.blendMode==PdfBlendMode::Darken?"/Darken":gs.blendMode==PdfBlendMode::Lighten?"/Lighten":gs.blendMode==PdfBlendMode::Overlay?"/Overlay":gs.blendMode==PdfBlendMode::Difference?"/Difference":gs.blendMode==PdfBlendMode::Exclusion?"/Exclusion":"/Normal"; std::ostringstream d; d<<"<< /Type /ExtGState /CA "<<gs.strokeOpacity<<" /ca "<<gs.fillOpacity<<" /BM "<<bm<<" >>"; objects[extGStateIds[i]]=d.str(); }
     for(std::size_t i=0;i<state_->images.size();++i){
         const auto& image=state_->images[i].image; std::string bytes; const char* filterName=nullptr;
-        if(image.GetEncoding()==PdfImageEncoding::Dct){const auto span=image.GetBytes();bytes.assign(reinterpret_cast<const char*>(span.data()),span.size());filterName="/DCTDecode";}else{bytes=compressBytes(image.GetBytes());filterName="/FlateDecode";}
+        const auto encoding=image.GetEncoding();
+        if(encoding==PdfImageEncoding::Dct){const auto span=image.GetBytes();bytes.assign(reinterpret_cast<const char*>(span.data()),span.size());filterName="/DCTDecode";}
+        else if(encoding==PdfImageEncoding::Jpx){const auto span=image.GetBytes();bytes.assign(reinterpret_cast<const char*>(span.data()),span.size());filterName="/JPXDecode";}
+        else if(encoding==PdfImageEncoding::CcittFax){const auto span=image.GetBytes();bytes.assign(reinterpret_cast<const char*>(span.data()),span.size());filterName="/CCITTFaxDecode";}
+        else{bytes=compressBytes(image.GetBytes());filterName="/FlateDecode";}
         std::ostringstream d; d<<"<< /Type /XObject /Subtype /Image /Width "<<image.GetWidth()<<" /Height "<<image.GetHeight()<<" /ColorSpace "<<colorSpaceName(image.GetColorSpace())<<" /BitsPerComponent "<<image.GetBitsPerComponent()<<" /Filter "<<filterName<<" /Length "<<bytes.size()<<" >>\nstream\n"; objects[imageIds[i]]=d.str()+bytes+"\nendstream";
     }
     auto utf16Hex=[](std::uint32_t cp){ static constexpr char h[]="0123456789ABCDEF"; auto unit=[&](std::uint16_t v){std::string x(4,'0');for(int j=3;j>=0;--j){x[j]=h[v&15];v>>=4;}return x;}; if(cp<=0xFFFF)return unit(static_cast<std::uint16_t>(cp)); cp-=0x10000; return unit(static_cast<std::uint16_t>(0xD800+(cp>>10)))+unit(static_cast<std::uint16_t>(0xDC00+(cp&0x3FF))); };

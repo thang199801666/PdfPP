@@ -124,6 +124,69 @@ PdfImage PdfImage::FromJpeg(const std::span<const std::byte> jpegBytes) {
                     info.precision, std::vector<std::byte>(jpegBytes.begin(), jpegBytes.end()));
 }
 
+namespace {
+// Reads the width/height from a JPEG 2000 codestream SIZ marker when present.
+// Returns false when the marker cannot be located (caller supplies dimensions).
+bool parseJpxDimensions(const std::span<const std::byte> bytes,
+                        std::uint32_t& width, std::uint32_t& height) {
+    // SOC marker: FF 4F FF 51; then SIZ (FF 51) with Lsiz, Rsiz, Xsiz...
+    if (bytes.size() < 12U) return false;
+    const auto at = [&](const std::size_t i) { return std::to_integer<unsigned char>(bytes[i]); };
+    const auto read16 = [&](const std::size_t i) {
+        return (static_cast<std::uint32_t>(at(i)) << 8U) | at(i + 1U);
+    };
+    const auto read32 = [&](const std::size_t i) {
+        return (static_cast<std::uint64_t>(read16(i)) << 16U) | read16(i + 2U);
+    };
+    if (!(at(0) == 0xFFU && at(1) == 0x4FU && at(2) == 0xFFU && at(3) == 0x51U)) return false;
+    // Walk markers until SIZ (FF 51).
+    std::size_t pos = 4U;
+    while (pos + 2U < bytes.size()) {
+        if (at(pos) == 0xFFU && at(pos + 1U) == 0x51U) {
+            if (pos + 8U + 16U > bytes.size()) return false;
+            const auto xsiz = read32(pos + 8U);
+            const auto ysiz = read32(pos + 12U);
+            if (xsiz == 0U || ysiz == 0U || xsiz > 0x100000U || ysiz > 0x100000U) return false;
+            width = static_cast<std::uint32_t>(xsiz);
+            height = static_cast<std::uint32_t>(ysiz);
+            return true;
+        }
+        if (at(pos) != 0xFFU) { ++pos; continue; }
+        const std::uint16_t marker = static_cast<std::uint16_t>(read16(pos));
+        // Skip the marker's segment length (markers without a length start 0xFF..).
+        const std::uint8_t second = at(pos + 1U);
+        if (second == 0x00U || second == 0xFFU || second == 0x4FU) { ++pos; continue; }
+        if (pos + 4U > bytes.size()) return false;
+        const std::size_t length = read16(pos + 2U);
+        if (length < 2U) return false;
+        pos += 2U + length;
+    }
+    return false;
+}
+} // namespace
+
+PdfImage PdfImage::FromJpeg2000(const std::span<const std::byte> jpxBytes) {
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    if (!parseJpxDimensions(jpxBytes, width, height)) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "Cannot determine JPEG 2000 dimensions from the codestream.");
+    }
+    return FromJpeg2000(width, height, jpxBytes);
+}
+
+PdfImage PdfImage::FromJpeg2000(const std::uint32_t width, const std::uint32_t height,
+                                const std::span<const std::byte> jpxBytes) {
+    return PdfImage(width, height, PdfImageColorSpace::DeviceRGB, PdfImageEncoding::Jpx,
+                    8U, std::vector<std::byte>(jpxBytes.begin(), jpxBytes.end()));
+}
+
+PdfImage PdfImage::FromCcitt(const std::uint32_t width, const std::uint32_t height,
+                             const std::span<const std::byte> faxBytes) {
+    return PdfImage(width, height, PdfImageColorSpace::DeviceGray, PdfImageEncoding::CcittFax,
+                    1U, std::vector<std::byte>(faxBytes.begin(), faxBytes.end()));
+}
+
 PdfImage PdfImage::FromJpegFile(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open JPEG file.");

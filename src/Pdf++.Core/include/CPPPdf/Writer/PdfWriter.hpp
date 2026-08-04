@@ -31,6 +31,10 @@ struct PdfSaveOptions final {
     // content streams) into a single shared object. Safe because the merged
     // objects carry no positional identity.
     bool deduplicateObjects{false};
+    // When true, JPEG (DCT) sources keep their /DCTDecode encoding on write
+    // instead of being re-compressed with Flate. Already-DCT/JPX/CCITT images
+    // always keep their native encoding.
+    bool preserveImageEncodings{true};
 };
 
 using PdfStampPoint = PdfPoint;
