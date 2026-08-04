@@ -1,3 +1,12 @@
+## 0.75.0
+
+- JPEG encoder: `PdfImage::EncodeJpeg` writes a baseline JPEG (DCT, 4:4:4,
+  quality 1-100) from RGB data without external libraries, including SOI/APP0/
+  SOF0/DQT markers, YCbCr conversion, forward DCT, zigzag reorder, and Huffman
+  bit coding.
+- Tests: `Feature.JpxImageWrite` also round-trips an encoded JPEG through
+  `FromJpeg` (dimensions + DCT encoding). All suites green.
+
 ## 0.74.0
 
 - PDF/UA validation checks: `PdfConformanceValidator` now also requires a

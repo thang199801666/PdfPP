@@ -122,6 +122,7 @@
     <ClCompile Include="src\Fonts\PdfFontResource.cpp" />
     <ClCompile Include="src\Fonts\PdfTrueTypeFont.cpp" />
     <ClCompile Include="src\Fonts\PdfType1Font.cpp" />
+    <ClCompile Include="src\Internal\Graphics\PdfJpegEncoder.cpp" />
     <ClCompile Include="src\Fonts\PdfCff.cpp" />
     <ClCompile Include="src\Content\PdfContentProcessor.cpp" />
     <ClCompile Include="src\Writer\PdfWriter.cpp" />

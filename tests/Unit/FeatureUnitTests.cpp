@@ -868,6 +868,15 @@ void TestJpxImageWrite() {
     const std::vector<std::byte> oneBit{std::byte{0xAA}, std::byte{0x55}};
     const auto g4 = PdfImage::EncodeCcittG4(16U, 1U, oneBit);
     PDFPP_TEST_CHECK(!g4.empty());
+
+    // JPEG encoder: a small RGB image round-trips through FromJpeg dimensions.
+    std::vector<std::byte> rgb(8 * 8 * 3U, std::byte{0x80});
+    const auto jpeg = PdfImage::EncodeJpeg(8U, 8U, rgb, 85);
+    PDFPP_TEST_CHECK(!jpeg.empty());
+    const auto decoded = PdfImage::FromJpeg(jpeg);
+    PDFPP_TEST_CHECK(decoded.GetWidth() == 8U);
+    PDFPP_TEST_CHECK(decoded.GetHeight() == 8U);
+    PDFPP_TEST_CHECK(decoded.GetEncoding() == PdfImageEncoding::Dct);
 }
 
 void TestType1FontEmbedding() {

@@ -118,6 +118,13 @@ public:
         std::uint32_t width, std::uint32_t height,
         std::span<const std::byte> bits);
 
+    // Encodes an RGB image as a baseline JPEG (DCT, 4:4:4, quality 1-100)
+    // without external libraries. Returns a complete JPEG file.
+    [[nodiscard]] static std::vector<std::byte> EncodeJpeg(
+        std::uint32_t width, std::uint32_t height,
+        std::span<const std::byte> rgbBytes,
+        int quality = 85);
+
     static PdfImage FromJpegFile(const std::filesystem::path& path);
 
     static PdfImage FromGray(

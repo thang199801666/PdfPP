@@ -1,5 +1,6 @@
 #include <CPPPdf/Graphics/PdfImage.hpp>
 #include <CPPPdf/PdfError.hpp>
+#include "Internal/Graphics/PdfJpegEncoder.hpp"
 
 #include <fstream>
 #include <limits>
@@ -152,7 +153,6 @@ bool parseJpxDimensions(const std::span<const std::byte> bytes,
             return true;
         }
         if (at(pos) != 0xFFU) { ++pos; continue; }
-        const std::uint16_t marker = static_cast<std::uint16_t>(read16(pos));
         // Skip the marker's segment length (markers without a length start 0xFF..).
         const std::uint8_t second = at(pos + 1U);
         if (second == 0x00U || second == 0xFFU || second == 0x4FU) { ++pos; continue; }
@@ -284,6 +284,15 @@ PdfImage PdfImage::FromJpegFile(const std::filesystem::path& path) {
     input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     if (!input) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot read JPEG file.");
     return FromJpeg(bytes);
+}
+
+std::vector<std::byte> PdfImage::EncodeJpeg(
+    const std::uint32_t width, const std::uint32_t height,
+    const std::span<const std::byte> rgbBytes, const int quality) {
+    if (width == 0U || height == 0U || rgbBytes.size() < static_cast<std::size_t>(width) * height * 3U) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Invalid RGB dimensions for JPEG encoding.");
+    }
+    return Internal::EncodeJpeg(width, height, rgbBytes, quality);
 }
 
 } // namespace CPPPdf
