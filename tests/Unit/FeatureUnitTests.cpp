@@ -1162,6 +1162,17 @@ void TestPngOutput() {
     const auto rotated = bitmap.Rotate90(1);
     PDFPP_TEST_CHECK(rotated.GetWidth() == 30U);
     PDFPP_TEST_CHECK(rotated.GetHeight() == 40U);
+    const auto flippedH = bitmap.FlipHorizontal();
+    PDFPP_TEST_CHECK(flippedH.GetWidth() == 40U);
+    const auto cornerH = flippedH.GetPixel(0U, 0U);
+    const auto cornerHOriginal = bitmap.GetPixel(39U, 0U);
+    PDFPP_TEST_CHECK(cornerH.red == cornerHOriginal.red && cornerH.green == cornerHOriginal.green &&
+                     cornerH.blue == cornerHOriginal.blue);
+    const auto flippedV = bitmap.FlipVertical();
+    const auto cornerV = flippedV.GetPixel(0U, 0U);
+    const auto cornerVOriginal = bitmap.GetPixel(0U, 29U);
+    PDFPP_TEST_CHECK(cornerV.red == cornerVOriginal.red && cornerV.green == cornerVOriginal.green &&
+                     cornerV.blue == cornerVOriginal.blue);
     std::filesystem::remove(pdfPath);
     std::filesystem::remove(pngPath);
     std::filesystem::remove(jpegPath);

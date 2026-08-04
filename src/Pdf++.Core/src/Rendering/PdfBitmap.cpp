@@ -377,4 +377,26 @@ PdfBitmap PdfBitmap::Rotate90(const int quarterTurns) const {
     return result;
 }
 
+PdfBitmap PdfBitmap::FlipHorizontal() const {
+    if (width_ == 0U || height_ == 0U) return {};
+    PdfBitmap result(width_, height_);
+    for (std::size_t y = 0; y < height_; ++y) {
+        for (std::size_t x = 0; x < width_; ++x) {
+            result.SetPixel(static_cast<std::int32_t>(width_ - 1U - x), static_cast<std::int32_t>(y), GetPixel(x, y));
+        }
+    }
+    return result;
+}
+
+PdfBitmap PdfBitmap::FlipVertical() const {
+    if (width_ == 0U || height_ == 0U) return {};
+    PdfBitmap result(width_, height_);
+    for (std::size_t y = 0; y < height_; ++y) {
+        for (std::size_t x = 0; x < width_; ++x) {
+            result.SetPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(height_ - 1U - y), GetPixel(x, y));
+        }
+    }
+    return result;
+}
+
 } // namespace CPPPdf

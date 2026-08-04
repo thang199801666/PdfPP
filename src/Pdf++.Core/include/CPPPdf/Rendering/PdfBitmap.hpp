@@ -66,6 +66,9 @@ public:
                                  std::size_t width, std::size_t height) const;
     // Returns a copy rotated clockwise by the given multiple of 90 degrees.
     [[nodiscard]] PdfBitmap Rotate90(int quarterTurns) const;
+    // Returns a horizontally or vertically mirrored copy.
+    [[nodiscard]] PdfBitmap FlipHorizontal() const;
+    [[nodiscard]] PdfBitmap FlipVertical() const;
 
 private:
     std::size_t width_{};

@@ -1,3 +1,10 @@
+## 0.104.0
+
+- Bitmap mirroring: `PdfBitmap::FlipHorizontal` and `FlipVertical` return
+  mirrored copies.
+- Tests: `Feature.PngOutput` checks corner pixels after both flips. All
+  suites green.
+
 ## 0.103.0
 
 - XMP metadata: `PdfWriter::SetXmpMetadata` embeds an XMP packet (built from
