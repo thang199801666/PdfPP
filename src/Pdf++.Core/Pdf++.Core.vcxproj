@@ -72,6 +72,7 @@
     <ClInclude Include="include\CPPPdf\Security\PdfSecurity.hpp" />
     <ClInclude Include="include\CPPPdf\Security\PdfSignature.hpp" />
     <ClInclude Include="include\CPPPdf\Security\PdfCms.hpp" />
+    <ClInclude Include="include\CPPPdf\Security\PdfPades.hpp" />
     <ClInclude Include="include\CPPPdf\Validation\PdfConformance.hpp" />
     <ClInclude Include="src\Internal\Security\PdfStandardSecurity.hpp" />
     <ClInclude Include="include\CPPPdf\Graphics\PdfCanvas.hpp" />
@@ -127,6 +128,7 @@
     <ClCompile Include="src\Security\PdfPasswordManager.cpp" />
     <ClCompile Include="src\Security\PdfSignature.cpp" />
     <ClCompile Include="src\Security\PdfCms.cpp" />
+    <ClCompile Include="src\Security\PdfPades.cpp" />
     <ClCompile Include="src\Validation\PdfConformance.cpp" />
     <ClCompile Include="src\Graphics\PdfCanvas.cpp" />
     <ClCompile Include="src\Graphics\PdfImage.cpp" />

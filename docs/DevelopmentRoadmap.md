@@ -80,6 +80,7 @@ secondary scope.
 - `PdfCms` builds and parses minimal CMS SignedData and signs/verifies RSA-PKCS#1 v1.5 over SHA-256 (CNG on Windows, big-number fallback elsewhere). `PdfSignatureManager::VerifySignature` recomputes the /ByteRange digest, recovers the signer key from the embedded certificate, and verifies the RSA signature.
 - ECDSA P-256 sign/verify (`EcDsaSign`/`EcDsaVerify`) and basic certificate introspection (`CertificateInfoOf`) are available.
 - Add PAdES, timestamping, DSS and long-term validation foundations.
+- `PdfDss::AddDocumentSecurityStore` writes a catalog `/DSS` entry with certificates, CRLs, OCSP responses, and VRI timestamps for PAdES-LTV.
 - Implement PDF/A-1 through PDF/A-4 creation and validation.
 - Practical PDF/A validation: `PdfConformanceValidator` checks the file version header, forbids encryption, verifies the XMP metadata stream's `pdfaid:part`/`conformance`, requires a `/GTS_PDFA1` output intent, validates embedded TrueType/CFF fonts (plus ToUnicode for level U and tagged structure for level A), rejects transparency for PDF/A-1, and flags forbidden annotation subtypes.
 - Implement PDF/UA structure trees, role maps, language and alt text.

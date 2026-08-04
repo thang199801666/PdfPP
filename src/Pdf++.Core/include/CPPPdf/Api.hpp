@@ -18,6 +18,7 @@
 #include <CPPPdf/Writer.hpp>
 #include <CPPPdf/Security/PdfSecurity.hpp>
 #include <CPPPdf/Security/PdfSignature.hpp>
+#include <CPPPdf/Security/PdfPades.hpp>
 #include <CPPPdf/Annotations.hpp>
 #include <CPPPdf/Forms.hpp>
 #include <CPPPdf/Validation/PdfConformance.hpp>

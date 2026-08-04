@@ -1,3 +1,11 @@
+## 0.69.0
+
+- PAdES foundations: `PdfDss::AddDocumentSecurityStore` writes a catalog `/DSS`
+  entry with embedded `/Certs`, `/CRLs`, `/OCSPs`, and `/VRI` timestamp data via
+  an incremental update; `HasDocumentSecurityStore` detects an existing DSS.
+- Tests: `verifyDss` adds a DSS with a certificate and verifies the catalog
+  `/DSS` round trip. All suites green.
+
 ## 0.68.0
 
 - Basic Arabic shaping: `PdfTextLayout::ShapeArabic` joins Arabic letters into

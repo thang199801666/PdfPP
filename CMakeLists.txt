@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.68.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.69.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -54,6 +54,7 @@ set(PDFPP_PUBLIC_HEADERS
 src/Pdf++.Core/include/CPPPdf/Security/PdfSecurity.hpp
 src/Pdf++.Core/include/CPPPdf/Security/PdfSignature.hpp
 src/Pdf++.Core/include/CPPPdf/Security/PdfCms.hpp
+src/Pdf++.Core/include/CPPPdf/Security/PdfPades.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfCanvas.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfImage.hpp
     src/Pdf++.Core/include/CPPPdf/Graphics/PdfFunction.hpp
@@ -105,6 +106,7 @@ src/Pdf++.Core/src/Document/PdfRedactor.cpp
     src/Pdf++.Core/src/Security/PdfPasswordManager.cpp
     src/Pdf++.Core/src/Security/PdfSignature.cpp
 src/Pdf++.Core/src/Security/PdfCms.cpp
+src/Pdf++.Core/src/Security/PdfPades.cpp
     src/Pdf++.Core/src/Internal/Security/PdfStandardSecurity.hpp
     src/Pdf++.Core/src/Graphics/PdfCanvas.cpp
     src/Pdf++.Core/src/Graphics/PdfImage.cpp

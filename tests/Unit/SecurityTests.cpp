@@ -311,6 +311,29 @@ void verifyCertificateInfo() {
     PDFPP_TEST_CHECK(true);
 }
 
+void verifyDss() {
+    const auto source = securityTemp("pdfpp-dss-source.pdf");
+    const auto output = securityTemp("pdfpp-dss-output.pdf");
+    PdfWriter writer;
+    writer.AddPage({0, 0, 200, 200});
+    writer.Save(source);
+
+    // A small DER certificate payload (arbitrary bytes; DSS stores opaque data).
+    const std::vector<std::byte> cert{std::byte{0x30}, std::byte{0x03}, std::byte{0x02},
+                                      std::byte{0x01}, std::byte{0x01}};
+    PdfDss::DssOptions options;
+    options.certificates.push_back(cert);
+    const auto result = PdfDss::AddDocumentSecurityStore(source, output, options);
+    PDFPP_TEST_CHECK(result.certificateCount == 1U);
+    PDFPP_TEST_CHECK(PdfDss::HasDocumentSecurityStore(output));
+    const auto document = PdfDocument::Open(output);
+    const PdfDictionary* catalog = document.GetObject(document.GetCatalogReference()).AsDictionary();
+    PDFPP_TEST_CHECK(catalog != nullptr);
+    PDFPP_TEST_CHECK(catalog->Contains(PdfName("DSS")));
+    std::filesystem::remove(source);
+    std::filesystem::remove(output);
+}
+
 } // namespace
 
 void TestCryptoPrimitivesAndAlgorithms() {
@@ -321,6 +344,7 @@ void TestCryptoPrimitivesAndAlgorithms() {
     verifySignatureVerification();
     verifyEcdsa();
     verifyCertificateInfo();
+    verifyDss();
 }
 
 void TestPasswordManagerLifecycle() {
