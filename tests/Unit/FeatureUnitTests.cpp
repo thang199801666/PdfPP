@@ -777,6 +777,7 @@ void TestTextLayoutAndFallback() {
         const std::string postScriptName = font.GetPostScriptName();
         PDFPP_TEST_CHECK(!postScriptName.empty());
         PDFPP_TEST_CHECK(!font.GetFontFamily().empty());
+        PDFPP_TEST_CHECK(!font.IsVariable());
         const auto gidA = font.GetGlyphId(U'A');
         const auto gidV = font.GetGlyphId(U'V');
         if (gidA && gidV) {

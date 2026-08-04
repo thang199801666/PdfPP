@@ -69,6 +69,10 @@ public:
     // family = nameID 1). Falls back to the source name when absent.
     [[nodiscard]] std::string GetPostScriptName() const;
     [[nodiscard]] std::string GetFontFamily() const;
+    // True when the font has an OpenType `fvar` table (variable font).
+    [[nodiscard]] bool IsVariable() const;
+    // Number of variation axes from the `fvar` table.
+    [[nodiscard]] std::size_t GetVariationAxisCount() const;
     [[nodiscard]] const std::vector<std::uint8_t>& GetBytes() const noexcept;
     [[nodiscard]] bool HasTable(std::string_view tag) const noexcept;
     [[nodiscard]] const PdfTrueTypeMetrics& GetMetrics() const noexcept;

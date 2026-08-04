@@ -1,3 +1,10 @@
+## 0.150.0
+
+- Variable font detection: `PdfTrueTypeFont::IsVariable` and
+  `GetVariationAxisCount` inspect the OpenType `fvar` table.
+- Tests: `Feature.TextLayoutAndFallback` checks a static system font is not
+  variable. All suites green.
+
 ## 0.149.0
 
 - Word counting: `PdfTextLayout::CountWords` counts whitespace-separated

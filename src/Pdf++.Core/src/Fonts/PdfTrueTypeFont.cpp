@@ -757,6 +757,21 @@ std::string PdfTrueTypeFont::GetPostScriptName() const {
 std::string PdfTrueTypeFont::GetFontFamily() const {
     return nameTableValue(bytes_, 1U);
 }
+
+bool PdfTrueTypeFont::IsVariable() const {
+    const auto tables = ParseTables(bytes_);
+    return tables.find("fvar") != tables.end();
+}
+
+std::size_t PdfTrueTypeFont::GetVariationAxisCount() const {
+    const auto tables = ParseTables(bytes_);
+    const auto it = tables.find("fvar");
+    if (it == tables.end() || it->second.length < 8U) return 0U;
+    // fvar header: majorVersion, minorVersion, axesArrayOffset, reserved,
+    // axisCount, axisSize, instanceCount, instanceSize.
+    const std::uint16_t axisCount = Read16(bytes_, it->second.offset + 8U);
+    return axisCount;
+}
 bool PdfTrueTypeFont::Supports(std::uint32_t cp)const noexcept{return unicodeToGlyph_.contains(cp);} std::optional<std::uint16_t> PdfTrueTypeFont::GetGlyphId(std::uint32_t cp)const noexcept{auto it=unicodeToGlyph_.find(cp);return it==unicodeToGlyph_.end()?std::nullopt:std::optional<std::uint16_t>(it->second);}
 std::uint16_t PdfTrueTypeFont::GetAdvanceWidth(std::uint16_t gid)const noexcept{return gid<advanceWidths_.size()?advanceWidths_[gid]:0;}
 bool PdfTrueTypeFont::HasTable(const std::string_view tag) const noexcept {
