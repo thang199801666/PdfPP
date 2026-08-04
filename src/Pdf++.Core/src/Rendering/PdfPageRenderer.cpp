@@ -576,6 +576,30 @@ void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
                     previousGlyph, chunk.glyphIds[characterIndex], 1.0) * cellWidth;
                 embeddedAdvance += kern;
             }
+            // GPOS mark-to-base attachment: when this glyph is a combining mark
+            // whose anchor is defined over the previous (base) glyph, nudge it
+            // to sit on the base anchor instead of following the baseline.
+            if (previousGlyph != 0xFFFFU) {
+                const auto attachment = embeddedFont->GetMarkBasePosition(
+                    chunk.glyphIds[characterIndex], previousGlyph);
+                if (attachment && outlineRendered) {
+                    const auto baseAdvance = embeddedFont->GetAdvanceWidth(previousGlyph);
+                    const double unit = baseAdvance > 0
+                        ? glyphAdvance / static_cast<double>(baseAdvance)
+                        : cellWidth / 1000.0;
+                    const double dx = static_cast<double>(attachment->baseX - attachment->markX) * unit;
+                    const double dy = static_cast<double>(attachment->baseY - attachment->markY) * unit;
+                    // Redraw the outline offset so the mark sits over the base.
+                    try {
+                        const auto& markOutline = embeddedFont->GetGlyphOutlineCached(
+                            chunk.glyphIds[characterIndex]);
+                        DrawTrueTypeGlyph(bitmap, markOutline,
+                                          left + embeddedAdvance + dx, top - dy,
+                                          glyphAdvance, height, color, chunk.renderingMode);
+                    } catch (const std::exception&) {
+                    }
+                }
+            }
             previousGlyph = chunk.glyphIds[characterIndex];
             embeddedAdvance += glyphAdvance;
             if (outlineRendered) {

@@ -1,3 +1,11 @@
+## 0.97.0
+
+- Renderer GPOS mark positioning: combining marks whose anchor is defined over
+  the previous base glyph are nudged onto the base anchor during rendering, so
+  diacritics sit correctly instead of following the baseline.
+- Tests: `Feature.TextLayoutAndFallback` renders `e` + combining acute through
+  the renderer. All suites green.
+
 ## 0.96.0
 
 - JPEG output: `PdfBitmap::SaveJpeg` writes a baseline JPEG (quality 1-100)
