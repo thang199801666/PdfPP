@@ -59,6 +59,14 @@ public:
     // Writes a baseline JPEG (DCT, quality 1-100) without external libraries.
     void SaveJpeg(const std::filesystem::path& path, int quality = 85) const;
 
+    // Returns a scaled copy (bilinear). Empty width/height keeps aspect ratio.
+    [[nodiscard]] PdfBitmap Resize(std::size_t width, std::size_t height) const;
+    // Returns a copy of the given rectangle (clamped to bounds).
+    [[nodiscard]] PdfBitmap Crop(std::size_t x, std::size_t y,
+                                 std::size_t width, std::size_t height) const;
+    // Returns a copy rotated clockwise by the given multiple of 90 degrees.
+    [[nodiscard]] PdfBitmap Rotate90(int quarterTurns) const;
+
 private:
     std::size_t width_{};
     std::size_t height_{};

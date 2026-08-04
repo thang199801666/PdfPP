@@ -1,3 +1,10 @@
+## 0.99.0
+
+- Bitmap manipulation: `PdfBitmap` gains bilinear `Resize`, `Crop`, and
+  `Rotate90` (multiples of 90 degrees) for thumbnails and orientation fixes.
+- Tests: `Feature.PngOutput` verifies resized aspect ratio, cropped
+  dimensions, and rotated shape. All suites green.
+
 ## 0.98.0
 
 - Word extraction: `PdfTextExtractor::ExtractWords` groups text chunks into

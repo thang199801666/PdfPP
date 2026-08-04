@@ -298,4 +298,83 @@ void PdfBitmap::SaveJpeg(const std::filesystem::path& path, const int quality) c
     }
 }
 
+PdfBitmap PdfBitmap::Resize(const std::size_t width, const std::size_t height) const {
+    if (width_ == 0U || height_ == 0U) return {};
+    std::size_t outWidth = width;
+    std::size_t outHeight = height;
+    if (outWidth == 0U && outHeight == 0U) return *this;
+    if (outWidth == 0U) {
+        outWidth = std::max<std::size_t>(1U, outHeight * width_ / height_);
+    } else if (outHeight == 0U) {
+        outHeight = std::max<std::size_t>(1U, outWidth * height_ / width_);
+    }
+    PdfBitmap result(outWidth, outHeight);
+    for (std::size_t y = 0; y < outHeight; ++y) {
+        const double srcY = (static_cast<double>(y) + 0.5) * static_cast<double>(height_) / outHeight - 0.5;
+        const std::size_t y0 = std::clamp<std::size_t>(static_cast<std::size_t>(std::max(0.0, srcY)), 0U, height_ - 1U);
+        const std::size_t y1 = std::min(y0 + 1U, height_ - 1U);
+        const double ty = std::clamp(srcY - static_cast<double>(y0), 0.0, 1.0);
+        for (std::size_t x = 0; x < outWidth; ++x) {
+            const double srcX = (static_cast<double>(x) + 0.5) * static_cast<double>(width_) / outWidth - 0.5;
+            const std::size_t x0 = std::clamp<std::size_t>(static_cast<std::size_t>(std::max(0.0, srcX)), 0U, width_ - 1U);
+            const std::size_t x1 = std::min(x0 + 1U, width_ - 1U);
+            const double tx = std::clamp(srcX - static_cast<double>(x0), 0.0, 1.0);
+            const auto p00 = GetPixel(x0, y0);
+            const auto p10 = GetPixel(x1, y0);
+            const auto p01 = GetPixel(x0, y1);
+            const auto p11 = GetPixel(x1, y1);
+            const auto lerp = [tx, ty](const std::uint8_t a, const std::uint8_t b, const std::uint8_t c, const std::uint8_t d) {
+                const double top = static_cast<double>(a) + (static_cast<double>(b) - a) * tx;
+                const double bottom = static_cast<double>(c) + (static_cast<double>(d) - c) * tx;
+                return static_cast<std::uint8_t>(std::lround(top + (bottom - top) * ty));
+            };
+            result.SetPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+                            {lerp(p00.red, p10.red, p01.red, p11.red),
+                             lerp(p00.green, p10.green, p01.green, p11.green),
+                             lerp(p00.blue, p10.blue, p01.blue, p11.blue),
+                             lerp(p00.alpha, p10.alpha, p01.alpha, p11.alpha)});
+        }
+    }
+    return result;
+}
+
+PdfBitmap PdfBitmap::Crop(const std::size_t x, const std::size_t y,
+                          const std::size_t width, const std::size_t height) const {
+    if (width_ == 0U || height_ == 0U) return {};
+    const std::size_t cropX = std::min(x, width_);
+    const std::size_t cropY = std::min(y, height_);
+    const std::size_t cropWidth = std::min(width, width_ - cropX);
+    const std::size_t cropHeight = std::min(height, height_ - cropY);
+    PdfBitmap result(cropWidth, cropHeight);
+    for (std::size_t row = 0; row < cropHeight; ++row) {
+        for (std::size_t col = 0; col < cropWidth; ++col) {
+            result.SetPixel(static_cast<std::int32_t>(col), static_cast<std::int32_t>(row),
+                            GetPixel(cropX + col, cropY + row));
+        }
+    }
+    return result;
+}
+
+PdfBitmap PdfBitmap::Rotate90(const int quarterTurns) const {
+    if (width_ == 0U || height_ == 0U) return {};
+    const int turns = ((quarterTurns % 4) + 4) % 4;
+    if (turns == 0) return *this;
+    const bool swap = (turns == 1 || turns == 3);
+    const std::size_t outWidth = swap ? height_ : width_;
+    const std::size_t outHeight = swap ? width_ : height_;
+    PdfBitmap result(outWidth, outHeight);
+    for (std::size_t y = 0; y < height_; ++y) {
+        for (std::size_t x = 0; x < width_; ++x) {
+            const auto color = GetPixel(x, y);
+            switch (turns) {
+            case 1: result.SetPixel(static_cast<std::int32_t>(height_ - 1U - y), static_cast<std::int32_t>(x), color); break;
+            case 2: result.SetPixel(static_cast<std::int32_t>(width_ - 1U - x), static_cast<std::int32_t>(height_ - 1U - y), color); break;
+            case 3: result.SetPixel(static_cast<std::int32_t>(y), static_cast<std::int32_t>(width_ - 1U - x), color); break;
+            default: break;
+            }
+        }
+    }
+    return result;
+}
+
 } // namespace CPPPdf

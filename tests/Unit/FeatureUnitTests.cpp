@@ -1135,6 +1135,16 @@ void TestPngOutput() {
     PDFPP_TEST_CHECK(jpegBytes.size() > 2U);
     PDFPP_TEST_CHECK(static_cast<unsigned char>(jpegBytes[0]) == 0xFFU &&
                      static_cast<unsigned char>(jpegBytes[1]) == 0xD8U);
+    // Bitmap manipulation: resize keeps the area, crop and rotate change shape.
+    const auto resized = bitmap.Resize(20U, 0U);
+    PDFPP_TEST_CHECK(resized.GetWidth() == 20U);
+    PDFPP_TEST_CHECK(resized.GetHeight() == 15U);
+    const auto cropped = bitmap.Crop(0U, 0U, 10U, 10U);
+    PDFPP_TEST_CHECK(cropped.GetWidth() == 10U);
+    PDFPP_TEST_CHECK(cropped.GetHeight() == 10U);
+    const auto rotated = bitmap.Rotate90(1);
+    PDFPP_TEST_CHECK(rotated.GetWidth() == 30U);
+    PDFPP_TEST_CHECK(rotated.GetHeight() == 40U);
     std::filesystem::remove(pdfPath);
     std::filesystem::remove(pngPath);
     std::filesystem::remove(jpegPath);
