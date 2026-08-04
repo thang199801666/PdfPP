@@ -1,3 +1,11 @@
+## 0.107.0
+
+- Tiling patterns (write): `PdfWriter::AddTilingPattern` registers a pattern
+  and `PdfCanvas::SetPattern` paints subsequent fills/strokes with it. The
+  writer emits `/Pattern` resources and `/PatternType 1` streams.
+- Tests: `Feature.TilingPatternWrite` writes a hatch pattern, checks the
+  output, and renders the page. All suites green.
+
 ## 0.106.0
 
 - CFF advance widths: `PdfCffParser::GetAdvanceWidth` returns a glyph's width

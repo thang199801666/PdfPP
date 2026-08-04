@@ -91,6 +91,7 @@ struct PdfWriterPage {
     bool verticalWriting{false};
     std::vector<std::size_t> imageIndices;
     std::vector<std::size_t> extGStateIndices;
+    std::vector<std::size_t> patternIndices;
     std::vector<std::size_t> embeddedFontIndices;
     std::vector<std::size_t> type1FontIndices;
     std::vector<std::size_t> cffFontIndices;
@@ -120,6 +121,10 @@ struct PdfWriterState {
     std::vector<PdfWriterEmbeddedFont> embeddedFonts;
     std::vector<PdfWriterType1Font> type1Fonts;
     std::vector<PdfWriterCffFont> cffFonts;
+    struct PdfWriterTilingPattern {
+        PdfTilingPatternOptions options;
+    };
+    std::vector<PdfWriterTilingPattern> tilingPatterns;
     std::optional<PdfEncryptionOptions> encryption;
 };
 }

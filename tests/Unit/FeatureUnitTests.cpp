@@ -1195,6 +1195,32 @@ void TestPageContentStream() {
     std::filesystem::remove(output);
 }
 
+void TestTilingPatternWrite() {
+    const auto output = TempPath("pdfpp_feature_tiling.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 200, 200});
+    const auto patternIndex = writer.AddTilingPattern(PdfTilingPatternOptions{
+        "P1", "0 0 0 0 re f", PdfRectangle{0, 0, 20, 20}, 20.0, 20.0});
+    PDFPP_TEST_CHECK(patternIndex == 0U);
+    ExpectThrows([&] {
+        (void)writer.AddTilingPattern(PdfTilingPatternOptions{"P1", "x", PdfRectangle{0, 0, 5, 5}});
+    });
+    auto canvas = writer.GetCanvas(page);
+    canvas.SetPattern("P1").FillRectangle(0, 0, 200, 200);
+    canvas.SetPattern("P1", false, true).FillRectangle(10, 10, 50, 50);
+    writer.Save(output);
+    const std::string bytes = ReadText(output);
+    PDFPP_TEST_CHECK(bytes.find("/PatternType 1") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Pattern <<") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/P1 ") != std::string::npos);
+    const auto document = PdfDocument::Open(output);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0U, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 200U);
+    std::filesystem::remove(output);
+}
+
 void TestTaggedPdf() {
     const auto output = TempPath("pdfpp_feature_tagged.pdf");
     PdfWriter writer;
@@ -1725,6 +1751,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
     runner.Run("Feature.TaggedPdf", TestTaggedPdf);
+    runner.Run("Feature.TilingPatternWrite", TestTilingPatternWrite);
     runner.Run("Feature.PageContentStream", TestPageContentStream);
     runner.Run("Feature.PngOutput", TestPngOutput);
     runner.Run("Feature.PolygonAndBezierPaths", TestPolygonAndBezierPaths);

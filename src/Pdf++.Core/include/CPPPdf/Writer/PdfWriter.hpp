@@ -122,6 +122,19 @@ struct PdfViewerPreferences final {
     unsigned int numberOfCopies{1};
 };
 
+// A tiling pattern: a small content stream painted in a tiled grid across the
+// fill (or stroke) area. Used for hatch patterns, grids, and textured fills.
+struct PdfTilingPatternOptions final {
+    std::string name;      // resource name, e.g. "P1" (used without the '/').
+    std::string content;   // content stream operators (e.g. "0 0 4 4 re f").
+    PdfRectangle bbox{};   // bounding box of one tile.
+    double xStep{0.0};     // horizontal tile spacing (<=0 means bbox width).
+    double yStep{0.0};     // vertical tile spacing (<=0 means bbox height).
+    bool paintTypeColor{true}; // 1 = colored, 0 = uncolored.
+    bool horizontal{false};
+    bool vertical{false};
+};
+
 enum class PdfPageLabelStyle { Decimal, UpperRoman, LowerRoman, UpperLetters, LowerLetters };
 
 struct PdfPageLabelOptions final {
@@ -210,6 +223,8 @@ public:
 
     [[nodiscard]] std::size_t AddPage(PdfRectangle mediaBox = {0, 0, 595, 842});
     [[nodiscard]] std::size_t InsertPage(std::size_t index, PdfRectangle mediaBox = {0, 0, 595, 842});
+    // Registers a tiling pattern usable via PdfCanvas::SetPattern on any page.
+    [[nodiscard]] std::size_t AddTilingPattern(const PdfTilingPatternOptions& options);
     void RemovePage(std::size_t index);
     void MovePage(std::size_t from, std::size_t to);
     [[nodiscard]] std::size_t GetPageCount() const noexcept;

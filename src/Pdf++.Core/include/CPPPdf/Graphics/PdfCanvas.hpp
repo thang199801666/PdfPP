@@ -51,6 +51,9 @@ public:
     PdfCanvas& SetFillColor(PdfColor color);
     PdfCanvas& SetStrokeOpacity(double opacity);
     PdfCanvas& SetFillOpacity(double opacity);
+    // Selects a tiling pattern (registered via PdfWriter::AddTilingPattern) for
+    // subsequent fill and/or stroke operations.
+    PdfCanvas& SetPattern(std::string patternName, bool applyToFill = true, bool applyToStroke = true);
     PdfCanvas& SetOpacity(double opacity);
     PdfCanvas& SetBlendMode(PdfBlendMode mode);
     PdfCanvas& SetLineWidth(double width);

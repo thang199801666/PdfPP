@@ -85,6 +85,24 @@ std::string PdfCanvas::RegisterOpacity(double strokeOpacity, double fillOpacity)
 PdfCanvas& PdfCanvas::SaveState(){Append("q\n");return *this;} PdfCanvas& PdfCanvas::RestoreState(){Append("Q\n");return *this;}
 PdfCanvas& PdfCanvas::SetStrokeColor(PdfColor c){Append(number(c.r)+" "+number(c.g)+" "+number(c.b)+" RG\n");return *this;}
 PdfCanvas& PdfCanvas::SetFillColor(PdfColor c){Append(number(c.r)+" "+number(c.g)+" "+number(c.b)+" rg\n");return *this;}
+PdfCanvas& PdfCanvas::SetPattern(std::string patternName,const bool applyToFill,const bool applyToStroke){
+    if(patternName.empty())throw std::invalid_argument("Pattern name must not be empty.");
+    if(patternName.front()=='/')patternName.erase(patternName.begin());
+    auto& page=state_->pages[pageIndex_];
+    std::size_t index=state_->tilingPatterns.size();
+    for(std::size_t i=0;i<state_->tilingPatterns.size();++i){
+        if(state_->tilingPatterns[i].options.name==patternName){index=i;break;}
+    }
+    if(index==state_->tilingPatterns.size()){
+        throw std::invalid_argument("Unknown tiling pattern: "+patternName);
+    }
+    if(std::find(page.patternIndices.begin(),page.patternIndices.end(),index)==page.patternIndices.end()){
+        page.patternIndices.push_back(index);
+    }
+    if(applyToFill)Append("/Pattern cs /"+patternName+" scn\n");
+    if(applyToStroke)Append("/Pattern CS /"+patternName+" SCN\n");
+    return *this;
+}
 PdfCanvas& PdfCanvas::SetStrokeOpacity(double opacity){Append("/"+RegisterOpacity(opacity,1.0)+" gs\n");return *this;}
 PdfCanvas& PdfCanvas::SetFillOpacity(double opacity){Append("/"+RegisterOpacity(1.0,opacity)+" gs\n");return *this;}
 PdfCanvas& PdfCanvas::SetOpacity(double opacity){Append("/"+RegisterOpacity(opacity,opacity)+" gs\n");return *this;}

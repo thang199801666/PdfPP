@@ -227,6 +227,19 @@ std::size_t PdfWriter::AddPage(PdfRectangle box) {
     return state_->pages.size() - 1;
 }
 
+std::size_t PdfWriter::AddTilingPattern(const PdfTilingPatternOptions& options) {
+    if (options.name.empty()) throw std::invalid_argument("Tiling pattern name must not be empty.");
+    if (options.content.empty()) throw std::invalid_argument("Tiling pattern content must not be empty.");
+    if (options.bbox.empty()) throw std::invalid_argument("Tiling pattern bbox must be non-empty.");
+    for (const auto& existing : state_->tilingPatterns) {
+        if (existing.options.name == options.name) {
+            throw std::invalid_argument("A tiling pattern with this name already exists: " + options.name);
+        }
+    }
+    state_->tilingPatterns.push_back({options});
+    return state_->tilingPatterns.size() - 1U;
+}
+
 std::size_t PdfWriter::InsertPage(std::size_t index, PdfRectangle box) {
     if (index > state_->pages.size()) throw std::out_of_range("Page index");
     Internal::PdfWriterPage page;
@@ -733,6 +746,8 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     for (auto& id : cffIds) id = allocate();
     for (auto& id : cffFileIds) id = allocate();
     for (auto& id : cffDescIds) id = allocate();
+    std::vector<int> patternIds(state_->tilingPatterns.size());
+    for (auto& id : patternIds) id = allocate();
     std::vector<int> pageIds,contentIds; for(std::size_t i=0;i<state_->pages.size();++i){pageIds.push_back(allocate());contentIds.push_back(allocate());}
     std::vector<std::vector<int>> linkIds(state_->pages.size());
     std::vector<std::vector<int>> attachmentIds(state_->pages.size());
@@ -1104,6 +1119,18 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             + " /FirstChar 32 /LastChar 255 /Encoding /WinAnsiEncoding /FontDescriptor "
             + std::to_string(cffDescIds[i]) + " 0 R >>";
     }
+    for (std::size_t i = 0; i < state_->tilingPatterns.size(); ++i) {
+        const auto& pattern = state_->tilingPatterns[i].options;
+        const double xStep = pattern.xStep > 0.0 ? pattern.xStep : (pattern.bbox.right - pattern.bbox.left);
+        const double yStep = pattern.yStep > 0.0 ? pattern.yStep : (pattern.bbox.top - pattern.bbox.bottom);
+        std::ostringstream p;
+        p << "<< /Type /Pattern /PatternType 1 /PaintType " << (pattern.paintTypeColor ? 1 : 2)
+          << " /TilingType 1 /BBox [" << pattern.bbox.left << ' ' << pattern.bbox.bottom << ' '
+          << pattern.bbox.right << ' ' << pattern.bbox.top << "] /XStep " << xStep
+          << " /YStep " << yStep << " /Resources << >> /Length " << pattern.content.size()
+          << " >>\nstream\n" << pattern.content << "\nendstream";
+        objects[patternIds[i]] = p.str();
+    }
     for (std::size_t i = 0; i < state_->ocgs.size(); ++i) {
         objects[ocgIds[i]] = "<< /Type /OCG /Name (" + escapePdfString(state_->ocgs[i].name) + ") /Usage << >> >>";
     }
@@ -1125,7 +1152,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         const auto&p=state_->pages[i];std::ostringstream box;box<<p.mediaBox.left<<' '<<p.mediaBox.bottom<<' '<<p.mediaBox.right<<' '<<p.mediaBox.top;
         std::ostringstream fonts; fonts<<"/F1 "<<base14Font<<" 0 R "; for(const auto fi:p.embeddedFontIndices)fonts<<'/'<<state_->embeddedFonts.at(fi).resourceName<<' '<<fontIds.at(fi).type0<<" 0 R "; for(const auto ti:p.type1FontIndices)fonts<<'/'<<state_->type1Fonts.at(ti).resourceName<<' '<<type1Ids.at(ti)<<" 0 R "; for(const auto ci:p.cffFontIndices)fonts<<'/'<<state_->cffFonts.at(ci).resourceName<<' '<<cffIds.at(ci)<<" 0 R ";
         std::ostringstream xObjects;for(const auto ii:p.imageIndices)xObjects<<'/'<<state_->images.at(ii).resourceName<<' '<<imageIds.at(ii)<<" 0 R ";
-        std::string resources="<< /Font << "+fonts.str()+">>";if(!p.imageIndices.empty())resources+=" /XObject << "+xObjects.str()+">>";if(!p.extGStateIndices.empty()){std::ostringstream gs;for(const auto gi:p.extGStateIndices)gs<<'/'<<state_->extGStates.at(gi).resourceName<<' '<<extGStateIds.at(gi)<<" 0 R ";resources+=" /ExtGState << "+gs.str()+">>";}if(!p.ocgResources.empty()){std::ostringstream props;props<<" /Properties << ";for(const auto& name:p.ocgResources){const std::size_t index=name.size()>2?static_cast<std::size_t>(std::stoul(name.substr(2)))-1U:0U;if(index<state_->ocgs.size())props<<'/'<<name<<' '<<ocgIds[index]<<" 0 R ";}props<<">>";resources+=props.str();}resources+=" >>";
+        std::string resources="<< /Font << "+fonts.str()+">>";if(!p.imageIndices.empty())resources+=" /XObject << "+xObjects.str()+">>";if(!p.extGStateIndices.empty()){std::ostringstream gs;for(const auto gi:p.extGStateIndices)gs<<'/'<<state_->extGStates.at(gi).resourceName<<' '<<extGStateIds.at(gi)<<" 0 R ";resources+=" /ExtGState << "+gs.str()+">>";}if(!p.patternIndices.empty()){std::ostringstream pat;for(const auto pi:p.patternIndices){const auto& opts=state_->tilingPatterns.at(pi).options;pat<<'/'<<opts.name<<' '<<patternIds.at(pi)<<" 0 R ";}resources+=" /Pattern << "+pat.str()+">>";}if(!p.ocgResources.empty()){std::ostringstream props;props<<" /Properties << ";for(const auto& name:p.ocgResources){const std::size_t index=name.size()>2?static_cast<std::size_t>(std::stoul(name.substr(2)))-1U:0U;if(index<state_->ocgs.size())props<<'/'<<name<<' '<<ocgIds[index]<<" 0 R ";}props<<">>";resources+=props.str();}resources+=" >>";
         std::string annotations;
         if (!linkIds[i].empty() || !attachmentIds[i].empty()) {
             annotations = " /Annots [";
