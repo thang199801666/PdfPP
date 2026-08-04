@@ -1070,6 +1070,12 @@ void TestJpxImageWrite() {
     const auto rgbImage = grayImage.ConvertToRgb();
     PDFPP_TEST_CHECK(rgbImage.GetColorSpace() == PdfImageColorSpace::DeviceRGB);
     PDFPP_TEST_CHECK(rgbImage.GetBytes().size() == 2U * 3U);
+    // EncodeBmp round-trips through FromBmp.
+    const auto bmpBytes = PdfImage::EncodeBmp(2U, 1U, std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(rgbImage.GetBytes().data()), rgbImage.GetBytes().size()));
+    const auto bmpDecoded = PdfImage::FromBmp(std::span<const std::byte>(bmpBytes));
+    PDFPP_TEST_CHECK(bmpDecoded.GetWidth() == 2U);
+    PDFPP_TEST_CHECK(bmpDecoded.GetHeight() == 1U);
     const auto indexedImage = PdfImage::FromRgb(4U, 4U, twoColor);    const auto indexedPdf = TempPath("pdfpp_feature_indexed.pdf");
     PdfWriter indexedWriter;
     const auto indexedPage = indexedWriter.AddPage({0, 0, 100, 100});

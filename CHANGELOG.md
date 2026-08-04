@@ -1,3 +1,10 @@
+## 0.154.0
+
+- BMP encoding: `PdfImage::EncodeBmp` builds a 24-bit uncompressed BMP from raw
+  RGB bytes, completing the BMP round-trip at the image level.
+- Tests: `Feature.JpxImageWrite` round-trips EncodeBmp through FromBmp. All
+  suites green.
+
 ## 0.153.0
 
 - Reverse cmap: `PdfTrueTypeFont::GetUnicodeForGlyph` returns a Unicode code

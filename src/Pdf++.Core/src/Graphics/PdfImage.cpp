@@ -774,6 +774,59 @@ std::vector<std::byte> PdfImage::EncodePng(
     return out;
 }
 
+std::vector<std::byte> PdfImage::EncodeBmp(
+    const std::uint32_t width,
+    const std::uint32_t height,
+    const std::span<const std::byte> rgbBytes) {
+    if (width == 0U || height == 0U || rgbBytes.size() != static_cast<std::size_t>(width) * height * 3U) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "BMP RGB byte count does not match width x height x 3.");
+    }
+    const std::uint32_t rowSize = width * 3U;
+    const std::uint32_t dataSize = rowSize * height;
+    const std::uint32_t fileSize = 54U + dataSize;
+    const auto le = [](const std::uint32_t value) {
+        return std::array<std::uint8_t, 4>{static_cast<std::uint8_t>(value & 0xFFU),
+                                           static_cast<std::uint8_t>((value >> 8U) & 0xFFU),
+                                           static_cast<std::uint8_t>((value >> 16U) & 0xFFU),
+                                           static_cast<std::uint8_t>((value >> 24U) & 0xFFU)};
+    };
+    std::vector<std::byte> out;
+    out.reserve(fileSize);
+    const auto pushLe = [&](const std::uint32_t value, const std::size_t bytes) {
+        const auto bytes32 = le(value);
+        for (std::size_t i = 0; i < bytes; ++i) out.push_back(std::byte{bytes32[i]});
+    };
+    // BITMAPFILEHEADER.
+    out.push_back(std::byte{'B'}); out.push_back(std::byte{'M'});
+    pushLe(fileSize, 4U);
+    pushLe(0U, 4U);
+    pushLe(54U, 4U);
+    // BITMAPINFOHEADER.
+    pushLe(40U, 4U);
+    pushLe(width, 4U);
+    pushLe(height, 4U);
+    pushLe(1U, 2U);  // planes
+    pushLe(24U, 2U); // bit count
+    pushLe(0U, 4U);  // BI_RGB
+    pushLe(dataSize, 4U);
+    pushLe(2835U, 4U);
+    pushLe(2835U, 4U);
+    pushLe(0U, 4U);
+    pushLe(0U, 4U);
+    // Pixel data bottom-up, BGR.
+    for (std::uint32_t y = 0; y < height; ++y) {
+        const std::size_t sourceRow = static_cast<std::size_t>(height - 1U - y) * width * 3U;
+        for (std::uint32_t x = 0; x < width; ++x) {
+            const std::size_t pixel = sourceRow + static_cast<std::size_t>(x) * 3U;
+            out.push_back(rgbBytes[pixel + 2U]); // B
+            out.push_back(rgbBytes[pixel + 1U]); // G
+            out.push_back(rgbBytes[pixel]);      // R
+        }
+    }
+    return out;
+}
+
 
 std::vector<std::byte> PdfImage::EncodeJpeg(
     const std::uint32_t width, const std::uint32_t height,

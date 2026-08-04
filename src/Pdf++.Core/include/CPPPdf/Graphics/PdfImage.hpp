@@ -111,6 +111,11 @@ public:
         std::uint32_t width, std::uint32_t height,
         std::span<const std::byte> rgbBytes);
 
+    // Encodes a raw RGB image as a 24-bit uncompressed BMP.
+    [[nodiscard]] static std::vector<std::byte> EncodeBmp(
+        std::uint32_t width, std::uint32_t height,
+        std::span<const std::byte> rgbBytes);
+
     // Creates an image whose payload is a JPEG 2000 (JPX) codestream; the
     // width/height are read from the SOC (FF 4F FF 51) + SIZ markers when
     // present, otherwise they must be supplied via the later overload.
