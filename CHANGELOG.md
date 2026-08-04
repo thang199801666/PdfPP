@@ -1,3 +1,10 @@
+## 0.105.0
+
+- Page resizing: `PdfWriter::SetPageSize` changes an existing page's media box
+  after creation.
+- Tests: `API.WriterDocumentInfo` resizes a page, saves, and reads the new box
+  back. All suites green.
+
 ## 0.104.0
 
 - Bitmap mirroring: `PdfBitmap::FlipHorizontal` and `FlipVertical` return

@@ -214,6 +214,8 @@ public:
     void MovePage(std::size_t from, std::size_t to);
     [[nodiscard]] std::size_t GetPageCount() const noexcept;
     [[nodiscard]] PdfRectangle GetPageMediaBox(std::size_t pageIndex) const;
+    // Changes an existing page's media box (page geometry) after AddPage.
+    void SetPageSize(std::size_t pageIndex, const PdfRectangle& mediaBox);
     [[nodiscard]] PdfCanvas GetCanvas(std::size_t pageIndex);
 
     void SetDocumentInfo(const PdfDocumentInfo& info);

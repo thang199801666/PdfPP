@@ -316,6 +316,14 @@ void PdfWriter::MovePage(std::size_t from, std::size_t to) {
 }
 std::size_t PdfWriter::GetPageCount() const noexcept{return state_->pages.size();}
 PdfRectangle PdfWriter::GetPageMediaBox(std::size_t i) const { if(i>=state_->pages.size())throw std::out_of_range("Page index"); return state_->pages[i].mediaBox; }
+void PdfWriter::SetPageSize(const std::size_t pageIndex, const PdfRectangle& mediaBox) {
+    if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
+    if (mediaBox.empty() || !std::isfinite(mediaBox.left) || !std::isfinite(mediaBox.top) ||
+        !std::isfinite(mediaBox.right) || !std::isfinite(mediaBox.bottom)) {
+        throw std::invalid_argument("Media box must be finite and non-empty.");
+    }
+    state_->pages[pageIndex].mediaBox = mediaBox;
+}
 PdfCanvas PdfWriter::GetCanvas(std::size_t i){if(i>=state_->pages.size())throw std::out_of_range("Page index");return PdfCanvas(state_,i);}
 
 void PdfWriter::SetDocumentInfo(const PdfDocumentInfo& info) { state_->documentInfo = info; }

@@ -807,8 +807,7 @@ void TestWriterDocumentInfo() {
     std::filesystem::remove(output);
 
     // XMP metadata packet embedded in the catalog.
-    const auto xmpOutput = TempPath("pdfpp_document_info_xmp.pdf");
-    PdfWriter xmpWriter;
+    const auto xmpOutput = TempPath("pdfpp_document_info_xmp.pdf");    PdfWriter xmpWriter;
     xmpWriter.AddPage();
     xmpWriter.SetTitle("XMP test");
     xmpWriter.SetAuthor("Author Name");
@@ -820,6 +819,17 @@ void TestWriterDocumentInfo() {
     PDFPP_TEST_CHECK(xmpBytes.find("xpacket") != std::string::npos);
     PDFPP_TEST_CHECK(xmpBytes.find("XMP test") != std::string::npos);
     std::filesystem::remove(xmpOutput);
+
+    // Resize a page after creation.
+    PdfWriter sizeWriter;
+    const auto sizePage = sizeWriter.AddPage();
+    sizeWriter.SetPageSize(sizePage, PdfRectangle{0, 0, 400, 600});
+    PDFPP_TEST_CHECK(sizeWriter.GetPageMediaBox(sizePage).right == 400);
+    ExpectThrows([&] { sizeWriter.SetPageSize(9U, PdfRectangle{0, 0, 1, 1}); });
+    const auto sizePath = TempPath("pdfpp_page_size.pdf");
+    sizeWriter.Save(sizePath);
+    PDFPP_TEST_CHECK(PdfDocument::Open(sizePath).GetPageMediaBox(0U).top == 600);
+    std::filesystem::remove(sizePath);
 }
 
 
@@ -1008,7 +1018,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 104U);
+    static_assert(CPPPdf::VersionMinor == 105U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1018,7 +1028,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.104.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.105.0");
 }
 
 int RunApiCoverageTests() {
