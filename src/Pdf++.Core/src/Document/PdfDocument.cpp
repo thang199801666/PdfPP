@@ -3473,6 +3473,42 @@ std::vector<PdfOutlineEntry> PdfDocument::GetOutlines() const {
     return result;
 }
 
+std::vector<PdfPageLabelEntry> PdfDocument::GetPageLabels() const {
+    std::vector<PdfPageLabelEntry> result;
+    const auto catalogRef = GetTrailerReference(PdfName("Root"));
+    if (!catalogRef) return result;
+    const auto& catalog = GetObject(*catalogRef);
+    const auto* catalogDict = catalog.AsDictionary();
+    if (!catalogDict) return result;
+    const auto* pageLabelsValue = catalogDict->Find(PdfName("PageLabels"));
+    const auto pageLabelsRef = pageLabelsValue ? pageLabelsValue->AsReference() : std::nullopt;
+    if (!pageLabelsRef) return result;
+    const auto& labels = GetObject(PdfReference{pageLabelsRef->first, pageLabelsRef->second});
+    const auto* labelsDict = labels.AsDictionary();
+    if (!labelsDict) return result;
+    const auto* nums = labelsDict->GetAsArray(PdfName("Nums"));
+    if (!nums) return result;
+    // /Nums is a flat array: [pageIndex, labelDict, pageIndex, labelDict, ...].
+    for (std::size_t i = 0; i + 1U < nums->size(); i += 2U) {
+        const auto pageIndex = nums->at(i).AsInteger();
+        if (!pageIndex) continue;
+        const auto* dict = nums->at(i + 1U).AsDictionary();
+        if (!dict) continue;
+        PdfPageLabelEntry entry;
+        entry.pageIndex = static_cast<std::size_t>(*pageIndex);
+        if (const auto style = dict->GetAsName(PdfName("S"))) entry.style = style->value();
+        if (const auto* prefixValue = dict->Find(PdfName("P"))) {
+            if (const auto* prefix = prefixValue->AsString()) entry.prefix = *prefix;
+        }
+        if (const auto start = dict->Find(PdfName("St")) ? dict->Find(PdfName("St"))->AsInteger() : std::nullopt) {
+            entry.startNumber = static_cast<unsigned int>(*start);
+        }
+        result.push_back(std::move(entry));
+    }
+    std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.pageIndex < b.pageIndex; });
+    return result;
+}
+
 std::string PdfDocument::GetAllPagesText() const {
     std::string all;
     const auto count = pageCount();

@@ -1,3 +1,11 @@
+## 0.100.0
+
+- Page label reading: `PdfDocument::GetPageLabels` parses the catalog
+  `/PageLabels /Nums` array and returns sorted ranges with style, prefix, and
+  start number.
+- Tests: `Writer.ObjectStreamAndPageLabels` round-trips writer page labels
+  through the reader. All suites green.
+
 ## 0.99.0
 
 - Bitmap manipulation: `PdfBitmap` gains bilinear `Resize`, `Crop`, and

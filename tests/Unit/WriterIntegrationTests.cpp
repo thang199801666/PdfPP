@@ -263,6 +263,14 @@ void TestObjectStreamRoundTrip() {
         PDFPP_TEST_CHECK(outlines.size() == 1U);
         PDFPP_TEST_CHECK(outlines[0].title == "ObjStm bookmark");
         PDFPP_TEST_CHECK(outlines[0].destinationPageIndex == 0U);
+        const auto labels = objectStreamDocument.GetPageLabels();
+        PDFPP_TEST_CHECK(labels.size() == 2U);
+        PDFPP_TEST_CHECK(labels[0].pageIndex == 0U);
+        PDFPP_TEST_CHECK(labels[0].style == "D");
+        PDFPP_TEST_CHECK(labels[1].pageIndex == 1U);
+        PDFPP_TEST_CHECK(labels[1].style == "r");
+        PDFPP_TEST_CHECK(labels[1].prefix == "P-");
+        PDFPP_TEST_CHECK(labels[1].startNumber == 5U);
         std::size_t compressedCount = 0U;
         bool compressedObjectReadable = false;
         for (std::uint32_t number = 1U; number < 80U; ++number) {

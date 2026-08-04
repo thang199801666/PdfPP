@@ -52,6 +52,13 @@ struct PdfOutlineEntry final {
     bool isOpen{};
 };
 
+// A single /PageLabels entry: the label range start plus its style/prefix.
+struct PdfPageLabelEntry final {
+    std::size_t pageIndex{};
+    std::string style; // "D", "R", "r", "A", "a"
+    std::string prefix;
+    unsigned int startNumber{1};
+};
 class PdfDocument final {public:
     PdfDocument();
     ~PdfDocument();
@@ -192,6 +199,9 @@ class PdfDocument final {public:
 
     // Reads the document outline (/Outlines tree) as a flat list of bookmarks.
     [[nodiscard]] std::vector<PdfOutlineEntry> GetOutlines() const;
+
+    // Reads the catalog /PageLabels /Nums entries, sorted by page index.
+    [[nodiscard]] std::vector<PdfPageLabelEntry> GetPageLabels() const;
 
 private:
     [[nodiscard]] std::optional<std::size_t> ResolveDestination(const PdfObject& destination) const;
