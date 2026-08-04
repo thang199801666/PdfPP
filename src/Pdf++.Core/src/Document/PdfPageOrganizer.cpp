@@ -248,6 +248,29 @@ PdfPageOrganizationResult PdfPageOrganizer::ReorderPages(
     return applySelection(inputPath, outputPath, pageOrder, true);
 }
 
+PdfPageOrganizationResult PdfPageOrganizer::MovePage(
+    const std::filesystem::path& inputPath,
+    const std::filesystem::path& outputPath,
+    const std::size_t fromIndex,
+    const std::size_t toIndex) {
+    const PdfDocument document = PdfDocument::Open(inputPath);
+    const std::size_t count = document.GetPageCount();
+    if (fromIndex >= count) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "MovePage source index is out of range.");
+    }
+    if (toIndex >= count) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "MovePage destination index is out of range.");
+    }
+    std::vector<std::size_t> order;
+    order.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i == fromIndex) continue;
+        order.push_back(i);
+    }
+    order.insert(order.begin() + static_cast<std::ptrdiff_t>(toIndex), fromIndex);
+    return applySelection(inputPath, outputPath, order, true);
+}
+
 PdfPageOrganizationResult PdfPageOrganizer::RemovePages(
     const std::filesystem::path& inputPath,
     const std::filesystem::path& outputPath,

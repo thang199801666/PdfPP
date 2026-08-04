@@ -1,3 +1,9 @@
+## 0.138.0
+
+- Page moving: `PdfPageOrganizer::MovePage` relocates a page to a new index.
+- Tests: `API.PageEditingAndOrganization` moves a page and checks the text
+  order. All suites green.
+
 ## 0.137.0
 
 - Image color conversion: `PdfImage::ConvertToRgb` converts raw Gray and CMYK

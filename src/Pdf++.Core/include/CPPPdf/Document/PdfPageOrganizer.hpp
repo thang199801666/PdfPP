@@ -19,6 +19,13 @@ public:
         const std::filesystem::path& outputPath,
         const std::vector<std::size_t>& pageOrder);
 
+    // Moves a page to a new index, shifting the others accordingly.
+    [[nodiscard]] static PdfPageOrganizationResult MovePage(
+        const std::filesystem::path& inputPath,
+        const std::filesystem::path& outputPath,
+        std::size_t fromIndex,
+        std::size_t toIndex);
+
     [[nodiscard]] static PdfPageOrganizationResult RemovePages(
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,

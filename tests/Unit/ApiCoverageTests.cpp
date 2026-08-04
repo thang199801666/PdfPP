@@ -371,6 +371,11 @@ void TestPageEditingAndOrganization(const std::filesystem::path& base) {
     const auto reorderResult = PdfPageOrganizer::ReorderPages(base, reordered, {1, 0});
     PDFPP_TEST_CHECK(reorderResult.outputPageCount == 2);
     PDFPP_TEST_CHECK(PdfDocument::Open(reordered).GetPageText(0).find("page two") != std::string::npos);
+    const auto moved = TempPath("pdfpp_api_moved.pdf");
+    const auto moveResult = PdfPageOrganizer::MovePage(base, moved, 0U, 1U);
+    PDFPP_TEST_CHECK(moveResult.outputPageCount == 2);
+    PDFPP_TEST_CHECK(PdfDocument::Open(moved).GetPageText(0).find("page two") != std::string::npos);
+    ExpectThrows([&] { (void)PdfPageOrganizer::MovePage(base, moved, 9U, 0U); });
     ExpectThrows([&] { (void)PdfPageOrganizer::ReorderPages(base, reordered, {0, 0}); });
     ExpectThrows([&] { (void)PdfPageOrganizer::RemovePages(base, reordered, {0, 1}); });
     ExpectThrows([&] { (void)PdfPageOrganizer::ExtractPages(base, reordered, {}); });
@@ -1082,7 +1087,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 137U);
+    static_assert(CPPPdf::VersionMinor == 138U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1092,7 +1097,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.137.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.138.0");
 }
 
 int RunApiCoverageTests() {
