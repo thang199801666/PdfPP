@@ -688,6 +688,12 @@ void TestTextLayoutAndFallback() {
     const auto emoji = PdfTextLayout::GraphemeClusters("a\xF0\x9F\x98\x80" "b");
     PDFPP_TEST_CHECK(emoji.size() == 3U);
 
+    // Arabic shaping: "ب" (U+0628) followed by "ت" (U+062A) joins into their
+    // presentation forms (initial ب FE91, final ت FE96).
+    const auto shaped = PdfTextLayout::ShapeArabic("\xD8\xA8\xD8\xAA");
+    const std::string expected = "\xEF\xBA\x91" "\xEF\xBA\x96"; // FE91 + FE96
+    PDFPP_TEST_CHECK(shaped == expected);
+
     // Kerning: fonts with a `kern` table expose pair adjustments; Helvetica-less
     // test avoids font-file dependence, so exercise the API shape via the
     // Windows fonts when available.

@@ -147,4 +147,74 @@ std::string PdfTextLayout::ReorderBidi(std::string_view utf8, const bool default
     return out;
 }
 
+std::string PdfTextLayout::ShapeArabic(std::string_view utf8) {
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    if (cps.empty()) return {};
+
+    // Arabic presentation forms for the basic letters (U+0621..U+064A subset).
+    // isJoining returns true for letters that join on both sides.
+    const auto hasJoining = [](const std::uint32_t cp) {
+        if (cp == 0x0621U) return false; // hamza does not join
+        return (cp >= 0x0622U && cp <= 0x062AU) || // alef..ta
+               (cp >= 0x062BU && cp <= 0x063AU) ||
+               (cp >= 0x0641U && cp <= 0x064AU);
+    };
+    const auto presentationForm = [](const std::uint32_t cp, const bool initial, const bool medial, const bool final) {
+        if (cp == 0x0622U) return final ? 0xFE82U : (initial ? 0xFE81U : (medial ? 0xFE82U : 0xFE81U));
+        if (cp == 0x0623U) return final ? 0xFE84U : (initial ? 0xFE83U : (medial ? 0xFE84U : 0xFE83U));
+        if (cp == 0x0625U) return final ? 0xFE88U : (initial ? 0xFE87U : (medial ? 0xFE88U : 0xFE87U));
+        if (cp == 0x0626U) return final ? 0xFE8AU : (initial ? 0xFE89U : (medial ? 0xFE8AU : 0xFE89U));
+        if (cp == 0x0627U) return final ? 0xFE8EU : (initial ? 0xFE8DU : (medial ? 0xFE8EU : 0xFE8DU));
+        if (cp == 0x0628U) return final ? 0xFE90U : (initial ? 0xFE91U : (medial ? 0xFE92U : 0xFE8FU));
+        if (cp == 0x0629U) return final ? 0xFE94U : (initial ? 0xFE93U : (medial ? 0xFE94U : 0xFE93U));
+        if (cp == 0x062AU) return final ? 0xFE96U : (initial ? 0xFE97U : (medial ? 0xFE98U : 0xFE95U));
+        if (cp == 0x062BU) return final ? 0xFE9AU : (initial ? 0xFE9BU : (medial ? 0xFE9CU : 0xFE99U));
+        if (cp == 0x062CU) return final ? 0xFE9EU : (initial ? 0xFE9FU : (medial ? 0xFEA0U : 0xFE9DU));
+        if (cp == 0x062DU) return final ? 0xFEA2U : (initial ? 0xFEA3U : (medial ? 0xFEA4U : 0xFEA1U));
+        if (cp == 0x062EU) return final ? 0xFEA6U : (initial ? 0xFEA7U : (medial ? 0xFEA8U : 0xFEA5U));
+        if (cp == 0x062FU) return final ? 0xFEAAU : (initial ? 0xFEABU : (medial ? 0xFEACU : 0xFEA9U));
+        if (cp == 0x0630U) return final ? 0xFEAEU : (initial ? 0xFEAFU : (medial ? 0xFEB0U : 0xFEADU));
+        if (cp == 0x0631U) return final ? 0xFEB2U : (initial ? 0xFEB3U : (medial ? 0xFEB4U : 0xFEB1U));
+        if (cp == 0x0632U) return final ? 0xFEB6U : (initial ? 0xFEB7U : (medial ? 0xFEB8U : 0xFEB5U));
+        if (cp == 0x0633U) return final ? 0xFEBAU : (initial ? 0xFEBBU : (medial ? 0xFEBCU : 0xFEB9U));
+        if (cp == 0x0634U) return final ? 0xFEBEU : (initial ? 0xFEBFU : (medial ? 0xFEC0U : 0xFEBDU));
+        if (cp == 0x0635U) return final ? 0xFEC2U : (initial ? 0xFEC3U : (medial ? 0xFEC4U : 0xFEC1U));
+        if (cp == 0x0636U) return final ? 0xFEC6U : (initial ? 0xFEC7U : (medial ? 0xFEC8U : 0xFEC5U));
+        if (cp == 0x0637U) return final ? 0xFECAU : (initial ? 0xFECBU : (medial ? 0xFECCU : 0xFEC9U));
+        if (cp == 0x0638U) return final ? 0xFECEU : (initial ? 0xFECFU : (medial ? 0xFED0U : 0xFECDU));
+        if (cp == 0x0639U) return final ? 0xFED2U : (initial ? 0xFED3U : (medial ? 0xFED4U : 0xFED1U));
+        if (cp == 0x063AU) return final ? 0xFED6U : (initial ? 0xFED7U : (medial ? 0xFED8U : 0xFED5U));
+        if (cp == 0x0641U) return final ? 0xFEDAU : (initial ? 0xFEDBU : (medial ? 0xFEDCU : 0xFED9U));
+        if (cp == 0x0642U) return final ? 0xFEDEU : (initial ? 0xFEDFU : (medial ? 0xFEE0U : 0xFEDDU));
+        if (cp == 0x0643U) return final ? 0xFEE2U : (initial ? 0xFEE3U : (medial ? 0xFEE4U : 0xFEE1U));
+        if (cp == 0x0644U) return final ? 0xFEE6U : (initial ? 0xFEE7U : (medial ? 0xFEE8U : 0xFEE5U));
+        if (cp == 0x0645U) return final ? 0xFEEAU : (initial ? 0xFEEBU : (medial ? 0xFEECU : 0xFEE9U));
+        if (cp == 0x0646U) return final ? 0xFEEEU : (initial ? 0xFEEFU : (medial ? 0xFEF0U : 0xFEEDU));
+        if (cp == 0x0647U) return final ? 0xFEF2U : (initial ? 0xFEF3U : (medial ? 0xFEF4U : 0xFEF1U));
+        if (cp == 0x0648U) return final ? 0xFEF6U : (initial ? 0xFEF7U : (medial ? 0xFEF8U : 0xFEF5U));
+        if (cp == 0x0649U) return final ? 0xFEFAU : (initial ? 0xFEFBU : (medial ? 0xFEFCU : 0xFEF9U));
+        if (cp == 0x064AU) return final ? 0xFEFEU : (initial ? 0xFEFFU : (medial ? 0xFEFEU : 0xFEFDU));
+        return cp;
+    };
+
+    std::string out;
+    for (std::size_t i = 0; i < cps.size(); ++i) {
+        const std::uint32_t cp = cps[i];
+        if (!hasJoining(cp)) {
+            appendUtf8(out, cp);
+            continue;
+        }
+        const bool prevJoins = i > 0U && hasJoining(cps[i - 1U]);
+        const bool nextJoins = i + 1U < cps.size() && hasJoining(cps[i + 1U]);
+        // Initial form when a joining character follows; final form when one
+        // precedes; medial when both.
+        const bool initial = nextJoins;
+        const bool final = prevJoins;
+        const bool medial = prevJoins && nextJoins;
+        appendUtf8(out, presentationForm(cp, initial, medial, final));
+    }
+    return out;
+}
+
 } // namespace CPPPdf

@@ -19,6 +19,13 @@ public:
     // so the visual order is correct when the text is drawn left-to-right.
     // Returns the visual-order characters (UTF-8 code points).
     [[nodiscard]] static std::string ReorderBidi(std::string_view utf8, bool defaultRtl = false);
+
+    // Basic Arabic shaping: joins Arabic letters into their contextual
+    // presentation forms (isolated/initial/medial/final) using the standard
+    // Arabic presentation forms. Letters not joined (at run edges or preceded
+    // by a non-joining character) keep their isolated form. The input is
+    // assumed to be in logical order with bidi already applied.
+    [[nodiscard]] static std::string ShapeArabic(std::string_view utf8);
 };
 
 } // namespace CPPPdf

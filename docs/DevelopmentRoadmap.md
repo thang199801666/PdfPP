@@ -51,7 +51,7 @@ secondary scope.
 - Improve font fallback, kerning, vertical writing and subsetting.
 - `kern` table parsing with cached kerning pairs, `PdfCanvas::ShowTextUtf8WithFallback` for glyph-coverage fallback across fonts, and vertical writing (`SetVerticalWriting`/`ShowTextVertical`) for top-to-bottom CJK runs.
 - Add Unicode grapheme handling, bidirectional text and complex shaping.
-- `PdfTextLayout` provides UAX #29 grapheme clustering and simplified UAX #9 bidi reordering.
+- `PdfTextLayout` provides UAX #29 grapheme clustering, simplified UAX #9 bidi reordering, and basic Arabic shaping via presentation forms (`ShapeArabic`).
 - Add paragraph, table, list, column and page-flow layout primitives.
 - `PdfDocumentLayout` flows paragraphs with automatic page breaks, draws bullet/numbered lists, multi-column text, and page headers/footers with page numbers.
 - Add headers, footers, page breaks and image placement.

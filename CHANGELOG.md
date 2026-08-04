@@ -1,3 +1,12 @@
+## 0.68.0
+
+- Basic Arabic shaping: `PdfTextLayout::ShapeArabic` joins Arabic letters into
+  their contextual presentation forms (isolated/initial/medial/final) using the
+  standard Arabic presentation forms table, enabling correct rendering of
+  connected Arabic text.
+- Tests: `Feature.TextLayoutAndFallback` verifies ب + ت join to their initial/
+  final forms. All suites green.
+
 ## 0.67.0
 
 - Image encoding on write: the writer now keeps JPEG (DCT), JPEG 2000 (JPX)
