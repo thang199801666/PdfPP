@@ -99,6 +99,8 @@ public:
         std::span<const std::byte> rgbBytes);
 
     static PdfImage FromJpeg(std::span<const std::byte> jpegBytes);
+    // Decodes a 24/32-bit uncompressed BMP into a raw RGB image.
+    static PdfImage FromBmp(std::span<const std::byte> bmpBytes);
     // Decodes a PNG file (RGB/RGBA/palette/gray, bit depths 1-8) into a raw
     // RGB image. Uses zlib inflate for IDAT.
     static PdfImage FromPng(std::span<const std::byte> pngBytes);

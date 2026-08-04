@@ -1245,6 +1245,12 @@ void TestPngOutput() {
     PDFPP_TEST_CHECK(bmpBytes.size() >= 54U);
     PDFPP_TEST_CHECK(bmpBytes[0] == 'B' && bmpBytes[1] == 'M');
     PDFPP_TEST_CHECK(bmpBytes.size() == 54U + 40U * 30U * 4U);
+    // FromBmp round-trips the BMP back to an RGB image.
+    const auto bmpImage = PdfImage::FromBmp(std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(bmpBytes.data()), bmpBytes.size()));
+    PDFPP_TEST_CHECK(bmpImage.GetWidth() == 40U);
+    PDFPP_TEST_CHECK(bmpImage.GetHeight() == 30U);
+    PDFPP_TEST_CHECK(bmpImage.GetColorSpace() == PdfImageColorSpace::DeviceRGB);
     std::filesystem::remove(bmpPath);
     // Grayscale conversion keeps dimensions and drops saturation.
     const auto gray = bitmap.ToGrayscale();

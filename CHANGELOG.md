@@ -1,3 +1,9 @@
+## 0.146.0
+
+- BMP decoding: `PdfImage::FromBmp` reads 24/32-bit uncompressed BMPs into a
+  raw RGB image, completing the BMP round-trip with `PdfBitmap::SaveBmp`.
+- Tests: `Feature.PngOutput` loads the rendered BMP back. All suites green.
+
 ## 0.145.0
 
 - PNG encoding: `PdfImage::EncodePng` builds a PNG file from raw RGB bytes

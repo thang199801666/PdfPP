@@ -165,6 +165,55 @@ PdfImage PdfImage::FromJpeg(const std::span<const std::byte> jpegBytes) {
                     info.precision, std::vector<std::byte>(jpegBytes.begin(), jpegBytes.end()));
 }
 
+PdfImage PdfImage::FromBmp(const std::span<const std::byte> bmpBytes) {
+    const auto readLe32 = [&](const std::size_t offset) {
+        if (offset + 4U > bmpBytes.size()) return std::uint32_t{0};
+        return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bmpBytes[offset])) |
+               (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bmpBytes[offset + 1U])) << 8U) |
+               (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bmpBytes[offset + 2U])) << 16U) |
+               (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bmpBytes[offset + 3U])) << 24U);
+    };
+    const auto readLe16 = [&](const std::size_t offset) -> std::uint16_t {
+        if (offset + 2U > bmpBytes.size()) return std::uint16_t{0};
+        return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bmpBytes[offset])) |
+               (static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bmpBytes[offset + 1U])) << 8U);
+    };
+    if (bmpBytes.size() < 54U ||
+        std::to_integer<std::uint8_t>(bmpBytes[0]) != 'B' ||
+        std::to_integer<std::uint8_t>(bmpBytes[1]) != 'M') {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Not a BMP file.");
+    }
+    const std::uint32_t dataOffset = readLe32(10U);
+    const std::uint32_t width = readLe32(18U);
+    const std::uint32_t height = readLe32(22U);
+    const std::uint16_t bitCount = readLe16(28U);
+    const std::uint32_t compression = readLe32(30U);
+    if (width == 0U || height == 0U || width > 32768U || height > 32768U) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Invalid BMP dimensions.");
+    }
+    if (compression != 0U || (bitCount != 24U && bitCount != 32U)) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Unsupported BMP format (expected 24/32-bit uncompressed).");
+    }
+    const std::uint32_t bytesPerPixel = bitCount / 8U;
+    const std::uint32_t rowSize = ((width * bitCount + 31U) / 32U) * 4U;
+    std::vector<std::byte> rgb;
+    rgb.reserve(static_cast<std::size_t>(width) * height * 3U);
+    for (std::uint32_t y = 0; y < height; ++y) {
+        // BMP rows are bottom-up.
+        const std::uint32_t sourceRow = height - 1U - y;
+        const std::size_t row = static_cast<std::size_t>(dataOffset) + static_cast<std::size_t>(sourceRow) * rowSize;
+        for (std::uint32_t x = 0; x < width; ++x) {
+            const std::size_t pixel = row + static_cast<std::size_t>(x) * bytesPerPixel;
+            if (pixel + 2U >= bmpBytes.size()) break;
+            rgb.push_back(bmpBytes[pixel + 2U]); // B -> R
+            rgb.push_back(bmpBytes[pixel + 1U]); // G
+            rgb.push_back(bmpBytes[pixel]);      // R -> B
+        }
+    }
+    return PdfImage(width, height, PdfImageColorSpace::DeviceRGB, PdfImageEncoding::Raw, 8U, std::move(rgb));
+}
+
 namespace {
 constexpr std::uint32_t kPngSignature = 0x89504E47U;
 
