@@ -1,3 +1,10 @@
+## 0.118.0
+
+- Font names: `PdfTrueTypeFont::GetPostScriptName`/`GetFontFamily` read the
+  `name` table (nameID 6 / 1, UTF-16BE decoded, Windows records preferred).
+- Tests: `Feature.TextLayoutAndFallback` reads names from the system font. All
+  suites green.
+
 ## 0.117.0
 
 - Combining-mark stripping: `PdfTextLayout::StripCombiningMarks` removes

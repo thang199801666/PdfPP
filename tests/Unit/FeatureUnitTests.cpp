@@ -774,6 +774,9 @@ void TestTextLayoutAndFallback() {
         [](const auto& path) { return std::filesystem::exists(path); });
     if (fontIt != candidates.end()) {
         const auto font = PdfTrueTypeFont::Load(*fontIt);
+        const std::string postScriptName = font.GetPostScriptName();
+        PDFPP_TEST_CHECK(!postScriptName.empty());
+        PDFPP_TEST_CHECK(!font.GetFontFamily().empty());
         const auto gidA = font.GetGlyphId(U'A');
         const auto gidV = font.GetGlyphId(U'V');
         if (gidA && gidV) {

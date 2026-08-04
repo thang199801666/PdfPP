@@ -624,7 +624,78 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
     f.bytes_=std::move(bytes);return f;
 }
 const std::string& PdfTrueTypeFont::GetSourceName()const noexcept{return sourceName_;} const std::vector<std::uint8_t>& PdfTrueTypeFont::GetBytes()const noexcept{return bytes_;}
+
+namespace {
+// Decodes a UTF-16BE string (platform 0/3 name records) to UTF-8.
+std::string decodeUtf16Be(const std::vector<std::uint8_t>& bytes, const std::size_t offset, const std::size_t length) {
+    std::string out;
+    for (std::size_t i = 0; i + 1U < length && offset + i + 1U < bytes.size(); i += 2U) {
+        std::uint32_t unit = (static_cast<std::uint32_t>(bytes[offset + i]) << 8U) | bytes[offset + i + 1U];
+        if (unit >= 0xD800U && unit <= 0xDBFFU && offset + i + 3U < bytes.size()) {
+            const std::uint32_t low = (static_cast<std::uint32_t>(bytes[offset + i + 2U]) << 8U) | bytes[offset + i + 3U];
+            if (low >= 0xDC00U && low <= 0xDFFFU) {
+                unit = 0x10000U + ((unit - 0xD800U) << 10U) + (low - 0xDC00U);
+                i += 2U;
+            }
+        }
+        if (unit < 0x80U) out.push_back(static_cast<char>(unit));
+        else if (unit < 0x800U) {
+            out.push_back(static_cast<char>(0xC0U | (unit >> 6U)));
+            out.push_back(static_cast<char>(0x80U | (unit & 0x3FU)));
+        } else if (unit < 0x10000U) {
+            out.push_back(static_cast<char>(0xE0U | (unit >> 12U)));
+            out.push_back(static_cast<char>(0x80U | ((unit >> 6U) & 0x3FU)));
+            out.push_back(static_cast<char>(0x80U | (unit & 0x3FU)));
+        } else {
+            out.push_back(static_cast<char>(0xF0U | (unit >> 18U)));
+            out.push_back(static_cast<char>(0x80U | ((unit >> 12U) & 0x3FU)));
+            out.push_back(static_cast<char>(0x80U | ((unit >> 6U) & 0x3FU)));
+            out.push_back(static_cast<char>(0x80U | (unit & 0x3FU)));
+        }
+    }
+    return out;
+}
+
+// Reads a name-table entry (by nameID) as a UTF-8 string; prefers the first
+// Windows (platform 3) record.
+std::string nameTableValue(const std::vector<std::uint8_t>& bytes, const std::uint16_t nameId) {
+    const auto tables = ParseTables(bytes);
+    const auto it = tables.find("name");
+    if (it == tables.end() || it->second.length < 6U) return {};
+    const std::size_t base = it->second.offset;
+    const std::uint16_t count = Read16(bytes, base + 2U);
+    const std::uint16_t stringOffset = Read16(bytes, base + 4U);
+    std::string fallback;
+    for (std::uint16_t i = 0; i < count; ++i) {
+        const std::size_t rec = base + 6U + std::size_t(i) * 12U;
+        if (rec + 12U > base + it->second.length) break;
+        const std::uint16_t platformId = Read16(bytes, rec);
+        const std::uint16_t nameIdValue = Read16(bytes, rec + 6U);
+        const std::uint16_t length = Read16(bytes, rec + 8U);
+        const std::uint16_t offset = Read16(bytes, rec + 10U);
+        if (nameIdValue != nameId) continue;
+        if (length == 0U) continue;
+        std::string value;
+        if (platformId == 0U || platformId == 3U) {
+            value = decodeUtf16Be(bytes, base + stringOffset + offset, length);
+        } else {
+            value.assign(reinterpret_cast<const char*>(bytes.data() + base + stringOffset + offset), length);
+        }
+        if (platformId == 3U && !value.empty()) return value;
+        if (fallback.empty()) fallback = value;
+    }
+    return fallback;
+}
+} // namespace
+
 const PdfTrueTypeMetrics& PdfTrueTypeFont::GetMetrics()const noexcept{return metrics_;} std::size_t PdfTrueTypeFont::GetGlyphMappingCount()const noexcept{return unicodeToGlyph_.size();}
+std::string PdfTrueTypeFont::GetPostScriptName() const {
+    const auto value = nameTableValue(bytes_, 6U);
+    return value.empty() ? sourceName_ : value;
+}
+std::string PdfTrueTypeFont::GetFontFamily() const {
+    return nameTableValue(bytes_, 1U);
+}
 bool PdfTrueTypeFont::Supports(std::uint32_t cp)const noexcept{return unicodeToGlyph_.contains(cp);} std::optional<std::uint16_t> PdfTrueTypeFont::GetGlyphId(std::uint32_t cp)const noexcept{auto it=unicodeToGlyph_.find(cp);return it==unicodeToGlyph_.end()?std::nullopt:std::optional<std::uint16_t>(it->second);}
 std::uint16_t PdfTrueTypeFont::GetAdvanceWidth(std::uint16_t gid)const noexcept{return gid<advanceWidths_.size()?advanceWidths_[gid]:0;}
 bool PdfTrueTypeFont::HasTable(const std::string_view tag) const noexcept {
