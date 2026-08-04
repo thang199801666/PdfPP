@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,6 +54,14 @@ public:
     // points are preserved.
     [[nodiscard]] static std::string ToUpper(std::string_view utf8);
     [[nodiscard]] static std::string ToLower(std::string_view utf8);
+
+    // Wraps UTF-8 text into lines of at most maxWidth using the supplied
+    // measure callback (returns the advance of a substring). Long words are
+    // split at grapheme boundaries.
+    [[nodiscard]] static std::vector<std::string> WordWrap(
+        std::string_view utf8,
+        double maxWidth,
+        const std::function<double(std::string_view)>& measure);
 };
 
 } // namespace CPPPdf

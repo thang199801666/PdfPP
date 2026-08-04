@@ -1,3 +1,10 @@
+## 0.136.0
+
+- Word wrapping: `PdfTextLayout::WordWrap` fits UTF-8 text into lines of a
+  maximum width using a measure callback, splitting long words at grapheme
+  boundaries.
+- Tests: `API.TextSearch` wraps three words into two lines. All suites green.
+
 ## 0.135.0
 
 - Unicode case conversion: `PdfTextLayout::ToUpper`/`ToLower` handle ASCII and

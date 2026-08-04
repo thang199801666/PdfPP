@@ -552,4 +552,58 @@ std::string PdfTextLayout::ToLower(const std::string_view utf8) {
     return out;
 }
 
+std::vector<std::string> PdfTextLayout::WordWrap(
+    const std::string_view utf8,
+    const double maxWidth,
+    const std::function<double(std::string_view)>& measure) {
+    std::vector<std::string> lines;
+    if (utf8.empty()) { lines.emplace_back(); return lines; }
+    const std::vector<std::string> words = [&] {
+        std::vector<std::string> result;
+        std::string current;
+        auto flush = [&] {
+            if (!current.empty()) { result.push_back(current); current.clear(); }
+        };
+        // Split on whitespace, keeping tokens (words) contiguous.
+        for (std::size_t i = 0; i < utf8.size();) {
+            const unsigned char c = static_cast<unsigned char>(utf8[i]);
+            const bool isSpace = c == ' ' || c == '\t' || c == '\n' || c == '\r';
+            if (isSpace) { flush(); ++i; continue; }
+            // Advance one code point.
+            std::size_t n = 1;
+            if ((c & 0xE0U) == 0xC0U) n = 2;
+            else if ((c & 0xF0U) == 0xE0U) n = 3;
+            else if ((c & 0xF8U) == 0xF0U) n = 4;
+            if (i + n > utf8.size()) n = 1;
+            current.append(utf8.substr(i, n));
+            i += n;
+        }
+        flush();
+        return result;
+    }();
+    std::string line;
+    for (const auto& word : words) {
+        const std::string candidate = line.empty() ? word : line + " " + word;
+        if (!line.empty() && measure(candidate) > maxWidth) {
+            lines.push_back(line);
+            line = word;
+        } else {
+            line = candidate;
+        }
+        // Split an over-long word at grapheme boundaries.
+        while (!line.empty() && measure(line) > maxWidth) {
+            const auto clusters = PdfTextLayout::GraphemeClusters(line);
+            std::string prefix;
+            for (std::size_t k = 0; k < clusters.size(); ++k) {
+                if (measure(prefix + clusters[k]) > maxWidth && !prefix.empty()) break;
+                prefix += clusters[k];
+            }
+            lines.push_back(prefix);
+            line = line.substr(prefix.size());
+        }
+    }
+    if (!line.empty()) lines.push_back(line);
+    return lines;
+}
+
 } // namespace CPPPdf

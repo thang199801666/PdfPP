@@ -211,6 +211,14 @@ void TestTextSearch() {
     // Unicode-aware case conversion.
     PDFPP_TEST_CHECK(PdfTextLayout::ToUpper("caf\u00e9") == "CAF\u00c9");
     PDFPP_TEST_CHECK(PdfTextLayout::ToLower("CAF\u00c9") == "caf\u00e9");
+    // Word wrap with a monospace-ish measure (1 unit per character).
+    const auto measure = [](const std::string_view text) {
+        return static_cast<double>(text.size());
+    };
+    const auto wrapped = PdfTextLayout::WordWrap("aaa bb cc", 5.0, measure);
+    PDFPP_TEST_CHECK(wrapped.size() == 2U);
+    PDFPP_TEST_CHECK(wrapped[0] == "aaa");
+    PDFPP_TEST_CHECK(wrapped[1] == "bb cc");
 
     // Accent-insensitive search: "cafe" matches "caf\u00e9".
     PdfTextChunk accented;
@@ -1074,7 +1082,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 135U);
+    static_assert(CPPPdf::VersionMinor == 136U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1084,7 +1092,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.135.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.136.0");
 }
 
 int RunApiCoverageTests() {
