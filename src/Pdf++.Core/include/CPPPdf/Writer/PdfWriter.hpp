@@ -231,6 +231,8 @@ public:
     [[nodiscard]] PdfRectangle GetPageMediaBox(std::size_t pageIndex) const;
     // Changes an existing page's media box (page geometry) after AddPage.
     void SetPageSize(std::size_t pageIndex, const PdfRectangle& mediaBox);
+    // Sets or clears a page's crop box (empty clears it).
+    void SetPageCropBox(std::size_t pageIndex, const PdfRectangle& cropBox);
     // Sets a page's rotation (0/90/180/270 clockwise).
     void SetPageRotation(std::size_t pageIndex, int rotation);
     [[nodiscard]] int GetPageRotation(std::size_t pageIndex) const;

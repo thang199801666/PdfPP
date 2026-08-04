@@ -85,6 +85,7 @@ struct PdfWriterOcg {
 };
 struct PdfWriterPage {
     PdfRectangle mediaBox{0,0,595,842};
+    std::optional<PdfRectangle> cropBox;
     int rotation{0};
     std::string content;
     std::string fontName{"Helvetica"};

@@ -848,6 +848,15 @@ void TestWriterDocumentInfo() {
     rotateWriter.Save(rotatePath);
     PDFPP_TEST_CHECK(PdfDocument::Open(rotatePath).GetPageInfo(0U).rotation == 90);
     std::filesystem::remove(rotatePath);
+
+    // Crop box from the writer.
+    PdfWriter cropWriter;
+    const auto cropPage = cropWriter.AddPage();
+    cropWriter.SetPageCropBox(cropPage, PdfRectangle{0, 0, 300, 400});
+    const auto cropPath = TempPath("pdfpp_writer_crop.pdf");
+    cropWriter.Save(cropPath);
+    PDFPP_TEST_CHECK(PdfDocument::Open(cropPath).GetPageInfo(0U).cropBox.right == 300);
+    std::filesystem::remove(cropPath);
 }
 
 
@@ -1036,7 +1045,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 118U);
+    static_assert(CPPPdf::VersionMinor == 119U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1046,7 +1055,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.118.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.119.0");
 }
 
 int RunApiCoverageTests() {

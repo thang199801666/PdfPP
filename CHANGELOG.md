@@ -1,3 +1,10 @@
+## 0.119.0
+
+- Writer crop box: `PdfWriter::SetPageCropBox` emits a page `/CropBox` (empty
+  clears it).
+- Tests: `API.WriterDocumentInfo` saves a cropped page and reads the box back.
+  All suites green.
+
 ## 0.118.0
 
 - Font names: `PdfTrueTypeFont::GetPostScriptName`/`GetFontFamily` read the

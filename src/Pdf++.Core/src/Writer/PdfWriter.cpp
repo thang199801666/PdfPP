@@ -337,6 +337,18 @@ void PdfWriter::SetPageSize(const std::size_t pageIndex, const PdfRectangle& med
     }
     state_->pages[pageIndex].mediaBox = mediaBox;
 }
+void PdfWriter::SetPageCropBox(const std::size_t pageIndex, const PdfRectangle& cropBox) {
+    if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
+    if (cropBox.empty()) {
+        state_->pages[pageIndex].cropBox.reset();
+        return;
+    }
+    if (!std::isfinite(cropBox.left) || !std::isfinite(cropBox.top) ||
+        !std::isfinite(cropBox.right) || !std::isfinite(cropBox.bottom)) {
+        throw std::invalid_argument("Crop box must be finite.");
+    }
+    state_->pages[pageIndex].cropBox = cropBox;
+}
 void PdfWriter::SetPageRotation(const std::size_t pageIndex, const int rotation) {
     if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
     if (rotation % 90 != 0) throw std::invalid_argument("Rotation must be a multiple of 90 degrees.");
@@ -1169,7 +1181,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             for (const auto id : attachmentIds[i]) annotations += std::to_string(id) + " 0 R ";
             annotations += ']';
         }
-        objects[pageIds[i]]="<< /Type /Page /Parent "+std::to_string(pages)+" 0 R /MediaBox ["+box.str()+"]"+std::string(p.rotation!=0?" /Rotate "+std::to_string(p.rotation):"")+" /Resources "+resources+" /Contents "+std::to_string(contentIds[i])+" 0 R"+annotations+" >>";objects[contentIds[i]]="<< /Length "+std::to_string(p.content.size())+" >>\nstream\n"+p.content+"endstream";
+        objects[pageIds[i]]="<< /Type /Page /Parent "+std::to_string(pages)+" 0 R /MediaBox ["+box.str()+"]"+std::string(p.cropBox?(" /CropBox ["+std::to_string(p.cropBox->left)+" "+std::to_string(p.cropBox->bottom)+" "+std::to_string(p.cropBox->right)+" "+std::to_string(p.cropBox->top)+"]"):"")+std::string(p.rotation!=0?" /Rotate "+std::to_string(p.rotation):"")+" /Resources "+resources+" /Contents "+std::to_string(contentIds[i])+" 0 R"+annotations+" >>";objects[contentIds[i]]="<< /Length "+std::to_string(p.content.size())+" >>\nstream\n"+p.content+"endstream";
         for (std::size_t j = 0; j < p.links.size(); ++j) {
             const auto& link = p.links[j];
             const auto& rectangle = link.options.rectangle;
