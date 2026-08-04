@@ -1,4 +1,5 @@
 #include <CPPPdf/Text/PdfTextSearch.hpp>
+#include <CPPPdf/Text/PdfTextLayout.hpp>
 
 #include <CPPPdf/PdfError.hpp>
 
@@ -218,6 +219,18 @@ std::vector<PdfTextSearchMatch> PdfTextSearch::Find(
     const std::vector<PdfTextChunk>& chunks,
     const std::string_view keyword,
     const PdfTextSearchOptions& options) {
+    if (options.ignoreAccents) {
+        // Normalize both the haystack and the needle so accents are ignored.
+        std::vector<PdfTextChunk> normalized = chunks;
+        for (auto& chunk : normalized) {
+            chunk.utf8Text = PdfTextLayout::RemoveDiacritics(chunk.utf8Text);
+        }
+        PdfTextSearchOptions matchOptions = options;
+        matchOptions.ignoreAccents = false;
+        const std::string normalizedNeedle = PdfTextLayout::RemoveDiacritics(keyword);
+        return PdfTextSearchIndex(normalized, {options.lineTolerance, options.maxHorizontalGap})
+            .Find(normalizedNeedle, matchOptions);
+    }
     return PdfTextSearchIndex(chunks, {options.lineTolerance, options.maxHorizontalGap}).Find(keyword, options);
 }
 

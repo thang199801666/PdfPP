@@ -1,3 +1,11 @@
+## 0.124.0
+
+- Accent-insensitive search: `PdfTextSearchOptions::ignoreAccents` matches
+  across diacritics (cafe finds caf\u00e9). New
+  `PdfTextLayout::RemoveDiacritics` maps Latin precomposed letters to ASCII.
+- Tests: `API.TextSearch` verifies the accent-insensitive and strict paths. All
+  suites green.
+
 ## 0.123.0
 
 - NFC normalization: `PdfTextLayout::NormalizeNfc` composes common Latin base +

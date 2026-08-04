@@ -13,6 +13,7 @@ namespace CPPPdf {
 
 struct PdfTextSearchOptions final {
     bool caseInsensitive{true};
+    bool ignoreAccents{false};
     bool allowAcrossLineBreaks{false};
     double lineTolerance{2.0};
     double maxHorizontalGap{6.0};

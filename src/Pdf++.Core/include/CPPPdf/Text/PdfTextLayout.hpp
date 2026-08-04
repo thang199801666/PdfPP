@@ -44,6 +44,10 @@ public:
     // Normalizes combining sequences to precomposed characters (NFC) for the
     // common Latin block (e.g. "e" + combining acute -> U+00E9).
     [[nodiscard]] static std::string NormalizeNfc(std::string_view utf8);
+
+    // Replaces Latin precomposed letters with their ASCII base (é -> e, ö -> o,
+    // ç -> c, ...), keeping non-Latin code points unchanged.
+    [[nodiscard]] static std::string RemoveDiacritics(std::string_view utf8);
 };
 
 } // namespace CPPPdf

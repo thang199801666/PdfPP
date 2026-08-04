@@ -395,4 +395,66 @@ std::string PdfTextLayout::NormalizeNfc(const std::string_view utf8) {
     return out;
 }
 
+std::string PdfTextLayout::RemoveDiacritics(const std::string_view utf8) {
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    std::string out;
+    for (const std::uint32_t cp : cps) {
+        if (isCombiningMark(cp)) continue;
+        char base = 0;
+        switch (cp) {
+        case 0x00C0: case 0x00C1: case 0x00C2: case 0x00C3: case 0x00C4: case 0x00C5:
+        case 0x0100: case 0x0102: case 0x0104: case 0x01DE: case 0x01FA: base = 'A'; break;
+        case 0x00E0: case 0x00E1: case 0x00E2: case 0x00E3: case 0x00E4: case 0x00E5:
+        case 0x0101: case 0x0103: case 0x0105: case 0x01DF: case 0x01FB: base = 'a'; break;
+        case 0x00C7: case 0x0106: case 0x0108: case 0x010A: case 0x010C: base = 'C'; break;
+        case 0x00E7: case 0x0107: case 0x0109: case 0x010B: case 0x010D: base = 'c'; break;
+        case 0x00C8: case 0x00C9: case 0x00CA: case 0x00CB:
+        case 0x0112: case 0x0114: case 0x0116: case 0x0118: case 0x011A:
+        case 0x0200: case 0x0202: case 0x0204: base = 'E'; break;
+        case 0x00E8: case 0x00E9: case 0x00EA: case 0x00EB:
+        case 0x0113: case 0x0115: case 0x0117: case 0x0119: case 0x011B:
+        case 0x0201: case 0x0203: case 0x0205: base = 'e'; break;
+        case 0x00CC: case 0x00CD: case 0x00CE: case 0x00CF:
+        case 0x0128: case 0x012A: case 0x012C: case 0x012E: case 0x0130: base = 'I'; break;
+        case 0x00EC: case 0x00ED: case 0x00EE: case 0x00EF:
+        case 0x0129: case 0x012B: case 0x012D: case 0x012F: case 0x0131: base = 'i'; break;
+        case 0x00D1: case 0x0143: case 0x0145: case 0x0147: case 0x014A: base = 'N'; break;
+        case 0x00F1: case 0x0144: case 0x0146: case 0x0148: case 0x014B: base = 'n'; break;
+        case 0x00D2: case 0x00D3: case 0x00D4: case 0x00D5: case 0x00D6:
+        case 0x014C: case 0x014E: case 0x0150: case 0x01EA: base = 'O'; break;
+        case 0x00F2: case 0x00F3: case 0x00F4: case 0x00F5: case 0x00F6:
+        case 0x014D: case 0x014F: case 0x0151: case 0x01EB: base = 'o'; break;
+        case 0x0154: case 0x0156: case 0x0158: base = 'R'; break;
+        case 0x0155: case 0x0157: case 0x0159: base = 'r'; break;
+        case 0x015A: case 0x015C: case 0x015E: base = 'S'; break;
+        case 0x015B: case 0x015D: case 0x015F: base = 's'; break;
+        case 0x00D9: case 0x00DA: case 0x00DB: case 0x00DC:
+        case 0x0168: case 0x016A: case 0x016C: case 0x016E: case 0x0170: case 0x0172:
+        case 0x01DB: base = 'U'; break;
+        case 0x00F9: case 0x00FA: case 0x00FB: case 0x00FC:
+        case 0x0169: case 0x016B: case 0x016D: case 0x016F: case 0x0171: case 0x0173:
+        case 0x01DC: base = 'u'; break;
+        case 0x00DD: case 0x0176: case 0x0178: base = 'Y'; break;
+        case 0x00FD: case 0x00FF: case 0x0177: base = 'y'; break;
+        case 0x0179: case 0x017B: case 0x017D: base = 'Z'; break;
+        case 0x017A: case 0x017C: case 0x017E: base = 'z'; break;
+        case 0x00C6: base = 'A'; break;
+        case 0x00E6: base = 'a'; break;
+        case 0x00D8: base = 'O'; break;
+        case 0x00F8: base = 'o'; break;
+        case 0x0110: base = 'D'; break;
+        case 0x0111: base = 'd'; break;
+        case 0x00DE: base = 'T'; break;
+        case 0x00FE: base = 't'; break;
+        case 0x00D0: base = 'D'; break;
+        case 0x00F0: base = 'd'; break;
+        default: break;
+        }
+        if (base != 0) { out.push_back(base); continue; }
+        appendUtf8(out, cp);
+    }
+    return out;
+}
+
 } // namespace CPPPdf
