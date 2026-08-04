@@ -423,6 +423,10 @@ void TestAnnotationsAndHighlight(const std::filesystem::path& base) {
     const auto annotationResult = PdfAnnotationEditor::AddAnnotations(base, annotated, annotations);
     PDFPP_TEST_CHECK(annotationResult.annotationCount == annotations.size());
     PDFPP_TEST_CHECK(annotationResult.modifiedPageCount == 1);
+    const auto readAnnotations = PdfDocument::Open(annotated).GetAnnotations(0U);
+    PDFPP_TEST_CHECK(readAnnotations.size() == annotations.size());
+    PDFPP_TEST_CHECK(readAnnotations[0].subtype == "Highlight");
+    PDFPP_TEST_CHECK(!readAnnotations[0].contents.empty());
     PDFPP_TEST_CHECK(PdfDocument::Open(annotated).GetPageCount() == 2);
 
     PdfKeywordHighlightOptions highlight;
@@ -1045,7 +1049,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 120U);
+    static_assert(CPPPdf::VersionMinor == 121U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1055,7 +1059,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.120.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.121.0");
 }
 
 int RunApiCoverageTests() {

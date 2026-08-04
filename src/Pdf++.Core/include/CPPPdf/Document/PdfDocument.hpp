@@ -69,6 +69,15 @@ struct PdfEncryptionInfo final {
     bool ownerAuthenticated{};
     bool encryptMetadata{true};
 };
+
+// A single annotation read from a page's /Annots array.
+struct PdfAnnotationInfo final {
+    std::string subtype;
+    PdfRectangle rect{};
+    std::string contents;
+    std::string title;
+    std::uint32_t objectNumber{};
+};
 class PdfDocument final {public:
     PdfDocument();
     ~PdfDocument();
@@ -222,6 +231,9 @@ class PdfDocument final {public:
 
     // Reads the catalog /PageLabels /Nums entries, sorted by page index.
     [[nodiscard]] std::vector<PdfPageLabelEntry> GetPageLabels() const;
+
+    // Lists the annotations on a page.
+    [[nodiscard]] std::vector<PdfAnnotationInfo> GetAnnotations(std::size_t pageIndex) const;
 
     // Returns the page's decoded content stream (all /Contents concatenated),
     // useful for debugging and content analysis.

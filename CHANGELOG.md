@@ -1,3 +1,10 @@
+## 0.121.0
+
+- Annotation listing: `PdfDocument::GetAnnotations` reads a page's `/Annots`
+  (direct or indirect) and returns subtype, rect, contents, and title.
+- Tests: `API.AnnotationsAndHighlight` reads back written annotations. All
+  suites green.
+
 ## 0.120.0
 
 - Encryption introspection: `PdfDocument::GetEncryptionInfo` exposes the

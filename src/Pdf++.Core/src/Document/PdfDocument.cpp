@@ -3509,6 +3509,56 @@ std::vector<PdfPageLabelEntry> PdfDocument::GetPageLabels() const {
     return result;
 }
 
+std::vector<PdfAnnotationInfo> PdfDocument::GetAnnotations(const std::size_t pageIndex) const {
+    std::vector<PdfAnnotationInfo> result;
+    const auto& pages = pageReferences();
+    if (pageIndex >= pages.size()) return result;
+    const std::string pageObject = readIndirectObject(pages[pageIndex].objectNumber);
+    const auto parsed = Internal::PdfObjectParser::Parse(pageObject, readerOptions_.limits.maxRecursionDepth);
+    const auto* dictionary = parsed.AsDictionary();
+    if (!dictionary) return result;
+    const auto* annotsValue = dictionary->Find(PdfName("Annots"));
+    const PdfArray* annotsArray = nullptr;
+    if (annotsValue) {
+        if (const auto* directArray = annotsValue->AsArray()) {
+            annotsArray = directArray;
+        } else if (const auto ref = annotsValue->AsReference()) {
+            const auto& annots = GetObject(PdfReference{ref->first, ref->second});
+            annotsArray = annots.AsArray();
+        }
+    }
+    if (annotsArray) {
+        for (const auto& item : annotsArray->values()) {
+                const auto ref = item.AsReference();
+                if (!ref) continue;
+                const auto& annot = GetObject(PdfReference{ref->first, ref->second});
+                const auto* annotDict = annot.AsDictionary();
+                if (!annotDict) continue;
+                PdfAnnotationInfo info;
+                info.objectNumber = ref->first;
+                if (const auto subtype = annotDict->GetAsName(PdfName("Subtype"))) info.subtype = subtype->value();
+                if (const auto* rectValue = annotDict->Find(PdfName("Rect"))) {
+                    if (const auto* rectArray = rectValue->AsArray()) {
+                        if (rectArray->size() >= 4U) {
+                            info.rect = PdfRectangle{
+                                rectArray->at(0U).AsReal().value_or(0.0),
+                                rectArray->at(1U).AsReal().value_or(0.0),
+                                rectArray->at(2U).AsReal().value_or(0.0),
+                                rectArray->at(3U).AsReal().value_or(0.0)};
+                        }
+                    }
+                }
+                if (const auto* contentsValue = annotDict->Find(PdfName("Contents"))) {
+                    if (const auto* text = contentsValue->AsString()) info.contents = *text;
+                }
+                if (const auto* titleValue = annotDict->Find(PdfName("T"))) {
+                    if (const auto* text = titleValue->AsString()) info.title = *text;
+                }
+                result.push_back(std::move(info));
+            }
+        }
+    return result;
+}
 std::string PdfDocument::GetPageContentStream(const std::size_t pageIndex) const {
     const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) {
