@@ -2,6 +2,7 @@
 #include <CPPPdf/PdfError.hpp>
 #include "Internal/Graphics/PdfJpegEncoder.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -654,6 +655,76 @@ PdfImage PdfImage::FromFile(const std::filesystem::path& path) {
     throw PdfException(PdfErrorCode::UnsupportedFeature,
                        "Unsupported image format (expected PNG or JPEG): " + path.string());
 }
+
+std::vector<std::byte> PdfImage::EncodePng(
+    const std::uint32_t width,
+    const std::uint32_t height,
+    const std::span<const std::byte> rgbBytes) {
+    if (width == 0U || height == 0U || rgbBytes.size() != static_cast<std::size_t>(width) * height * 3U) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "PNG RGB byte count does not match width x height x 3.");
+    }
+    const auto crcTable = [] {
+        std::array<std::uint32_t, 256> table{};
+        for (std::uint32_t n = 0; n < 256U; ++n) {
+            std::uint32_t c = n;
+            for (int k = 0; k < 8; ++k) c = (c & 1U) ? 0xEDB88320U ^ (c >> 1U) : c >> 1U;
+            table[n] = c;
+        }
+        return table;
+    }();
+    const auto bigEndian = [](const std::uint32_t value) {
+        return std::array<std::uint8_t, 4>{static_cast<std::uint8_t>((value >> 24U) & 0xFFU),
+                                           static_cast<std::uint8_t>((value >> 16U) & 0xFFU),
+                                           static_cast<std::uint8_t>((value >> 8U) & 0xFFU),
+                                           static_cast<std::uint8_t>(value & 0xFFU)};
+    };
+    std::vector<std::byte> out;
+    out.reserve(54U + static_cast<std::size_t>(width) * height * 4U);
+    const auto append = [&](const std::byte* data, const std::size_t size) {
+        out.insert(out.end(), data, data + size);
+    };
+    const auto chunk = [&](const char tag[4], const std::vector<std::byte>& data) {
+        const auto length = bigEndian(static_cast<std::uint32_t>(data.size()));
+        out.push_back(std::byte{length[0]}); out.push_back(std::byte{length[1]});
+        out.push_back(std::byte{length[2]}); out.push_back(std::byte{length[3]});
+        for (int i = 0; i < 4; ++i) out.push_back(std::byte{static_cast<std::uint8_t>(tag[i])});
+        if (!data.empty()) append(data.data(), data.size());
+        std::uint32_t crc = 0xFFFFFFFFU;
+        for (int i = 0; i < 4; ++i) crc = crcTable[(crc ^ static_cast<std::uint8_t>(tag[i])) & 0xFFU] ^ (crc >> 8U);
+        for (const std::byte b : data) crc = crcTable[(crc ^ std::to_integer<std::uint8_t>(b)) & 0xFFU] ^ (crc >> 8U);
+        const auto checksum = bigEndian(crc ^ 0xFFFFFFFFU);
+        out.push_back(std::byte{checksum[0]}); out.push_back(std::byte{checksum[1]});
+        out.push_back(std::byte{checksum[2]}); out.push_back(std::byte{checksum[3]});
+    };
+    static constexpr std::uint8_t signature[8]{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    for (const std::uint8_t b : signature) out.push_back(std::byte{b});
+    std::vector<std::byte> ihdr;
+    for (const std::uint8_t b : bigEndian(width)) ihdr.push_back(std::byte{b});
+    for (const std::uint8_t b : bigEndian(height)) ihdr.push_back(std::byte{b});
+    ihdr.push_back(std::byte{8}); ihdr.push_back(std::byte{2}); // bit depth 8, color type 2 (RGB)
+    ihdr.push_back(std::byte{0}); ihdr.push_back(std::byte{0}); ihdr.push_back(std::byte{0});
+    chunk("IHDR", ihdr);
+    std::vector<std::byte> raw;
+    raw.reserve((static_cast<std::size_t>(width) * 3U + 1U) * height);
+    for (std::uint32_t y = 0; y < height; ++y) {
+        raw.push_back(std::byte{0});
+        const std::size_t row = static_cast<std::size_t>(y) * width * 3U;
+        for (std::uint32_t x = 0; x < width * 3U; ++x) raw.push_back(rgbBytes[row + x]);
+    }
+    uLongf compressedSize = compressBound(static_cast<uLong>(raw.size()));
+    std::vector<std::byte> compressed(compressedSize);
+    if (compress2(reinterpret_cast<Bytef*>(compressed.data()), &compressedSize,
+                  reinterpret_cast<const Bytef*>(raw.data()),
+                  static_cast<uLong>(raw.size()), Z_BEST_COMPRESSION) != Z_OK) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "PNG compression failed.");
+    }
+    compressed.resize(compressedSize);
+    chunk("IDAT", compressed);
+    chunk("IEND", {});
+    return out;
+}
+
 
 std::vector<std::byte> PdfImage::EncodeJpeg(
     const std::uint32_t width, const std::uint32_t height,

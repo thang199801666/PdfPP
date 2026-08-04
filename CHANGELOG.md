@@ -1,3 +1,10 @@
+## 0.145.0
+
+- PNG encoding: `PdfImage::EncodePng` builds a PNG file from raw RGB bytes
+  (IHDR/IDAT/IEND, zlib-compressed), completing the PNG round-trip.
+- Tests: `Feature.PngOutput` round-trips EncodePng through FromPng. All suites
+  green.
+
 ## 0.144.0
 
 - Image loading: `PdfImage::FromFile` auto-detects PNG and JPEG by signature.

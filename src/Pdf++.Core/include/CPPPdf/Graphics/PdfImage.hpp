@@ -103,6 +103,12 @@ public:
     // RGB image. Uses zlib inflate for IDAT.
     static PdfImage FromPng(std::span<const std::byte> pngBytes);
 
+    // Encodes a raw RGB image as a PNG file (IHDR/IDAT/IEND) without external
+    // libraries. Returns the complete PNG bytes.
+    [[nodiscard]] static std::vector<std::byte> EncodePng(
+        std::uint32_t width, std::uint32_t height,
+        std::span<const std::byte> rgbBytes);
+
     // Creates an image whose payload is a JPEG 2000 (JPX) codestream; the
     // width/height are read from the SOC (FF 4F FF 51) + SIZ markers when
     // present, otherwise they must be supplied via the later overload.

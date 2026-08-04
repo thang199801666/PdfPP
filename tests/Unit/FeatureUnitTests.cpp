@@ -1232,6 +1232,12 @@ void TestPngOutput() {
     const auto fileImage = PdfImage::FromFile(pngPath);
     PDFPP_TEST_CHECK(fileImage.GetWidth() == 40U);
     PDFPP_TEST_CHECK(fileImage.GetHeight() == 30U);
+    // EncodePng round-trips back through FromPng.
+    const auto encodedPng = PdfImage::EncodePng(2U, 1U, std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(pngString.data()), 6U));
+    const auto roundTrip = PdfImage::FromPng(std::span<const std::byte>(encodedPng));
+    PDFPP_TEST_CHECK(roundTrip.GetWidth() == 2U);
+    PDFPP_TEST_CHECK(roundTrip.GetHeight() == 1U);
     // BMP output has the 'BM' signature and expected file size.
     const auto bmpPath = TempPath("pdfpp_feature_out.bmp");
     bitmap.SaveBmp(bmpPath);
