@@ -365,6 +365,106 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
                         }
                     }
                 }
+                // MarkMarkPos (lookup type 6): a mark attaches to a preceding
+                // mark (double diacritics). Format 1: mark1 coverage, mark2
+                // coverage, class count, mark1 array, mark2 array, class table.
+                if (lookupType == 6U) {
+                    for(std::uint16_t s=0;s<subCount;++s){
+                        const std::uint16_t subOff6=Read16(bytes,lookup+6U+std::size_t(s)*2U);
+                        if(subOff6==0U||lookup+subOff6+12U>gb+gpos->second.length)continue;
+                        const std::size_t sub6=lookup+subOff6;
+                        const std::uint16_t format=Read16(bytes,sub6);
+                        if(format!=1U)continue; // MarkMarkPosFormat1
+                        const std::uint16_t mark1CoverageOff=Read16(bytes,sub6+2U);
+                        const std::uint16_t mark2CoverageOff=Read16(bytes,sub6+4U);
+                        const std::uint16_t classCount=Read16(bytes,sub6+6U);
+                        const std::uint16_t mark1ArrayOff=Read16(bytes,sub6+8U);
+                        const std::uint16_t mark2ArrayOff=Read16(bytes,sub6+10U);
+                        if(mark1CoverageOff==0U||mark2CoverageOff==0U||classCount==0U||classCount>8U)continue;
+                        if(mark1ArrayOff==0U||mark2ArrayOff==0U)continue;
+                        const std::size_t mark1Cov=sub6+mark1CoverageOff;
+                        const std::size_t mark2Cov=sub6+mark2CoverageOff;
+                        const std::size_t mark1Array=sub6+mark1ArrayOff;
+                        const std::size_t mark2Array=sub6+mark2ArrayOff;
+                        // mark2 class table (after mark2 array): mark2ClassCount then entries.
+                        const std::size_t mark2ClassOff=Read16(bytes,sub6+12U);
+                        if(mark2ClassOff==0U)continue;
+                        const std::size_t mark2ClassTable=sub6+mark2ClassOff;
+                        const std::uint16_t mark2ClassCount=Read16(bytes,mark2ClassTable);
+                        if(mark2ClassCount==0U)continue;
+                        // Gather mark1 and mark2 glyphs from coverages.
+                        std::vector<std::uint16_t> mark1Glyphs;
+                        {
+                            const std::uint16_t fmt=Read16(bytes,mark1Cov);
+                            const std::uint16_t cnt=Read16(bytes,mark1Cov+2U);
+                            for(std::uint16_t m=0;m<cnt;++m){
+                                if(fmt==1U)mark1Glyphs.push_back(Read16(bytes,mark1Cov+4U+std::size_t(m)*2U));
+                                else if(fmt==2U){
+                                    const std::uint16_t rc=Read16(bytes,mark1Cov+2U);
+                                    for(std::uint16_t r=0;r<rc;++r){
+                                        const std::size_t at=mark1Cov+4U+std::size_t(r)*6U;
+                                        const std::uint16_t start=Read16(bytes,at);
+                                        const std::uint16_t end=Read16(bytes,at+2U);
+                                        const std::uint16_t sg=Read16(bytes,at+4U);
+                                        if(m>=start&&m<end){mark1Glyphs.push_back(static_cast<std::uint16_t>(sg+(m-start)));break;}
+                                    }
+                                }
+                            }
+                        }
+                        std::vector<std::uint16_t> mark2Glyphs;
+                        {
+                            const std::uint16_t fmt=Read16(bytes,mark2Cov);
+                            const std::uint16_t cnt=Read16(bytes,mark2Cov+2U);
+                            for(std::uint16_t m=0;m<cnt;++m){
+                                if(fmt==1U)mark2Glyphs.push_back(Read16(bytes,mark2Cov+4U+std::size_t(m)*2U));
+                                else if(fmt==2U){
+                                    const std::uint16_t rc=Read16(bytes,mark2Cov+2U);
+                                    for(std::uint16_t r=0;r<rc;++r){
+                                        const std::size_t at=mark2Cov+4U+std::size_t(r)*6U;
+                                        const std::uint16_t start=Read16(bytes,at);
+                                        const std::uint16_t end=Read16(bytes,at+2U);
+                                        const std::uint16_t sg=Read16(bytes,at+4U);
+                                        if(m>=start&&m<end){mark2Glyphs.push_back(static_cast<std::uint16_t>(sg+(m-start)));break;}
+                                    }
+                                }
+                            }
+                        }
+                        const std::uint16_t mark1Count=Read16(bytes,mark1Array);
+                        const std::uint16_t mark2Count=Read16(bytes,mark2Array);
+                        for(std::uint16_t m1=0;m1<mark1Count&&m1<mark1Glyphs.size();++m1){
+                            const std::size_t mark1Rec=mark1Array+2U+std::size_t(m1)*4U;
+                            if(mark1Rec+4U>gb+gpos->second.length)break;
+                            const std::uint16_t mark1Class=Read16(bytes,mark1Rec);
+                            const std::uint16_t mark1AnchorOff=Read16(bytes,mark1Rec+2U);
+                            if(mark1AnchorOff==0U)continue;
+                            const std::size_t mark1Anchor=mark1Array+mark1AnchorOff;
+                            if(mark1Anchor+6U>gb+gpos->second.length)continue;
+                            if(Read16(bytes,mark1Anchor)!=1U)continue;
+                            const std::int16_t mark1X=ReadS16(bytes,mark1Anchor+2U);
+                            const std::int16_t mark1Y=ReadS16(bytes,mark1Anchor+4U);
+                            // For each mark2 class, iterate mark2 glyphs.
+                            for(std::uint16_t c=0;c<classCount;++c){
+                                for(std::uint16_t m2=0;m2<mark2Count&&m2<mark2Glyphs.size();++m2){
+                                    // mark2 glyph's class from the class table.
+                                    const std::uint16_t m2Class = mark2Glyphs[m2] < mark2ClassCount
+                                        ? Read16(bytes,mark2ClassTable+2U+std::size_t(mark2Glyphs[m2])*2U) : 0U;
+                                    if(m2Class!=c)continue;
+                                    const std::size_t mark2Rec=mark2Array+2U+(std::size_t(m2)*classCount+c)*2U;
+                                    if(mark2Rec+2U>gb+gpos->second.length)break;
+                                    const std::uint16_t mark2AnchorOff=Read16(bytes,mark2Rec);
+                                    if(mark2AnchorOff==0U)continue;
+                                    const std::size_t mark2Anchor=mark2Array+mark2AnchorOff;
+                                    if(mark2Anchor+6U>gb+gpos->second.length)continue;
+                                    if(Read16(bytes,mark2Anchor)!=1U)continue;
+                                    const std::int16_t mark2X=ReadS16(bytes,mark2Anchor+2U);
+                                    const std::int16_t mark2Y=ReadS16(bytes,mark2Anchor+4U);
+                                    f.markMark_.emplace((std::uint64_t(mark1Glyphs[m1])<<32U)|
+                                        std::uint64_t(mark2Glyphs[m2]), AnchorPair{mark1X, mark1Y, mark2X, mark2Y});
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -427,6 +527,14 @@ std::optional<PdfTrueTypeFont::MarkBaseAttachment> PdfTrueTypeFont::GetMarkBaseP
     const std::uint16_t markGlyph, const std::uint16_t baseGlyph) const {
     const auto it = markBase_.find((std::uint64_t(markGlyph) << 32U) | baseGlyph);
     if (it == markBase_.end()) return std::nullopt;
+    return MarkBaseAttachment{it->second.markX, it->second.markY,
+                              it->second.baseX, it->second.baseY};
+}
+
+std::optional<PdfTrueTypeFont::MarkBaseAttachment> PdfTrueTypeFont::GetMarkMarkPosition(
+    const std::uint16_t mark1Glyph, const std::uint16_t mark2Glyph) const {
+    const auto it = markMark_.find((std::uint64_t(mark1Glyph) << 32U) | mark2Glyph);
+    if (it == markMark_.end()) return std::nullopt;
     return MarkBaseAttachment{it->second.markX, it->second.markY,
                               it->second.baseX, it->second.baseY};
 }

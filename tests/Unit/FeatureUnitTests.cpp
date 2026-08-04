@@ -808,6 +808,10 @@ void TestTextLayoutAndFallback() {
             }
             PDFPP_TEST_CHECK(font.GetMarkBaseCount() > 0U);
         }
+        // GPOS mark-to-mark positioning for stacked diacritics.
+        if (font.HasMarkMark()) {
+            PDFPP_TEST_CHECK(font.GetMarkMarkCount() > 0U);
+        }
         // Render base + combining mark with GPOS positioning active.
         if (font.HasMarkBase()) {
             const auto markPdf = TempPath("pdfpp_feature_render_mark.pdf");

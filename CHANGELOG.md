@@ -1,3 +1,11 @@
+## 0.109.0
+
+- GPOS MarkMarkPos: the TrueType parser reads lookup-type-6 mark-to-mark
+  anchor attachments (format 1) for stacked diacritics; `GetMarkMarkPosition`
+  returns the anchor pair.
+- Tests: `Feature.TextLayoutAndFallback` verifies the mark-to-mark store. All
+  suites green.
+
 ## 0.108.0
 
 - PNG decoding: `PdfImage::FromPng` reads PNG files (RGB/RGBA/palette/gray,

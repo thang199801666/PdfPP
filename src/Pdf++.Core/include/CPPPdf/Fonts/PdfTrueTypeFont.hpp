@@ -106,6 +106,12 @@ public:
         std::uint16_t markGlyph, std::uint16_t baseGlyph) const;
     [[nodiscard]] bool HasMarkBase() const noexcept { return !markBase_.empty(); }
     [[nodiscard]] std::size_t GetMarkBaseCount() const noexcept { return markBase_.size(); }
+    // Returns the anchor attachment for a mark placed over another mark
+    // (double diacritics) when the font has a GPOS MarkMarkPos pair.
+    [[nodiscard]] std::optional<MarkBaseAttachment> GetMarkMarkPosition(
+        std::uint16_t mark1Glyph, std::uint16_t mark2Glyph) const;
+    [[nodiscard]] bool HasMarkMark() const noexcept { return !markMark_.empty(); }
+    [[nodiscard]] std::size_t GetMarkMarkCount() const noexcept { return markMark_.size(); }
     [[nodiscard]] PdfTrueTypeGlyphOutline GetGlyphOutline(std::uint16_t glyphId) const;
     [[nodiscard]] const PdfTrueTypeGlyphOutline& GetGlyphOutlineCached(std::uint16_t glyphId) const;
     [[nodiscard]] std::size_t GetCachedOutlineCount() const noexcept { return outlineCache_.size(); }
@@ -139,6 +145,8 @@ private:
         std::int16_t baseY{};
     };
     std::unordered_map<std::uint64_t, AnchorPair> markBase_;
+    // OpenType GPOS mark-to-mark anchors: (mark1<<32 | mark2).
+    std::unordered_map<std::uint64_t, AnchorPair> markMark_;
     using KerningCacheEntry = std::pair<const std::uint64_t, double>;
     mutable std::list<KerningCacheEntry> kerningLru_;
     mutable std::unordered_map<std::uint64_t, std::list<KerningCacheEntry>::iterator> kerningCache_;
