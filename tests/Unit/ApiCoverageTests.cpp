@@ -317,6 +317,13 @@ void TestPageEditingAndOrganization(const std::filesystem::path& base) {
     ExpectThrows([&] { (void)PdfPageOrganizer::RemovePages(base, reordered, {0, 1}); });
     ExpectThrows([&] { (void)PdfPageOrganizer::ExtractPages(base, reordered, {}); });
     ExpectThrows([&] { (void)PdfPageOrganizer::SplitEvery(base, TempPath("pdfpp_invalid_split"), 0); });
+    ExpectThrows([&] { (void)PdfPageOrganizer::DuplicatePages(base, reordered, {9}); });
+
+    const auto duplicated = TempPath("pdfpp_api_duplicated.pdf");
+    const auto duplicateResult = PdfPageOrganizer::DuplicatePages(base, duplicated, {0});
+    PDFPP_TEST_CHECK(duplicateResult.originalPageCount == 2U);
+    PDFPP_TEST_CHECK(duplicateResult.outputPageCount == 3U);
+    PDFPP_TEST_CHECK(PdfDocument::Open(duplicated).GetPageCount() == 3U);
 
     const auto splitDirectory = TempPath("pdfpp_api_split");
     std::filesystem::remove_all(splitDirectory);
@@ -941,7 +948,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 77U);
+    static_assert(CPPPdf::VersionMinor == 78U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -951,7 +958,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.77.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.78.0");
 }
 
 int RunApiCoverageTests() {

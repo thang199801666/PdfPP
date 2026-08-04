@@ -2,6 +2,7 @@
 
 #include <CPPPdf/Document/PdfDocument.hpp>
 #include <CPPPdf/Document/PdfPage.hpp>
+#include <CPPPdf/Document/PdfPageImporter.hpp>
 #include <CPPPdf/Objects/PdfObject.hpp>
 #include <CPPPdf/PdfError.hpp>
 #include "Internal/Parsing/PdfObjectParser.hpp"
@@ -300,6 +301,28 @@ std::vector<PdfPageOrganizationResult> PdfPageOrganizer::SplitEvery(
         results.push_back(ExtractPages(inputPath, outputPath, pages));
     }
     return results;
+}
+
+PdfPageOrganizationResult PdfPageOrganizer::DuplicatePages(
+    const std::filesystem::path& inputPath,
+    const std::filesystem::path& outputPath,
+    const std::vector<std::size_t>& pageIndices) {
+    PdfDocument document = PdfDocument::Open(inputPath);
+    const std::size_t count = document.GetPageCount();
+    std::vector<std::size_t> allIndices;
+    allIndices.reserve(count + pageIndices.size());
+    for (std::size_t i = 0U; i < count; ++i) allIndices.push_back(i);
+    for (const std::size_t index : pageIndices) {
+        if (index >= count) throw PdfException(PdfErrorCode::InvalidArgument, "Duplicate page index out of range.");
+        allIndices.push_back(index);
+    }
+    PdfPageImportSource selection{inputPath, allIndices};
+    const auto result = PdfPageImporter::CopyPages({selection}, outputPath);
+    PdfPageOrganizationResult organization;
+    organization.outputPath = outputPath;
+    organization.originalPageCount = count;
+    organization.outputPageCount = count + pageIndices.size();
+    return organization;
 }
 
 } // namespace CPPPdf

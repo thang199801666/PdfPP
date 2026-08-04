@@ -1,3 +1,11 @@
+## 0.78.0
+
+- Page duplication: `PdfPageOrganizer::DuplicatePages` appends copies of the
+  requested pages at the end of the document via the page importer, validating
+  indices.
+- Tests: `API.PageEditingAndOrganization` duplicates page 0 (2 -> 3 pages) and
+  checks out-of-range rejection. All suites green.
+
 ## 0.77.0
 
 - CCITT Group 3/4 one-dimensional decoding: `PdfImage::DecodeCcittG4` converts a

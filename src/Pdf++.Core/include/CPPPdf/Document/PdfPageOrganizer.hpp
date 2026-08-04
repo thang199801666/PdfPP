@@ -38,6 +38,12 @@ public:
         const std::filesystem::path& outputDirectory,
         std::size_t pagesPerFile,
         const std::string& filePrefix = "part");
+
+    // Duplicates the given pages, appending copies at the end of the document.
+    [[nodiscard]] static PdfPageOrganizationResult DuplicatePages(
+        const std::filesystem::path& inputPath,
+        const std::filesystem::path& outputPath,
+        const std::vector<std::size_t>& pageIndices);
 };
 
 } // namespace CPPPdf
