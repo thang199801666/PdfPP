@@ -830,6 +830,17 @@ void TestWriterDocumentInfo() {
     sizeWriter.Save(sizePath);
     PDFPP_TEST_CHECK(PdfDocument::Open(sizePath).GetPageMediaBox(0U).top == 600);
     std::filesystem::remove(sizePath);
+
+    // Rotate a page from the writer.
+    PdfWriter rotateWriter;
+    const auto rotatePage = rotateWriter.AddPage();
+    rotateWriter.SetPageRotation(rotatePage, 90);
+    PDFPP_TEST_CHECK(rotateWriter.GetPageRotation(rotatePage) == 90);
+    ExpectThrows([&] { rotateWriter.SetPageRotation(rotatePage, 45); });
+    const auto rotatePath = TempPath("pdfpp_writer_rotate.pdf");
+    rotateWriter.Save(rotatePath);
+    PDFPP_TEST_CHECK(PdfDocument::Open(rotatePath).GetPageInfo(0U).rotation == 90);
+    std::filesystem::remove(rotatePath);
 }
 
 
@@ -1018,7 +1029,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 114U);
+    static_assert(CPPPdf::VersionMinor == 115U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1028,7 +1039,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.114.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.115.0");
 }
 
 int RunApiCoverageTests() {

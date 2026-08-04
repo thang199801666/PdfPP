@@ -1,3 +1,10 @@
+## 0.115.0
+
+- Writer page rotation: `PdfWriter::SetPageRotation`/`GetPageRotation` emit
+  the page `/Rotate` value (0/90/180/270).
+- Tests: `API.WriterDocumentInfo` rotates a page, saves, and reads it back. All
+  suites green.
+
 ## 0.114.0
 
 - Region text extraction: `PdfDocument::GetPageTextInRegion` returns text

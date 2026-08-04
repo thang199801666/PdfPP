@@ -337,6 +337,15 @@ void PdfWriter::SetPageSize(const std::size_t pageIndex, const PdfRectangle& med
     }
     state_->pages[pageIndex].mediaBox = mediaBox;
 }
+void PdfWriter::SetPageRotation(const std::size_t pageIndex, const int rotation) {
+    if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
+    if (rotation % 90 != 0) throw std::invalid_argument("Rotation must be a multiple of 90 degrees.");
+    state_->pages[pageIndex].rotation = (rotation % 360 + 360) % 360;
+}
+int PdfWriter::GetPageRotation(const std::size_t pageIndex) const {
+    if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
+    return state_->pages[pageIndex].rotation;
+}
 PdfCanvas PdfWriter::GetCanvas(std::size_t i){if(i>=state_->pages.size())throw std::out_of_range("Page index");return PdfCanvas(state_,i);}
 
 void PdfWriter::SetDocumentInfo(const PdfDocumentInfo& info) { state_->documentInfo = info; }
@@ -1160,7 +1169,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             for (const auto id : attachmentIds[i]) annotations += std::to_string(id) + " 0 R ";
             annotations += ']';
         }
-        objects[pageIds[i]]="<< /Type /Page /Parent "+std::to_string(pages)+" 0 R /MediaBox ["+box.str()+"] /Resources "+resources+" /Contents "+std::to_string(contentIds[i])+" 0 R"+annotations+" >>";objects[contentIds[i]]="<< /Length "+std::to_string(p.content.size())+" >>\nstream\n"+p.content+"endstream";
+        objects[pageIds[i]]="<< /Type /Page /Parent "+std::to_string(pages)+" 0 R /MediaBox ["+box.str()+"]"+std::string(p.rotation!=0?" /Rotate "+std::to_string(p.rotation):"")+" /Resources "+resources+" /Contents "+std::to_string(contentIds[i])+" 0 R"+annotations+" >>";objects[contentIds[i]]="<< /Length "+std::to_string(p.content.size())+" >>\nstream\n"+p.content+"endstream";
         for (std::size_t j = 0; j < p.links.size(); ++j) {
             const auto& link = p.links[j];
             const auto& rectangle = link.options.rectangle;
