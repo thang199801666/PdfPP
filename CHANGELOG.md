@@ -1,3 +1,10 @@
+## 0.102.0
+
+- Content inspection: `PdfDocument::GetPageContentStream` returns a page's
+  decoded content stream (all /Contents concatenated).
+- Tests: `Feature.PageContentStream` verifies written BT/Tj operators and
+  out-of-range rejection. All suites green.
+
 ## 0.101.0
 
 - Regex redaction: `PdfRedactor::RedactRegex` covers every text occurrence

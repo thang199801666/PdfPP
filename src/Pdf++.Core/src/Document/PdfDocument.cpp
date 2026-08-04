@@ -3509,6 +3509,19 @@ std::vector<PdfPageLabelEntry> PdfDocument::GetPageLabels() const {
     return result;
 }
 
+std::string PdfDocument::GetPageContentStream(const std::size_t pageIndex) const {
+    const auto& pages = pageReferences();
+    if (pageIndex >= pages.size()) {
+        throw PdfException(PdfErrorCode::InvalidPageTree,
+                           "Page index " + std::to_string(pageIndex) + " is outside the document.");
+    }
+    const std::string pageObject = readIndirectObject(pages[pageIndex].objectNumber);
+    const auto decoder = [this](const PdfReference& reference) {
+        return decodeContentStreamReference(reference);
+    };
+    return joinDecodedStreams(contentReferences(pageObject), decoder);
+}
+
 std::string PdfDocument::GetAllPagesText() const {
     std::string all;
     const auto count = pageCount();

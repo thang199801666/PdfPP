@@ -203,6 +203,10 @@ class PdfDocument final {public:
     // Reads the catalog /PageLabels /Nums entries, sorted by page index.
     [[nodiscard]] std::vector<PdfPageLabelEntry> GetPageLabels() const;
 
+    // Returns the page's decoded content stream (all /Contents concatenated),
+    // useful for debugging and content analysis.
+    [[nodiscard]] std::string GetPageContentStream(std::size_t pageIndex) const;
+
 private:
     [[nodiscard]] std::optional<std::size_t> ResolveDestination(const PdfObject& destination) const;
 

@@ -1167,6 +1167,21 @@ void TestPngOutput() {
     std::filesystem::remove(jpegPath);
 }
 
+void TestPageContentStream() {
+    const auto output = TempPath("pdfpp_feature_content.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 200, 200});
+    writer.GetCanvas(page).BeginText().SetFontAndSize("Helvetica", 12)
+        .MoveText(20, 150).ShowText("Content probe").EndText();
+    writer.Save(output);
+    const auto document = PdfDocument::Open(output);
+    const std::string content = document.GetPageContentStream(0U);
+    PDFPP_TEST_CHECK(content.find("BT") != std::string::npos);
+    PDFPP_TEST_CHECK(content.find("Tj") != std::string::npos);
+    ExpectThrows([&] { (void)document.GetPageContentStream(9U); });
+    std::filesystem::remove(output);
+}
+
 void TestTaggedPdf() {
     const auto output = TempPath("pdfpp_feature_tagged.pdf");
     PdfWriter writer;
@@ -1697,6 +1712,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
     runner.Run("Feature.TaggedPdf", TestTaggedPdf);
+    runner.Run("Feature.PageContentStream", TestPageContentStream);
     runner.Run("Feature.PngOutput", TestPngOutput);
     runner.Run("Feature.PolygonAndBezierPaths", TestPolygonAndBezierPaths);
     runner.Run("Feature.CffFontEmbedding", TestCffFontEmbedding);
