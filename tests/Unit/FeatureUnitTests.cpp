@@ -1109,6 +1109,7 @@ void TestCffFontEmbedding() {
     const std::string bytes = ReadText(output);
     PDFPP_TEST_CHECK(bytes.find("/FontFile3") != std::string::npos);
     PDFPP_TEST_CHECK(bytes.find("/Type1C") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Widths [") != std::string::npos);
     auto document = PdfDocument::Open(output);
     PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
     std::filesystem::remove(output);

@@ -1,3 +1,10 @@
+## 0.128.0
+
+- CFF font metrics: the writer now emits a `/Widths` array for embedded CFF
+  fonts using the parsed charstring advance widths.
+- Tests: `Feature.CffFontEmbedding` checks the `/Widths` array in the output.
+  All suites green.
+
 ## 0.127.0
 
 - Page box conveniences: `PdfDocument::GetPageRotation`/`GetPageCropBox` and

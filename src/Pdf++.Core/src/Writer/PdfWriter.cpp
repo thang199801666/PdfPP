@@ -1142,7 +1142,17 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             + "/CapHeight 700 /StemV 80 /FontFile3 " + std::to_string(cffFileIds[i]) + " 0 R >>";
         objects[cffIds[i]] = "<< /Type /Font /Subtype /Type1 /BaseFont /" + base
             + " /FirstChar 32 /LastChar 255 /Encoding /WinAnsiEncoding /FontDescriptor "
-            + std::to_string(cffDescIds[i]) + " 0 R >>";
+            + std::to_string(cffDescIds[i]) + " 0 R /Widths [";
+        // Use the parsed CFF advance widths for 32..255 where the font has glyphs.
+        std::ostringstream cffWidths;
+        for (std::uint32_t code = 32U; code <= 255U; ++code) {
+            const std::uint32_t glyphId = code - 32U;
+            const double advance = glyphId < cff.glyphCount
+                ? PdfCffParser::GetAdvanceWidth(cff, glyphId)
+                : cff.privateDict.defaultWidthX;
+            cffWidths << std::lround(advance) << (code == 255U ? "" : " ");
+        }
+        objects[cffIds[i]] += cffWidths.str() + " ] >>";
     }
     for (std::size_t i = 0; i < state_->tilingPatterns.size(); ++i) {
         const auto& pattern = state_->tilingPatterns[i].options;
