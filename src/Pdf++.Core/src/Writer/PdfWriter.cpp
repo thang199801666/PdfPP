@@ -349,6 +349,10 @@ void PdfWriter::SetPageCropBox(const std::size_t pageIndex, const PdfRectangle& 
     }
     state_->pages[pageIndex].cropBox = cropBox;
 }
+PdfRectangle PdfWriter::GetPageCropBox(const std::size_t pageIndex) const {
+    if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
+    return state_->pages[pageIndex].cropBox.value_or(PdfRectangle{});
+}
 void PdfWriter::SetPageRotation(const std::size_t pageIndex, const int rotation) {
     if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page index");
     if (rotation % 90 != 0) throw std::invalid_argument("Rotation must be a multiple of 90 degrees.");

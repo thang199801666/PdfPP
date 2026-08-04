@@ -125,6 +125,15 @@ class PdfDocument final {public:
         const auto info = pageInfo(pageIndex);
         return info.mediaBox.empty() ? info.cropBox : info.mediaBox;
     }
+    // Convenience: the page's rotation in degrees (0/90/180/270).
+    [[nodiscard]] int GetPageRotation(std::size_t pageIndex) const {
+        return pageInfo(pageIndex).rotation;
+    }
+    // Convenience: the page's crop box (falls back to media box if unset).
+    [[nodiscard]] PdfRectangle GetPageCropBox(std::size_t pageIndex) const {
+        const auto info = pageInfo(pageIndex);
+        return info.cropBox.empty() ? info.mediaBox : info.cropBox;
+    }
     // Convenience: text of every page joined with newlines.
     [[nodiscard]] std::string GetAllPagesText() const;
 

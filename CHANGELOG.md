@@ -1,3 +1,10 @@
+## 0.127.0
+
+- Page box conveniences: `PdfDocument::GetPageRotation`/`GetPageCropBox` and
+  `PdfWriter::GetPageCropBox`.
+- Tests: `API.WriterDocumentInfo` reads back rotation and crop box. All suites
+  green.
+
 ## 0.126.0
 
 - Bitmap utilities: `PdfBitmap::ToGrayscale` (Rec. 709 luma) and
