@@ -53,6 +53,9 @@ public:
                      std::int32_t destinationY, PdfBlendMode mode,
                      std::uint8_t opacity = 255U);
     void SavePpm(const std::filesystem::path& path) const;
+    // Writes a true-color 8-bit PNG (RGBA, non-interlaced, zlib-compressed)
+    // without external libraries.
+    void SavePng(const std::filesystem::path& path) const;
 
 private:
     std::size_t width_{};

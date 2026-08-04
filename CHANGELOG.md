@@ -1,3 +1,10 @@
+## 0.93.0
+
+- PNG output: `PdfBitmap::SavePng` writes a true-color RGBA PNG (IHDR/IDAT/IEND,
+  zlib-compressed, correct CRC) with no external libraries.
+- Tests: `Feature.PngOutput` renders a colored page to PNG and verifies the
+  signature and chunk structure. All suites green.
+
 ## 0.92.0
 
 - Page rotation: `PdfPageEditor::SetPageRotation` sets a page's `/Rotate`

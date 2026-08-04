@@ -2,8 +2,12 @@
 #include <CPPPdf/PdfError.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <fstream>
 #include <limits>
+#include <vector>
+#include <zlib.h>
 
 namespace CPPPdf {
 namespace {
@@ -194,6 +198,82 @@ void PdfBitmap::SavePpm(const std::filesystem::path& path) const {
     }
     if (!output) {
         throw PdfException(PdfErrorCode::FileOpenFailed, "Unable to write rendered PPM image.");
+    }
+}
+
+void PdfBitmap::SavePng(const std::filesystem::path& path) const {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        throw PdfException(PdfErrorCode::FileOpenFailed, "Unable to create rendered PNG image.");
+    }
+    const auto crcTable = [] {
+        std::array<std::uint32_t, 256> table{};
+        for (std::uint32_t n = 0; n < 256U; ++n) {
+            std::uint32_t c = n;
+            for (int k = 0; k < 8; ++k) {
+                c = (c & 1U) ? 0xEDB88320U ^ (c >> 1U) : c >> 1U;
+            }
+            table[n] = c;
+        }
+        return table;
+    }();
+    const auto crc = [&](const std::uint8_t* data, const std::size_t size) {
+        std::uint32_t c = 0xFFFFFFFFU;
+        for (std::size_t i = 0; i < size; ++i) c = crcTable[(c ^ data[i]) & 0xFFU] ^ (c >> 8U);
+        return c ^ 0xFFFFFFFFU;
+    };
+    const auto bigEndian = [](std::uint32_t value) {
+        return std::array<std::uint8_t, 4>{static_cast<std::uint8_t>((value >> 24U) & 0xFFU),
+                                           static_cast<std::uint8_t>((value >> 16U) & 0xFFU),
+                                           static_cast<std::uint8_t>((value >> 8U) & 0xFFU),
+                                           static_cast<std::uint8_t>(value & 0xFFU)};
+    };
+    const auto writeChunk = [&](const char tag[4], const std::uint8_t* data, const std::size_t size) {
+        const auto length = bigEndian(static_cast<std::uint32_t>(size));
+        output.write(reinterpret_cast<const char*>(length.data()), 4);
+        output.write(tag, 4);
+        if (size > 0U) output.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
+        std::vector<std::uint8_t> crcData(size + 4U);
+        for (int i = 0; i < 4; ++i) crcData[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(tag[i]);
+        if (size > 0U) std::copy(data, data + size, crcData.begin() + 4);
+        const auto checksum = bigEndian(crc(crcData.data(), size + 4U));
+        output.write(reinterpret_cast<const char*>(checksum.data()), 4);
+    };
+    // PNG signature.
+    static constexpr std::uint8_t signature[8]{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    output.write(reinterpret_cast<const char*>(signature), 8);
+    // IHDR: width, height, bit depth 8, color type 6 (RGBA), 0 compression.
+    std::uint8_t ihdr[13];
+    const auto w = bigEndian(static_cast<std::uint32_t>(width_));
+    const auto h = bigEndian(static_cast<std::uint32_t>(height_));
+    std::copy(w.begin(), w.end(), ihdr);
+    std::copy(h.begin(), h.end(), ihdr + 4);
+    ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+    writeChunk("IHDR", ihdr, 13);
+    // Raw image data with a filter byte (0 = None) per scanline.
+    std::vector<std::uint8_t> raw;
+    raw.reserve((width_ * 4U + 1U) * height_);
+    for (std::size_t y = 0; y < height_; ++y) {
+        raw.push_back(0);
+        for (std::size_t x = 0; x < width_; ++x) {
+            const auto offset = (y * width_ + x) * 4U;
+            raw.push_back(ToByte(pixels_[offset]));
+            raw.push_back(ToByte(pixels_[offset + 1U]));
+            raw.push_back(ToByte(pixels_[offset + 2U]));
+            raw.push_back(ToByte(pixels_[offset + 3U]));
+        }
+    }
+    uLongf compressedSize = compressBound(static_cast<uLong>(raw.size()));
+    std::vector<std::uint8_t> compressed(compressedSize);
+    if (compress2(compressed.data(), &compressedSize, raw.data(),
+                  static_cast<uLong>(raw.size()), Z_BEST_COMPRESSION) != Z_OK) {
+        throw PdfException(PdfErrorCode::FileOpenFailed, "PNG compression failed.");
+    }
+    compressed.resize(compressedSize);
+    writeChunk("IDAT", compressed.data(), compressed.size());
+    writeChunk("IEND", nullptr, 0U);
+    if (!output) {
+        throw PdfException(PdfErrorCode::FileOpenFailed, "Unable to write rendered PNG image.");
     }
 }
 

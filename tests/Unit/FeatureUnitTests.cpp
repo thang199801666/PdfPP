@@ -1094,6 +1094,30 @@ void TestPolygonAndBezierPaths() {
     std::filesystem::remove(output);
 }
 
+void TestPngOutput() {
+    const auto pdfPath = TempPath("pdfpp_feature_png_src.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 40, 30});
+    writer.GetCanvas(page).SetFillColor(PdfColor{1.0, 0.0, 0.0}).FillRectangle(0, 0, 40, 30);
+    writer.Save(pdfPath);
+    const auto document = PdfDocument::Open(pdfPath);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0U, options);
+    const auto pngPath = TempPath("pdfpp_feature_out.png");
+    bitmap.SavePng(pngPath);
+    const std::string bytes = ReadText(pngPath);
+    PDFPP_TEST_CHECK(bytes.size() > 8U);
+    const std::string signature = bytes.substr(0, 8);
+    PDFPP_TEST_CHECK(signature[0] == static_cast<char>(0x89) && signature[1] == 'P' &&
+                     signature[2] == 'N' && signature[3] == 'G');
+    PDFPP_TEST_CHECK(bytes.find("IHDR") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("IDAT") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("IEND") != std::string::npos);
+    std::filesystem::remove(pdfPath);
+    std::filesystem::remove(pngPath);
+}
+
 void TestTaggedPdf() {
     const auto output = TempPath("pdfpp_feature_tagged.pdf");
     PdfWriter writer;
@@ -1624,6 +1648,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
     runner.Run("Feature.TaggedPdf", TestTaggedPdf);
+    runner.Run("Feature.PngOutput", TestPngOutput);
     runner.Run("Feature.PolygonAndBezierPaths", TestPolygonAndBezierPaths);
     runner.Run("Feature.CffFontEmbedding", TestCffFontEmbedding);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);

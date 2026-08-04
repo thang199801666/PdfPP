@@ -52,8 +52,7 @@ struct PdfOutlineEntry final {
     bool isOpen{};
 };
 
-class PdfDocument final {
-public:
+class PdfDocument final {public:
     PdfDocument();
     ~PdfDocument();
     PdfDocument(PdfDocument&&) noexcept;
