@@ -561,6 +561,74 @@ void TestIccBasedRendering() {
     std::filesystem::remove(output);
 }
 
+void TestIccSrgbGammaRendering() {
+    // A minimal sRGB ICC profile (header + rTRC 'curv' gamma 2.2) triggers the
+    // renderer's gamma re-encode: a 128 (mid) sample becomes ~210.
+    std::vector<std::byte> profile(180U, std::byte{0});
+    const auto put = [&](const std::size_t offset, const std::uint32_t value) {
+        profile[offset] = std::byte((value >> 24U) & 0xFFU);
+        profile[offset + 1U] = std::byte((value >> 16U) & 0xFFU);
+        profile[offset + 2U] = std::byte((value >> 8U) & 0xFFU);
+        profile[offset + 3U] = std::byte(value & 0xFFU);
+    };
+    // Header: profile class 'sRGB' (0), color space 'RGB ' (16), PCS 'XYZ ' (20).
+    put(0U, 0x73524742U);  // 'sRGB'
+    put(16U, 0x52474220U); // 'RGB '
+    put(20U, 0x58595A20U); // 'XYZ '
+    // Tag table: 1 tag, entry {sig 'rTRC', offset 160, size 12}.
+    put(128U, 1U);
+    put(132U, 0x72545243U); // 'rTRC'
+    put(136U, 160U);
+    put(140U, 12U);
+    // rTRC 'curv' with 0 entries then u8Fixed8 gamma 2.2 (0x0233).
+    put(160U, 0x63757276U); // 'curv'
+    put(164U, 0U);          // entry count = 0
+    profile[168] = std::byte{0x02};
+    profile[169] = std::byte{0x33};
+    const std::string profileBytes(reinterpret_cast<const char*>(profile.data()), profile.size());
+
+    std::ostringstream pdf;
+    pdf << "%PDF-1.4\n";
+    std::array<std::size_t, 7> offsets{};
+    const auto object = [&](const std::size_t number, const std::string& body) {
+        offsets[number] = static_cast<std::size_t>(pdf.tellp());
+        pdf << number << " 0 obj\n" << body << "\nendobj\n";
+    };
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+              "/Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>");
+    const std::string imageBytes = "\x80\x80\x80";
+    object(4, "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 "
+              "/ColorSpace [ /ICCBased 6 0 R ] "
+              "/BitsPerComponent 8 /Length " + std::to_string(imageBytes.size()) + " >>\nstream\n"
+              + imageBytes + "\nendstream");
+    const std::string content = "q 0 0 100 100 cm /Im1 Do Q";
+    object(5, "<< /Length " + std::to_string(content.size()) + " >>\nstream\n"
+              + content + "endstream");
+    object(6, "<< /N 3 /Length " + std::to_string(profileBytes.size()) + " >>\nstream\n"
+              + profileBytes + "\nendstream");
+    const std::size_t xrefOffset = static_cast<std::size_t>(pdf.tellp());
+    pdf << "xref\n0 7\n0000000000 65535 f \n";
+    for (std::size_t i = 1; i <= 6U; ++i) {
+        pdf << std::setw(10) << std::setfill('0') << offsets[i] << " 00000 n \n";
+    }
+    pdf << "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    const auto output = TempPath("pdfpp_feature_icc_gamma.pdf");
+    {
+        std::ofstream file(output, std::ios::binary);
+        file << pdf.str();
+    }
+    const auto document = PdfDocument::Open(output);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0, options);
+    const auto pixel = bitmap.GetPixel(50U, 25U);
+    // 128 raised to 1/2.2 then scaled -> ~210, distinctly above identity 128.
+    PDFPP_TEST_CHECK(pixel.red > 170U && pixel.red < 245U);
+    std::filesystem::remove(output);
+}
+
 void TestOptionalContentLayers() {
     const auto output = TempPath("pdfpp_feature_layers.pdf");
     PdfWriter writer;
@@ -1518,6 +1586,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.TilingPatternRendering", TestTilingPatternRendering);
     runner.Run("Feature.SeparationAndDeviceNRendering", TestSeparationAndDeviceNRendering);
     runner.Run("Feature.IccBasedRendering", TestIccBasedRendering);
+    runner.Run("Feature.IccSrgbGammaRendering", TestIccSrgbGammaRendering);
     runner.Run("Feature.OptionalContentLayers", TestOptionalContentLayers);
     runner.Run("Feature.TextLayoutAndFallback", TestTextLayoutAndFallback);
     runner.Run("Feature.DocumentLayoutPrimitives", TestDocumentLayoutPrimitives);

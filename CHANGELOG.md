@@ -1,3 +1,12 @@
+## 0.89.0
+
+- ICC color management: the renderer detects standard sRGB ICC profiles on
+  ICCBased RGB images and applies the profile's transfer curve (gamma) so
+  images render with correct tone instead of a raw pass-through.
+- Tests: `Feature.IccSrgbGammaRendering` builds a minimal sRGB profile (rTRC
+  'curv' gamma 2.2) and verifies a mid-tone sample is re-encoded (~210 vs 128).
+  All suites green.
+
 ## 0.88.0
 
 - Convenience search: `PdfDocument::SearchText` runs the shared literal search

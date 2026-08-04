@@ -28,6 +28,8 @@
 namespace CPPPdf {
 namespace {
 
+double sRgbGammaOfProfile(const std::vector<std::byte>& profile);
+
 std::size_t CheckedPixelCount(const std::size_t width, const std::size_t height) {
     if (height != 0U && width > std::numeric_limits<std::size_t>::max() / height) {
         throw PdfException(PdfErrorCode::InvalidArgument, "Renderer buffer dimensions overflow.");
@@ -843,9 +845,25 @@ PdfRgbaColor ImagePixel(const PdfExtractedImage& image, const std::size_t x, con
         } else if (components == 3U) {
             const auto offset = pixelIndex * 3U;
             if (offset + 2U >= image.decodedBytes.size()) return {};
-            color = {std::to_integer<std::uint8_t>(image.decodedBytes[offset]),
-                     std::to_integer<std::uint8_t>(image.decodedBytes[offset + 1U]),
-                     std::to_integer<std::uint8_t>(image.decodedBytes[offset + 2U]), 255U};
+            // Detect a standard sRGB ICC profile and apply its transfer curve so
+            // ICCBased RGB images render with proper gamma instead of a raw pass.
+            const double gamma = sRgbGammaOfProfile(image.info.iccProfileBytes);
+            if (gamma > 0.0) {
+                const auto srgb = [&](const std::uint8_t channel) {
+                    // ICC values are already in the profile's linear space; the
+                    // sRGB profile stores an sRGB TRC, so re-encode to display.
+                    const double linear = channel / 255.0;
+                    double encoded = std::pow(linear, 1.0 / gamma);
+                    return static_cast<std::uint8_t>(std::lround(std::clamp(encoded, 0.0, 1.0) * 255.0));
+                };
+                color = {srgb(std::to_integer<std::uint8_t>(image.decodedBytes[offset])),
+                         srgb(std::to_integer<std::uint8_t>(image.decodedBytes[offset + 1U])),
+                         srgb(std::to_integer<std::uint8_t>(image.decodedBytes[offset + 2U])), 255U};
+            } else {
+                color = {std::to_integer<std::uint8_t>(image.decodedBytes[offset]),
+                         std::to_integer<std::uint8_t>(image.decodedBytes[offset + 1U]),
+                         std::to_integer<std::uint8_t>(image.decodedBytes[offset + 2U]), 255U};
+            }
         } else if (components == 4U) {
             const auto offset = pixelIndex * 4U;
             if (offset + 3U >= image.decodedBytes.size()) return {};
@@ -1199,6 +1217,50 @@ void PaintTilingPattern(PdfBitmap& bitmap, const PdfResolvedPattern& pattern,
             }
         }
     }
+}
+
+// Returns the display gamma (2.2 for sRGB TRC) encoded in a standard sRGB ICC
+// profile, or 0.0 when the profile is not a recognized sRGB RGB profile.
+double sRgbGammaOfProfile(const std::vector<std::byte>& profile) {
+    if (profile.size() < 132U) return 0.0;
+    // ICC header: color space signature at offset 16 (4 bytes).
+    const auto fourCc = [&](const std::size_t offset) -> std::uint32_t {
+        if (offset + 4U > profile.size()) return std::uint32_t{0};
+        return (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[offset])) << 24U) |
+               (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[offset + 1U])) << 16U) |
+               (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[offset + 2U])) << 8U) |
+               static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[offset + 3U]));
+    };
+    constexpr std::uint32_t kSrgb = 0x73524742; // 'sRGB'
+    constexpr std::uint32_t kRgb = 0x52474220; // 'RGB '
+    if (fourCc(0U) != kSrgb && fourCc(20U) != kSrgb) return 0.0;
+    if (fourCc(12U) != kRgb && fourCc(16U) != kRgb) return 0.0;
+    // Tag table: count at offset 128, then 12-byte entries {sig, offset, size}.
+    const std::uint32_t tagCount = fourCc(128U);
+    for (std::uint32_t t = 0; t < tagCount; ++t) {
+        const std::size_t entry = 132U + std::size_t(t) * 12U;
+        if (entry + 12U > profile.size()) break;
+        // 'rTRC' = red tone reproduction curve.
+        if (fourCc(entry) != 0x72545243U) continue;
+        const std::uint32_t curveOffset = fourCc(entry + 4U);
+        const std::uint32_t curveSize = fourCc(entry + 8U);
+        if (curveSize < 12U || curveOffset + curveSize > profile.size()) continue;
+        if (fourCc(curveOffset) != 0x63757276U) continue;
+        const std::uint32_t entryCount =
+            (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[curveOffset + 4U])) << 24U) |
+            (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[curveOffset + 5U])) << 16U) |
+            (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[curveOffset + 6U])) << 8U) |
+            static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[curveOffset + 7U]));
+        if (entryCount == 0U && curveOffset + 8U + 4U <= profile.size()) {
+            // u8Fixed8 gamma (e.g. 0x0233 = 2.2).
+            const std::uint32_t raw =
+                (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[curveOffset + 8U])) << 8U) |
+                static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(profile[curveOffset + 9U]));
+            const double gamma = raw / 256.0;
+            if (gamma > 0.5 && gamma < 4.0) return gamma;
+        }
+    }
+    return 0.0;
 }
 
 } // namespace
