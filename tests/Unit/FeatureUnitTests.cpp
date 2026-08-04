@@ -778,6 +778,7 @@ void TestTextLayoutAndFallback() {
         PDFPP_TEST_CHECK(!postScriptName.empty());
         PDFPP_TEST_CHECK(!font.GetFontFamily().empty());
         PDFPP_TEST_CHECK(!font.IsVariable());
+        PDFPP_TEST_CHECK(font.GetWeightClass() >= 100U && font.GetWeightClass() <= 900U);
         const auto gidA = font.GetGlyphId(U'A');
         const auto gidV = font.GetGlyphId(U'V');
         if (gidA && gidV) {

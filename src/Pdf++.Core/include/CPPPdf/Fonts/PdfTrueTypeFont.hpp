@@ -73,6 +73,8 @@ public:
     [[nodiscard]] bool IsVariable() const;
     // Number of variation axes from the `fvar` table.
     [[nodiscard]] std::size_t GetVariationAxisCount() const;
+    // OS/2 usWeightClass (100..900; 400 normal, 700 bold), or 400 when absent.
+    [[nodiscard]] std::uint16_t GetWeightClass() const;
     [[nodiscard]] const std::vector<std::uint8_t>& GetBytes() const noexcept;
     [[nodiscard]] bool HasTable(std::string_view tag) const noexcept;
     [[nodiscard]] const PdfTrueTypeMetrics& GetMetrics() const noexcept;

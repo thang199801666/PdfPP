@@ -1,3 +1,10 @@
+## 0.155.0
+
+- Font weight: `PdfTrueTypeFont::GetWeightClass` reads the OS/2
+  usWeightClass (defaults to 400).
+- Tests: `Feature.TextLayoutAndFallback` checks the range for a system font.
+  All suites green.
+
 ## 0.154.0
 
 - BMP encoding: `PdfImage::EncodeBmp` builds a 24-bit uncompressed BMP from raw

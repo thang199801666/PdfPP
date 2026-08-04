@@ -772,6 +772,14 @@ std::size_t PdfTrueTypeFont::GetVariationAxisCount() const {
     const std::uint16_t axisCount = Read16(bytes_, it->second.offset + 8U);
     return axisCount;
 }
+
+std::uint16_t PdfTrueTypeFont::GetWeightClass() const {
+    const auto tables = ParseTables(bytes_);
+    const auto it = tables.find("OS/2");
+    // usWeightClass is at offset 4 in the OS/2 table.
+    if (it == tables.end() || it->second.length < 6U) return 400U;
+    return Read16(bytes_, it->second.offset + 4U);
+}
 bool PdfTrueTypeFont::Supports(std::uint32_t cp)const noexcept{return unicodeToGlyph_.contains(cp);} std::optional<std::uint16_t> PdfTrueTypeFont::GetGlyphId(std::uint32_t cp)const noexcept{auto it=unicodeToGlyph_.find(cp);return it==unicodeToGlyph_.end()?std::nullopt:std::optional<std::uint16_t>(it->second);}
 std::optional<std::uint32_t> PdfTrueTypeFont::GetUnicodeForGlyph(const std::uint16_t glyphId) const {
     for (const auto& [cp, gid] : unicodeToGlyph_) {
