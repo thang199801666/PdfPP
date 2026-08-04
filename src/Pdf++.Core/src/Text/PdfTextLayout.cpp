@@ -673,4 +673,26 @@ std::size_t PdfTextLayout::CountWords(const std::string_view utf8) {
     return count;
 }
 
+std::string PdfTextLayout::TitleCase(const std::string_view utf8) {
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    std::vector<std::uint32_t> out;
+    out.reserve(cps.size());
+    bool atWordStart = true;
+    for (const std::uint32_t cp : cps) {
+        if (isWhitespaceCp(cp)) {
+            out.push_back(cp);
+            atWordStart = true;
+        } else if (atWordStart) {
+            out.push_back(toUpperLatin(cp));
+            atWordStart = false;
+        } else {
+            out.push_back(toLowerLatin(cp));
+        }
+    }
+    std::string result;
+    for (const std::uint32_t cp : out) appendUtf8(result, cp);
+    return result;
+}
+
 } // namespace CPPPdf

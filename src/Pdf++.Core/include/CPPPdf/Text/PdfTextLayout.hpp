@@ -74,6 +74,9 @@ public:
 
     // Counts whitespace-separated words.
     [[nodiscard]] static std::size_t CountWords(std::string_view utf8);
+
+    // Title case: uppercases the first letter of every word.
+    [[nodiscard]] static std::string TitleCase(std::string_view utf8);
 };
 
 } // namespace CPPPdf

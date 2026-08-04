@@ -232,6 +232,7 @@ void TestTextSearch() {
     PDFPP_TEST_CHECK(lines.size() == 4U);
     PDFPP_TEST_CHECK(lines[0] == "a" && lines[1] == "b" && lines[2].empty() && lines[3] == "c");
     PDFPP_TEST_CHECK(PdfTextLayout::CountWords("hello  world \n foo") == 3);
+    PDFPP_TEST_CHECK(PdfTextLayout::TitleCase("hELLO wORLD") == "Hello World");
 
     // Accent-insensitive search: "cafe" matches "caf\u00e9".
     PdfTextChunk accented;
@@ -1107,7 +1108,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 150U);
+    static_assert(CPPPdf::VersionMinor == 151U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1117,7 +1118,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.150.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.151.0");
 }
 
 int RunApiCoverageTests() {

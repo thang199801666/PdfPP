@@ -1,3 +1,10 @@
+## 0.151.0
+
+- Title casing: `PdfTextLayout::TitleCase` uppercases the first letter of each
+  word and lowercases the rest (Latin-aware).
+- Tests: `API.TextSearch` converts "hELLO wORLD" to "Hello World". All suites
+  green.
+
 ## 0.150.0
 
 - Variable font detection: `PdfTrueTypeFont::IsVariable` and
