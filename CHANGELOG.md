@@ -1,3 +1,9 @@
+## 0.95.0
+
+- Document conveniences: `PdfDocument::GetPageMediaBox` and `GetAllPagesText`
+  (all pages' extracted text joined with newlines).
+- Tests: `API.PageEditingAndOrganization` exercises both. All suites green.
+
 ## 0.94.0
 
 - Keyword search without modification: `PdfKeywordHighlighter::FindMatches`

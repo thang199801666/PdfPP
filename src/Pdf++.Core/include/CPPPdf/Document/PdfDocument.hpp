@@ -92,6 +92,13 @@ class PdfDocument final {public:
     [[nodiscard]] PdfDocumentInfo GetDocumentInfo() const { return documentInfo(); }
     [[nodiscard]] PdfPageInfo pageInfo(std::size_t pageIndex) const;
     [[nodiscard]] PdfPageInfo GetPageInfo(std::size_t pageIndex) const { return pageInfo(pageIndex); }
+    // Convenience: the page's media box (falls back to crop box if unset).
+    [[nodiscard]] PdfRectangle GetPageMediaBox(std::size_t pageIndex) const {
+        const auto info = pageInfo(pageIndex);
+        return info.mediaBox.empty() ? info.cropBox : info.mediaBox;
+    }
+    // Convenience: text of every page joined with newlines.
+    [[nodiscard]] std::string GetAllPagesText() const;
 
     [[nodiscard]] std::string readIndirectObject(std::uint32_t objectNumber) const;
     [[nodiscard]] std::vector<std::uint32_t> objectNumbers() const;

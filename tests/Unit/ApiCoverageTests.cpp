@@ -314,6 +314,9 @@ void TestPageEditingAndOrganization(const std::filesystem::path& base) {
     auto document = PdfDocument::Open(edited);
     PDFPP_TEST_CHECK(document.GetPageInfo(0).rotation == 90);
     PDFPP_TEST_CHECK(document.GetPageInfo(0).cropBox.right == 250);
+    PDFPP_TEST_CHECK(!document.GetPageMediaBox(0).empty());
+    const auto allPagesText = document.GetAllPagesText();
+    PDFPP_TEST_CHECK(!allPagesText.empty());
 
     const auto background = TempPath("pdfpp_api_background.pdf");
     const auto backgroundResult = PdfPageEditor::AddContent(
@@ -982,7 +985,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 94U);
+    static_assert(CPPPdf::VersionMinor == 95U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -992,7 +995,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.94.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.95.0");
 }
 
 int RunApiCoverageTests() {

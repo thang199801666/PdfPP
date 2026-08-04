@@ -3473,6 +3473,16 @@ std::vector<PdfOutlineEntry> PdfDocument::GetOutlines() const {
     return result;
 }
 
+std::string PdfDocument::GetAllPagesText() const {
+    std::string all;
+    const auto count = pageCount();
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i > 0U) all += '\n';
+        all += ExtractText(i, PdfTextExtractionRequest{});
+    }
+    return all;
+}
+
 std::vector<PdfTextSearchMatch> PdfDocument::SearchText(
     const std::size_t pageIndex,
     const std::string_view keyword,
