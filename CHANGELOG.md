@@ -1,3 +1,10 @@
+## 0.116.0
+
+- UTF-8 helpers: `PdfTextLayout::CountCodePoints` and `TruncateUtf8` (with an
+  ellipsis, cutting at grapheme boundaries so combining marks stay attached).
+- Tests: `API.TextSearch` verifies counts and truncation of `he` + combining
+  acute. All suites green.
+
 ## 0.115.0
 
 - Writer page rotation: `PdfWriter::SetPageRotation`/`GetPageRotation` emit

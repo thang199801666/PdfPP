@@ -217,4 +217,40 @@ std::string PdfTextLayout::ShapeArabic(std::string_view utf8) {
     return out;
 }
 
+std::size_t PdfTextLayout::CountCodePoints(const std::string_view utf8) {
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    return cps.size();
+}
+
+namespace {
+// True for combining marks, variation selectors, ZWJ, and zero-width joiners
+// that must stay attached to their base code point when truncating.
+bool isCombiningMark(const std::uint32_t cp) {
+    return (cp >= 0x0300U && cp <= 0x036FU) ||
+           (cp >= 0x1AB0U && cp <= 0x1AFFU) ||
+           (cp >= 0x1DC0U && cp <= 0x1DFFU) ||
+           (cp >= 0x20D0U && cp <= 0x20FFU) ||
+           (cp >= 0xFE00U && cp <= 0xFE0FU) ||
+           cp == 0x200DU || cp == 0x200CU || cp == 0xFEFFU;
+}
+} // namespace
+
+std::string PdfTextLayout::TruncateUtf8(
+    const std::string_view utf8,
+    const std::size_t maxCodePoints,
+    const std::string_view ellipsis) {
+    if (maxCodePoints == 0U) return std::string(ellipsis);
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    if (cps.size() <= maxCodePoints) return std::string(utf8);
+    std::size_t take = maxCodePoints;
+    // Do not split a base + combining-mark cluster.
+    while (take > 0U && take < cps.size() && isCombiningMark(cps[take])) --take;
+    std::string out;
+    for (std::size_t i = 0; i < take; ++i) appendUtf8(out, cps[i]);
+    out += ellipsis;
+    return out;
+}
+
 } // namespace CPPPdf

@@ -26,6 +26,16 @@ public:
     // by a non-joining character) keep their isolated form. The input is
     // assumed to be in logical order with bidi already applied.
     [[nodiscard]] static std::string ShapeArabic(std::string_view utf8);
+
+    // Counts the Unicode code points in a UTF-8 string.
+    [[nodiscard]] static std::size_t CountCodePoints(std::string_view utf8);
+
+    // Truncates UTF-8 text to at most `maxCodePoints` code points, cutting at
+    // a grapheme boundary and appending `ellipsis` when truncation happened.
+    [[nodiscard]] static std::string TruncateUtf8(
+        std::string_view utf8,
+        std::size_t maxCodePoints,
+        std::string_view ellipsis = "...");
 };
 
 } // namespace CPPPdf
