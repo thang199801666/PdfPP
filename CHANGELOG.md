@@ -1,3 +1,10 @@
+## 0.142.0
+
+- Canvas font introspection: `PdfCanvas::GetActiveFontName` returns the active
+  base font name.
+- Tests: `Feature.TextLayoutAndFallback` reads the default "Helvetica". All
+  suites green.
+
 ## 0.141.0
 
 - Unicode whitespace: `PdfTextLayout::IsWhitespace` and `TrimWhitespace`

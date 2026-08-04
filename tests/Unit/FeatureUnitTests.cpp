@@ -847,6 +847,7 @@ void TestTextLayoutAndFallback() {
             PdfWriter measureWriter;
             const auto measurePage = measureWriter.AddPage({0, 0, 300, 200});
             auto measureCanvas = measureWriter.GetCanvas(measurePage);
+            PDFPP_TEST_CHECK(measureCanvas.GetActiveFontName() == "Helvetica");
             PDFPP_TEST_CHECK(measureCanvas.MeasureTextUtf8("x") == 0.0);
             measureCanvas.SetTrueTypeFontAndSize(font, 20.0);
             const double measured = measureCanvas.MeasureTextUtf8("Hello");

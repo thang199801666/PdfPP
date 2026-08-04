@@ -100,6 +100,8 @@ public:
     PdfCanvas& SetFontAndSize(std::string base14Font, double size);
     PdfCanvas& SetTrueTypeFontAndSize(const PdfTrueTypeFont& font, double size);
     [[nodiscard]] double GetCurrentFontSize() const noexcept;
+    // Returns the active base font name (e.g. "Helvetica").
+    [[nodiscard]] std::string GetActiveFontName() const noexcept;
     // Measures UTF-8 text with the active TrueType font and size. Returns 0
     // when no TrueType font is active.
     [[nodiscard]] double MeasureTextUtf8(std::string_view utf8Text) const;

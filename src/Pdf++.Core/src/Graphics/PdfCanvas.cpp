@@ -209,6 +209,11 @@ double PdfCanvas::GetCurrentFontSize() const noexcept {
     return state_->pages[pageIndex_].currentFontSize;
 }
 
+std::string PdfCanvas::GetActiveFontName() const noexcept {
+    if (!state_ || pageIndex_ >= state_->pages.size()) return {};
+    return state_->pages[pageIndex_].fontName;
+}
+
 double PdfCanvas::MeasureTextUtf8(const std::string_view utf8Text) const {
     if (!state_ || pageIndex_ >= state_->pages.size()) return 0.0;
     const auto& page = state_->pages[pageIndex_];
