@@ -1,3 +1,10 @@
+## 0.126.0
+
+- Bitmap utilities: `PdfBitmap::ToGrayscale` (Rec. 709 luma) and
+  `HasTransparency`.
+- Tests: `Feature.PngOutput` verifies grayscale channels and opacity. All
+  suites green.
+
 ## 0.125.0
 
 - XMP reading: `PdfDocument::GetXmpMetadata` returns the catalog `/Metadata`

@@ -71,6 +71,10 @@ public:
     // Returns a horizontally or vertically mirrored copy.
     [[nodiscard]] PdfBitmap FlipHorizontal() const;
     [[nodiscard]] PdfBitmap FlipVertical() const;
+    // Returns a grayscale copy (Rec. 709 luminance).
+    [[nodiscard]] PdfBitmap ToGrayscale() const;
+    // True when every pixel has full alpha.
+    [[nodiscard]] bool HasTransparency() const noexcept;
 
 private:
     std::size_t width_{};

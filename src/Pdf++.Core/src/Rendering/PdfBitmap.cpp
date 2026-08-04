@@ -456,4 +456,27 @@ PdfBitmap PdfBitmap::FlipVertical() const {
     return result;
 }
 
+PdfBitmap PdfBitmap::ToGrayscale() const {
+    if (width_ == 0U || height_ == 0U) return {};
+    PdfBitmap result(width_, height_);
+    for (std::size_t y = 0; y < height_; ++y) {
+        for (std::size_t x = 0; x < width_; ++x) {
+            const auto color = GetPixel(x, y);
+            // Rec. 709 luma.
+            const std::uint8_t gray = static_cast<std::uint8_t>(std::lround(
+                std::clamp(0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue, 0.0, 255.0)));
+            result.SetPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+                            {gray, gray, gray, color.alpha});
+        }
+    }
+    return result;
+}
+
+bool PdfBitmap::HasTransparency() const noexcept {
+    for (std::size_t offset = 3U; offset < pixels_.size(); offset += 4U) {
+        if (ToByte(pixels_[offset]) < 255U) return true;
+    }
+    return false;
+}
+
 } // namespace CPPPdf

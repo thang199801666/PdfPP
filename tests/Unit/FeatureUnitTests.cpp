@@ -1204,6 +1204,12 @@ void TestPngOutput() {
     PDFPP_TEST_CHECK(bmpBytes[0] == 'B' && bmpBytes[1] == 'M');
     PDFPP_TEST_CHECK(bmpBytes.size() == 54U + 40U * 30U * 4U);
     std::filesystem::remove(bmpPath);
+    // Grayscale conversion keeps dimensions and drops saturation.
+    const auto gray = bitmap.ToGrayscale();
+    PDFPP_TEST_CHECK(gray.GetWidth() == 40U && gray.GetHeight() == 30U);
+    const auto grayPixel = gray.GetPixel(20U, 15U);
+    PDFPP_TEST_CHECK(grayPixel.red == grayPixel.green && grayPixel.green == grayPixel.blue);
+    PDFPP_TEST_CHECK(!bitmap.HasTransparency());
     std::filesystem::remove(pdfPath);
     std::filesystem::remove(pngPath);
     std::filesystem::remove(jpegPath);
