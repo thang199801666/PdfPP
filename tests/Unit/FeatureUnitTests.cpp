@@ -933,6 +933,28 @@ void TestType1FontEmbedding() {
     std::filesystem::remove(output);
 }
 
+void TestTaggedPdf() {
+    const auto output = TempPath("pdfpp_feature_tagged.pdf");
+    PdfWriter writer;
+    writer.AddPage({0, 0, 200, 200});
+    writer.SetTaggedPdf(true);
+    PDFPP_TEST_CHECK(writer.IsTaggedPdf());
+    writer.SetLanguage("en-US");
+    PDFPP_TEST_CHECK(writer.GetLanguage() == "en-US");
+    writer.Save(output);
+    const std::string bytes = ReadText(output);
+    PDFPP_TEST_CHECK(bytes.find("/MarkInfo") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Marked true") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/Lang (en-US)") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/StructTreeRoot") != std::string::npos);
+    auto document = PdfDocument::Open(output);
+    const PdfDictionary* catalog = document.GetObject(document.GetCatalogReference()).AsDictionary();
+    PDFPP_TEST_CHECK(catalog != nullptr);
+    PDFPP_TEST_CHECK(catalog->Contains(PdfName("StructTreeRoot")));
+    PDFPP_TEST_CHECK(catalog->Contains(PdfName("MarkInfo")));
+    std::filesystem::remove(output);
+}
+
 void TestPortfolio() {
     const auto output = TempPath("pdfpp_feature_portfolio.pdf");
     PdfWriter writer;
@@ -1439,6 +1461,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.ParallelRendering", TestParallelRendering);
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
+    runner.Run("Feature.TaggedPdf", TestTaggedPdf);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

@@ -86,7 +86,7 @@ secondary scope.
 - Implement PDF/A-1 through PDF/A-4 creation and validation.
 - Practical PDF/A validation: `PdfConformanceValidator` checks the file version header, forbids encryption, verifies the XMP metadata stream's `pdfaid:part`/`conformance`, requires a `/GTS_PDFA1` output intent, validates embedded TrueType/CFF fonts (plus ToUnicode for level U and tagged structure for level A), rejects transparency for PDF/A-1, and flags forbidden annotation subtypes.
 - Implement PDF/UA structure trees, role maps, language and alt text.
-- `PdfConformanceValidator` checks PDF/UA structure tree, `/Lang`, `/MarkInfo /Marked`, and document title.
+- `PdfConformanceValidator` checks PDF/UA structure tree, `/Lang`, `/MarkInfo /Marked`, and document title; `PdfWriter::SetTaggedPdf` writes `/MarkInfo`, `/Lang`, and a `/StructTreeRoot` with role map.
 - Add redaction and metadata/attachment sanitization.
 - `PdfRedactor::RedactText` covers matched text with opaque black rectangles via an appended content stream.
 

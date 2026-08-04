@@ -232,6 +232,13 @@ public:
     void SetOpenAction(const PdfDestinationOptions& destination);
     void ClearOpenAction() noexcept;
     [[nodiscard]] bool HasOpenAction() const noexcept;
+
+    // Marks the document as tagged (PDF/UA-ready): adds /MarkInfo /Marked true,
+    // /Lang, and a minimal /StructTreeRoot to the catalog.
+    void SetTaggedPdf(bool tagged = true);
+    [[nodiscard]] bool IsTaggedPdf() const noexcept;
+    void SetLanguage(std::string langCode);
+    [[nodiscard]] const std::string& GetLanguage() const noexcept;
     void AddPageLabel(std::size_t pageIndex, const PdfPageLabelOptions& options);
     void RemovePageLabel(std::size_t pageIndex);
     void ClearPageLabels() noexcept;

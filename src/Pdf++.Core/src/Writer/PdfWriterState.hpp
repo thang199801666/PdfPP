@@ -98,6 +98,8 @@ struct PdfWriterState {
     PdfDocumentInfo documentInfo{};
     PdfViewerPreferences viewerPreferences{};
     std::optional<PdfDestinationOptions> openAction{};
+    bool tagged{false};
+    std::string language;
     std::vector<PdfWriterPageLabel> pageLabels;
     std::vector<PdfWriterPage> pages;
     std::vector<PdfWriterOcg> ocgs;

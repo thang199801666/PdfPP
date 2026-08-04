@@ -1,3 +1,11 @@
+## 0.80.0
+
+- Tagged PDF: `PdfWriter::SetTaggedPdf`/`SetLanguage` write `/MarkInfo
+  /Marked true`, `/Lang`, and a minimal `/StructTreeRoot` (with `/ParentTree`
+  and a document `/RoleMap`) to the catalog, producing PDF/UA-ready output.
+- Tests: `Feature.TaggedPdf` verifies the catalog carries `/MarkInfo`, `/Lang`,
+  and `/StructTreeRoot`. All suites green (32 feature subtests).
+
 ## 0.79.0
 
 - OpenType GSUB ligature substitution: `PdfTrueTypeFont` parses the GSUB

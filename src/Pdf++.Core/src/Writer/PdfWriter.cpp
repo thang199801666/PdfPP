@@ -327,6 +327,11 @@ void PdfWriter::SetOpenAction(const PdfDestinationOptions& destination) {
 }
 void PdfWriter::ClearOpenAction() noexcept { state_->openAction.reset(); }
 bool PdfWriter::HasOpenAction() const noexcept { return state_->openAction.has_value(); }
+
+void PdfWriter::SetTaggedPdf(const bool tagged) { state_->tagged = tagged; }
+bool PdfWriter::IsTaggedPdf() const noexcept { return state_->tagged; }
+void PdfWriter::SetLanguage(std::string langCode) { state_->language = std::move(langCode); }
+const std::string& PdfWriter::GetLanguage() const noexcept { return state_->language; }
 void PdfWriter::AddPageLabel(std::size_t pageIndex, const PdfPageLabelOptions& options) {
     if (pageIndex >= state_->pages.size()) throw std::out_of_range("Page label index");
     if (options.startNumber == 0U) throw std::invalid_argument("Page label start number must be positive");
@@ -688,6 +693,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     std::vector<int> extGStateIds(state_->extGStates.size()); for(auto& id:extGStateIds) id=allocate();
     std::vector<int> ocgIds(state_->ocgs.size()); for(auto& id:ocgIds) id=allocate();
     const int ocPropertiesObject = state_->ocgs.empty() ? 0 : allocate();
+    const int structTreeObject = state_->tagged ? allocate() : 0;
     struct EmbeddedIds { int file{}, descriptor{}, cid{}, toUnicode{}, type0{}; };
     std::vector<EmbeddedIds> fontIds(state_->embeddedFonts.size());
     for(auto& ids:fontIds){ ids.file=allocate(); ids.descriptor=allocate(); ids.cid=allocate(); ids.toUnicode=allocate(); ids.type0=allocate(); }
@@ -731,6 +737,13 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             objects[catalog] += " /Title (" + escapePdfString(state_->portfolio->title) + ")";
         }
         objects[catalog] += " >>";
+    }
+    if (state_->tagged) {
+        objects[catalog] += " /MarkInfo << /Marked true >>";
+        if (!state_->language.empty()) {
+            objects[catalog] += " /Lang (" + escapePdfString(state_->language) + ")";
+        }
+        objects[catalog] += " /StructTreeRoot " + std::to_string(structTreeObject) + " 0 R";
     }
     if (state_->openAction) {
         Internal::PdfWriterNamedDestination action;
@@ -980,6 +993,12 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
             objects[type1Ids[i]] += std::to_string(t1.GetGlyphWidth(static_cast<std::uint8_t>(c))) + " ";
         }
         objects[type1Ids[i]] += "] >>";
+    }
+    if (structTreeObject != 0) {
+        // Minimal structure tree: a /StructTreeRoot with an empty /K array and
+        // the default document role map.
+        objects[structTreeObject] = "<< /Type /StructTreeRoot /K [] "
+            "/ParentTree << /Nums [0 []] >> /RoleMap << /Document /Document >> >>";
     }
     for (std::size_t i = 0; i < state_->ocgs.size(); ++i) {
         objects[ocgIds[i]] = "<< /Type /OCG /Name (" + escapePdfString(state_->ocgs[i].name) + ") /Usage << >> >>";
