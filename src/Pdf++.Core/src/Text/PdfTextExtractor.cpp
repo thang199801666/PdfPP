@@ -101,6 +101,16 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
             fillAlpha = alpha[1];
             return;
         }
+        if (event.type == PdfContentEventType::BeginText) {
+            // BT starts a new text object: the line origin resets to the
+            // current text matrix origin.
+            textLineX = event.textState.textMatrix[4];
+            textLineY = event.textState.textMatrix[5];
+            currentX = textLineX;
+            currentY = textLineY + event.textState.rise;
+            hasPosition = true;
+            return;
+        }
         if (event.type == PdfContentEventType::SetTextMatrix) {
             textLineX = event.textState.textMatrix[4];
             textLineY = event.textState.textMatrix[5];

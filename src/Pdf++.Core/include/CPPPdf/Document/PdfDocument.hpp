@@ -137,6 +137,14 @@ class PdfDocument final {public:
     // pageIndex is zero-based.
     [[nodiscard]] std::string extractPageText(std::size_t pageIndex) const;
     [[nodiscard]] std::string GetPageText(std::size_t pageIndex) const { return extractPageText(pageIndex); }
+    // Extracts text inside a rectangular page region.
+    [[nodiscard]] std::string GetPageTextInRegion(
+        std::size_t pageIndex, const PdfRectangle& region) const {
+        PdfTextExtractionRequest request;
+        request.strategy = PdfTextExtractionStrategy::Region;
+        request.region = PdfTextRegion{region, true};
+        return ExtractText(pageIndex, request);
+    }
     [[nodiscard]] std::vector<std::string> extractAllPageText() const;
     [[nodiscard]] std::vector<std::string> GetAllPageText() const { return extractAllPageText(); }
     // Extracts pages concurrently. File-backed documents use independent reader

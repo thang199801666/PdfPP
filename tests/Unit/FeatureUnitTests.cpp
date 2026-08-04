@@ -861,8 +861,10 @@ void TestTextLayoutAndFallback() {
         PDFPP_TEST_CHECK(writer.GetCanvas(page).IsVerticalWriting());
         writer.GetCanvas(page).SetVerticalWriting(false);
         PDFPP_TEST_CHECK(!writer.GetCanvas(page).IsVerticalWriting());
-        writer.Save(output);
-        const auto document = PdfDocument::Open(output);
+    writer.Save(output);
+    const auto document = PdfDocument::Open(output);
+    const auto textLayoutChunks = document.ExtractTextChunks(0U);
+    (void)textLayoutChunks;
         PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
         std::filesystem::remove(output);
     }
@@ -1266,6 +1268,25 @@ void TestTextStateOperators() {
     options.dpi = 72.0;
     const auto bitmap = PdfPageRenderer::Render(document, 0U, options);
     PDFPP_TEST_CHECK(bitmap.GetWidth() == 300U);
+    std::filesystem::remove(output);
+}
+
+void TestRegionTextExtraction() {
+    const auto output = TempPath("pdfpp_feature_region_text.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 300, 300});
+    auto canvas = writer.GetCanvas(page);
+    canvas.BeginText().SetFontAndSize("Helvetica", 12).MoveText(20, 250).ShowText("Upper text").EndText();
+    canvas.BeginText().SetFontAndSize("Helvetica", 12).MoveText(20, 100).ShowText("Lower text").EndText();
+    writer.Save(output);
+    const auto document = PdfDocument::Open(output);
+    const std::string upper = document.GetPageTextInRegion(0U, PdfRectangle{0, 150, 300, 300});
+    PDFPP_TEST_CHECK(upper.find("Upper") != std::string::npos);
+    PDFPP_TEST_CHECK(upper.find("Lower") == std::string::npos);
+    // Lower half should contain only the lower line.
+    const std::string lower = document.GetPageTextInRegion(0U, PdfRectangle{0, 0, 300, 150});
+    PDFPP_TEST_CHECK(lower.find("Lower") != std::string::npos);
+    PDFPP_TEST_CHECK(lower.find("Upper") == std::string::npos);
     std::filesystem::remove(output);
 }
 
@@ -1799,6 +1820,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
     runner.Run("Feature.TaggedPdf", TestTaggedPdf);
+    runner.Run("Feature.RegionTextExtraction", TestRegionTextExtraction);
     runner.Run("Feature.TextStateOperators", TestTextStateOperators);
     runner.Run("Feature.TilingPatternWrite", TestTilingPatternWrite);
     runner.Run("Feature.PageContentStream", TestPageContentStream);

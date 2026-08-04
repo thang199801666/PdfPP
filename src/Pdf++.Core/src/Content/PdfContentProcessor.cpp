@@ -406,7 +406,11 @@ void PdfContentProcessor::Process(
             event.bytes = std::move(inlineImage.bytes);
             handler_(event);
         }
-        else if (token == "BT") Emit(handler_, PdfContentEventType::BeginText, std::string(token), textState);
+        else if (token == "BT") {
+            // BT begins a text object and resets the text matrix to identity.
+            textState.textMatrix = {1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+            Emit(handler_, PdfContentEventType::BeginText, std::string(token), textState);
+        }
         else if (token == "ET") Emit(handler_, PdfContentEventType::EndText, std::string(token), textState);
         else if (token == "q") {
             graphicsStack.push_back({textState.currentTransformationMatrix,

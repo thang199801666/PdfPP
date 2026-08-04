@@ -1,3 +1,11 @@
+## 0.114.0
+
+- Region text extraction: `PdfDocument::GetPageTextInRegion` returns text
+  inside a page rectangle. Fixed text-line origin reset at `BT` so multiple
+  text objects in one page position correctly.
+- Tests: `Feature.RegionTextExtraction` extracts per-half regions of a two-line
+  page. All suites green.
+
 ## 0.113.0
 
 - GPOS SinglePos: the TrueType parser reads lookup-type-1 per-glyph xAdvance
