@@ -1,3 +1,11 @@
+## 0.131.0
+
+- GPOS CursivePos: the TrueType parser reads lookup-type-3 entry/exit anchors
+  for joining scripts; `GetCursiveAnchor` exposes them. Complements the
+  existing SinglePos, PairPos, MarkBase, and MarkMark coverage.
+- Tests: `Feature.TextLayoutAndFallback` checks the cursive store. All suites
+  green.
+
 ## 0.130.0
 
 - CFF glyph names: `PdfCffParser::GetGlyphName` maps a glyph's charset SID to

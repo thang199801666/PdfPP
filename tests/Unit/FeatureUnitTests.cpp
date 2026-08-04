@@ -819,6 +819,14 @@ void TestTextLayoutAndFallback() {
         if (gidA) {
             PDFPP_TEST_CHECK(std::abs(font.GetGlyphAdvanceAdjustment(*gidA)) < 2000);
         }
+        // Cursive anchors are exposed (fonts with joining scripts may set them).
+        if (font.HasCursiveAnchors()) {
+            PDFPP_TEST_CHECK(font.GetCursiveAnchorCount() > 0U);
+            const auto anchor = font.GetCursiveAnchor(*gidA);
+            if (anchor) {
+                PDFPP_TEST_CHECK(anchor->hasEntry || anchor->hasExit);
+            }
+        }
         // Render base + combining mark with GPOS positioning active.
         if (font.HasMarkBase()) {
             const auto markPdf = TempPath("pdfpp_feature_render_mark.pdf");

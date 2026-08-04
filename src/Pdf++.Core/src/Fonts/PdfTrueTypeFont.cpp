@@ -423,6 +423,67 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
                         }
                     }
                 }
+                // CursivePos (lookup type 3): entry/exit anchors used when
+                // joining script glyphs (Arabic, N'Ko). Format 1: coverage +
+                // entryExit records.
+                if (lookupType == 3U) {
+                    for(std::uint16_t s=0;s<subCount;++s){
+                        const std::uint16_t subOff3=Read16(bytes,lookup+6U+std::size_t(s)*2U);
+                        if(subOff3==0U||lookup+subOff3+4U>gb+gpos->second.length)continue;
+                        const std::size_t sub3=lookup+subOff3;
+                        const std::uint16_t format=Read16(bytes,sub3);
+                        if(format!=1U)continue; // CursivePosFormat1
+                        const std::uint16_t coverageOff=Read16(bytes,sub3+2U);
+                        const std::uint16_t entryExitCount=Read16(bytes,sub3+4U);
+                        if(coverageOff==0U||coverageOff+4U>gpos->second.length)continue;
+                        const std::size_t cov=sub3+coverageOff;
+                        if(cov+4U>gb+gpos->second.length)continue;
+                        const std::uint16_t covFormat=Read16(bytes,cov);
+                        const std::uint16_t covCount=Read16(bytes,cov+2U);
+                        // Collect coverage glyphs.
+                        std::vector<std::uint16_t> glyphs;
+                        for(std::uint16_t p=0;p<covCount;++p){
+                            if(covFormat==1U){
+                                glyphs.push_back(Read16(bytes,cov+4U+std::size_t(p)*2U));
+                            } else if(covFormat==2U){
+                                const std::uint16_t rc=Read16(bytes,cov+2U);
+                                for(std::uint16_t r=0;r<rc;++r){
+                                    const std::size_t at=cov+4U+std::size_t(r)*6U;
+                                    if(at+6U>gb+gpos->second.length)break;
+                                    const std::uint16_t start=Read16(bytes,at);
+                                    const std::uint16_t end=Read16(bytes,at+2U);
+                                    const std::uint16_t sg=Read16(bytes,at+4U);
+                                    if(p>=start&&p<end){glyphs.push_back(static_cast<std::uint16_t>(sg+(p-start)));break;}
+                                }
+                            }
+                        }
+                        // entryExitRecords: {entryAnchorOff, exitAnchorOff} per glyph.
+                        for(std::uint16_t g=0;g<entryExitCount&&g<glyphs.size();++g){
+                            const std::size_t rec=sub3+6U+std::size_t(g)*4U;
+                            if(rec+4U>gb+gpos->second.length)break;
+                            const std::uint16_t entryOff=Read16(bytes,rec);
+                            const std::uint16_t exitOff=Read16(bytes,rec+2U);
+                            CursiveAnchor anchor{};
+                            if(entryOff!=0U){
+                                const std::size_t at=sub3+entryOff;
+                                if(at+6U<=gb+gpos->second.length&&Read16(bytes,at)==1U){
+                                    anchor.entryX=ReadS16(bytes,at+2U);
+                                    anchor.entryY=ReadS16(bytes,at+4U);
+                                    anchor.hasEntry=true;
+                                }
+                            }
+                            if(exitOff!=0U){
+                                const std::size_t at=sub3+exitOff;
+                                if(at+6U<=gb+gpos->second.length&&Read16(bytes,at)==1U){
+                                    anchor.exitX=ReadS16(bytes,at+2U);
+                                    anchor.exitY=ReadS16(bytes,at+4U);
+                                    anchor.hasExit=true;
+                                }
+                            }
+                            f.cursiveAnchors_[glyphs[g]]=anchor;
+                        }
+                    }
+                }
                 // MarkBasePos (lookup type 4): mark-to-base anchor attachments for
                 // combining marks. MarkBasePosFormat1 subtables map a mark class
                 // to anchors on each base glyph.
@@ -766,6 +827,13 @@ std::optional<PdfTrueTypeFont::MarkBaseAttachment> PdfTrueTypeFont::GetMarkMarkP
 std::int16_t PdfTrueTypeFont::GetGlyphAdvanceAdjustment(const std::uint16_t glyph) const noexcept {
     const auto it = glyphAdjustments_.find(glyph);
     return it == glyphAdjustments_.end() ? std::int16_t{0} : it->second;
+}
+
+std::optional<PdfTrueTypeFont::CursiveAnchor> PdfTrueTypeFont::GetCursiveAnchor(
+    const std::uint16_t glyph) const {
+    const auto it = cursiveAnchors_.find(glyph);
+    if (it == cursiveAnchors_.end()) return std::nullopt;
+    return it->second;
 }
 
 double PdfTrueTypeFont::GetCachedKerning(const std::uint16_t left, const std::uint16_t right,
