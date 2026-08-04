@@ -71,6 +71,9 @@ public:
 
     // Splits text into lines on \n and \r\n (keeps empty lines).
     [[nodiscard]] static std::vector<std::string> SplitLines(std::string_view utf8);
+
+    // Counts whitespace-separated words.
+    [[nodiscard]] static std::size_t CountWords(std::string_view utf8);
 };
 
 } // namespace CPPPdf

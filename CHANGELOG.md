@@ -1,3 +1,10 @@
+## 0.149.0
+
+- Word counting: `PdfTextLayout::CountWords` counts whitespace-separated
+  words.
+- Tests: `API.TextSearch` counts three words across spaces and newlines. All
+  suites green.
+
 ## 0.148.0
 
 - Line splitting: `PdfTextLayout::SplitLines` splits on \n, \r\n, and lone \r

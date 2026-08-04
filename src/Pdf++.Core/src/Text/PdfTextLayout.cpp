@@ -657,4 +657,20 @@ std::vector<std::string> PdfTextLayout::SplitLines(const std::string_view utf8) 
     return lines;
 }
 
+std::size_t PdfTextLayout::CountWords(const std::string_view utf8) {
+    std::vector<std::uint32_t> cps;
+    decodeUtf8View(utf8, cps);
+    std::size_t count = 0;
+    bool inWord = false;
+    for (const std::uint32_t cp : cps) {
+        if (isWhitespaceCp(cp)) {
+            inWord = false;
+        } else if (!inWord) {
+            inWord = true;
+            ++count;
+        }
+    }
+    return count;
+}
+
 } // namespace CPPPdf
