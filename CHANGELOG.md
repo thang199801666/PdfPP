@@ -1,3 +1,11 @@
+## 0.113.0
+
+- GPOS SinglePos: the TrueType parser reads lookup-type-1 per-glyph xAdvance
+  adjustments (formats 1 and 2); `GetGlyphAdvanceAdjustment` exposes them and
+  the renderer includes them in advance totals.
+- Tests: `Feature.TextLayoutAndFallback` checks an adjustment for glyph A. All
+  suites green.
+
 ## 0.112.0
 
 - Text state operators: `PdfCanvas` gains `SetTextLeading`, `SetTextRise`,

@@ -370,6 +370,59 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
                         }
                     }
                 }
+                // SinglePos (lookup type 1): per-glyph positioning, typically an
+                // xAdvance adjustment not present in the hmtx table.
+                if (lookupType == 1U) {
+                    for(std::uint16_t s=0;s<subCount;++s){
+                        const std::uint16_t subOff1=Read16(bytes,lookup+6U+std::size_t(s)*2U);
+                        if(subOff1==0U||lookup+subOff1+4U>gb+gpos->second.length)continue;
+                        const std::size_t sub1=lookup+subOff1;
+                        const std::uint16_t format=Read16(bytes,sub1);
+                        const std::uint16_t coverageOff=Read16(bytes,sub1+2U);
+                        const std::uint16_t valueFormat=Read16(bytes,sub1+4U);
+                        const bool hasXAdvance=(valueFormat&0x0004U)!=0U;
+                        if(!hasXAdvance||coverageOff==0U||coverageOff+4U>gpos->second.length)continue;
+                        const std::size_t cov=sub1+coverageOff;
+                        if(cov+4U>gb+gpos->second.length)continue;
+                        const std::uint16_t covFormat=Read16(bytes,cov);
+                        const std::uint16_t covCount=Read16(bytes,cov+2U);
+                        const std::size_t xAdvanceOffset=std::popcount(valueFormat&0x0003U)*2U;
+                        // Collect coverage glyphs (ordered by glyph id for format 2).
+                        std::vector<std::uint16_t> glyphs;
+                        for(std::uint16_t p=0;p<covCount;++p){
+                            if(covFormat==1U){
+                                glyphs.push_back(Read16(bytes,cov+4U+std::size_t(p)*2U));
+                            } else if(covFormat==2U){
+                                const std::uint16_t rc=Read16(bytes,cov+2U);
+                                for(std::uint16_t r=0;r<rc;++r){
+                                    const std::size_t at=cov+4U+std::size_t(r)*6U;
+                                    if(at+6U>gb+gpos->second.length)break;
+                                    const std::uint16_t start=Read16(bytes,at);
+                                    const std::uint16_t end=Read16(bytes,at+2U);
+                                    const std::uint16_t sg=Read16(bytes,at+4U);
+                                    if(p>=start&&p<end){glyphs.push_back(static_cast<std::uint16_t>(sg+(p-start)));break;}
+                                }
+                            }
+                        }
+                        if(format==1U){
+                            // A single value record applies to every covered glyph.
+                            const std::size_t valueBase=sub1+6U;
+                            const std::int16_t xAdvance=ReadS16(bytes,valueBase+xAdvanceOffset);
+                            if(xAdvance!=0){
+                                for(const auto g:glyphs)f.glyphAdjustments_[g]=xAdvance;
+                            }
+                        } else if(format==2U){
+                            const std::uint16_t valueCount=Read16(bytes,sub1+6U);
+                            const std::size_t valuesBase=sub1+8U;
+                            for(std::uint16_t p=0;p<valueCount&&p<glyphs.size();++p){
+                                const std::size_t rec=valuesBase+static_cast<std::size_t>(p)*std::popcount(valueFormat)*2U;
+                                if(rec+2U+xAdvanceOffset>gb+gpos->second.length)break;
+                                const std::int16_t xAdvance=ReadS16(bytes,rec+xAdvanceOffset);
+                                if(xAdvance!=0)f.glyphAdjustments_[glyphs[p]]=xAdvance;
+                            }
+                        }
+                    }
+                }
                 // MarkBasePos (lookup type 4): mark-to-base anchor attachments for
                 // combining marks. MarkBasePosFormat1 subtables map a mark class
                 // to anchors on each base glyph.
@@ -637,6 +690,11 @@ std::optional<PdfTrueTypeFont::MarkBaseAttachment> PdfTrueTypeFont::GetMarkMarkP
     if (it == markMark_.end()) return std::nullopt;
     return MarkBaseAttachment{it->second.markX, it->second.markY,
                               it->second.baseX, it->second.baseY};
+}
+
+std::int16_t PdfTrueTypeFont::GetGlyphAdvanceAdjustment(const std::uint16_t glyph) const noexcept {
+    const auto it = glyphAdjustments_.find(glyph);
+    return it == glyphAdjustments_.end() ? std::int16_t{0} : it->second;
 }
 
 double PdfTrueTypeFont::GetCachedKerning(const std::uint16_t left, const std::uint16_t right,

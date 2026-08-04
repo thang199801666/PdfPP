@@ -812,6 +812,10 @@ void TestTextLayoutAndFallback() {
         if (font.HasMarkMark()) {
             PDFPP_TEST_CHECK(font.GetMarkMarkCount() > 0U);
         }
+        // GPOS SinglePos adjustments are exposed and applied to advance sums.
+        if (gidA) {
+            PDFPP_TEST_CHECK(std::abs(font.GetGlyphAdvanceAdjustment(*gidA)) < 2000);
+        }
         // Render base + combining mark with GPOS positioning active.
         if (font.HasMarkBase()) {
             const auto markPdf = TempPath("pdfpp_feature_render_mark.pdf");

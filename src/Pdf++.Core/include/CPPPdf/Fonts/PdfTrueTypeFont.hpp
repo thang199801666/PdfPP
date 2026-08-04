@@ -112,6 +112,11 @@ public:
         std::uint16_t mark1Glyph, std::uint16_t mark2Glyph) const;
     [[nodiscard]] bool HasMarkMark() const noexcept { return !markMark_.empty(); }
     [[nodiscard]] std::size_t GetMarkMarkCount() const noexcept { return markMark_.size(); }
+    // Returns the GPOS SinglePos xAdvance adjustment (font units) for a glyph,
+    // or 0 when the glyph has none.
+    [[nodiscard]] std::int16_t GetGlyphAdvanceAdjustment(std::uint16_t glyph) const noexcept;
+    [[nodiscard]] bool HasGlyphAdjustments() const noexcept { return !glyphAdjustments_.empty(); }
+    [[nodiscard]] std::size_t GetGlyphAdjustmentCount() const noexcept { return glyphAdjustments_.size(); }
     [[nodiscard]] PdfTrueTypeGlyphOutline GetGlyphOutline(std::uint16_t glyphId) const;
     [[nodiscard]] const PdfTrueTypeGlyphOutline& GetGlyphOutlineCached(std::uint16_t glyphId) const;
     [[nodiscard]] std::size_t GetCachedOutlineCount() const noexcept { return outlineCache_.size(); }
@@ -147,6 +152,8 @@ private:
     std::unordered_map<std::uint64_t, AnchorPair> markBase_;
     // OpenType GPOS mark-to-mark anchors: (mark1<<32 | mark2).
     std::unordered_map<std::uint64_t, AnchorPair> markMark_;
+    // OpenType GPOS SinglePos xAdvance adjustments per glyph (font units).
+    std::unordered_map<std::uint16_t, std::int16_t> glyphAdjustments_;
     using KerningCacheEntry = std::pair<const std::uint64_t, double>;
     mutable std::list<KerningCacheEntry> kerningLru_;
     mutable std::unordered_map<std::uint64_t, std::list<KerningCacheEntry>::iterator> kerningCache_;

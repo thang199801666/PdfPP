@@ -525,8 +525,10 @@ void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
     double totalEmbeddedAdvance = 0.0;
     if (embeddedFont) {
         for (const auto glyphId : chunk.glyphIds) {
-            if (glyphId != std::numeric_limits<std::uint16_t>::max())
-                totalEmbeddedAdvance += embeddedFont->GetAdvanceWidth(glyphId);
+            if (glyphId != std::numeric_limits<std::uint16_t>::max()) {
+                totalEmbeddedAdvance += static_cast<double>(embeddedFont->GetAdvanceWidth(glyphId)) +
+                    embeddedFont->GetGlyphAdvanceAdjustment(glyphId);
+            }
         }
     }
     double embeddedAdvance = 0.0;
@@ -559,7 +561,8 @@ void DrawTextChunk(PdfBitmap& bitmap, const PdfTextChunk& chunk,
         if (embeddedFont && characterIndex < chunk.glyphIds.size() &&
             chunk.glyphIds[characterIndex] != std::numeric_limits<std::uint16_t>::max()) {
             const double glyphAdvance = totalEmbeddedAdvance > 0.0
-                ? width * embeddedFont->GetAdvanceWidth(chunk.glyphIds[characterIndex]) /
+                ? width * (static_cast<double>(embeddedFont->GetAdvanceWidth(chunk.glyphIds[characterIndex])) +
+                    embeddedFont->GetGlyphAdvanceAdjustment(chunk.glyphIds[characterIndex])) /
                     totalEmbeddedAdvance : cellWidth;
             bool outlineRendered = false;
             try {
