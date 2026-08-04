@@ -116,6 +116,37 @@ PdfCanvas& PdfCanvas::FillRectangle(double x,double y,double w,double h){return 
 PdfCanvas& PdfCanvas::Stroke(){Append("S\n");return *this;} PdfCanvas& PdfCanvas::Fill(){Append("f\n");return *this;}
 PdfCanvas& PdfCanvas::FillEvenOdd(){Append("f*\n");return *this;} PdfCanvas& PdfCanvas::FillStroke(){Append("B\n");return *this;} PdfCanvas& PdfCanvas::FillStrokeEvenOdd(){Append("B*\n");return *this;}
 PdfCanvas& PdfCanvas::Clip(){Append("W\n");return *this;} PdfCanvas& PdfCanvas::ClipEvenOdd(){Append("W*\n");return *this;} PdfCanvas& PdfCanvas::EndPath(){Append("n\n");return *this;}
+PdfCanvas& PdfCanvas::SetLineDash(std::span<const double> pattern,double phase){
+    if(pattern.empty()){Append("[] 0 d\n");return *this;}
+    std::string out="[";
+    for(std::size_t i=0;i<pattern.size();++i){out+=number(pattern[i]);if(i+1U<pattern.size())out+=" ";}
+    out+="] "+number(phase)+" d\n";
+    Append(out);return *this;
+}
+PdfCanvas& PdfCanvas::DrawPolyline(std::span<const PdfPoint> points){
+    if(points.size()<2U)throw std::invalid_argument("Polyline requires at least two points.");
+    MoveTo(points[0].x,points[0].y);
+    for(std::size_t i=1U;i<points.size();++i)LineTo(points[i].x,points[i].y);
+    return Stroke();
+}
+PdfCanvas& PdfCanvas::DrawPolygon(std::span<const PdfPoint> points){
+    if(points.size()<3U)throw std::invalid_argument("Polygon requires at least three points.");
+    MoveTo(points[0].x,points[0].y);
+    for(std::size_t i=1U;i<points.size();++i)LineTo(points[i].x,points[i].y);
+    return ClosePath().Stroke();
+}
+PdfCanvas& PdfCanvas::FillPolygon(std::span<const PdfPoint> points){
+    if(points.size()<3U)throw std::invalid_argument("Polygon requires at least three points.");
+    MoveTo(points[0].x,points[0].y);
+    for(std::size_t i=1U;i<points.size();++i)LineTo(points[i].x,points[i].y);
+    return ClosePath().Fill();
+}
+PdfCanvas& PdfCanvas::DrawBezier(double x0,double y0,double cx1,double cy1,double cx2,double cy2,double x1,double y1){
+    return MoveTo(x0,y0).CurveTo(cx1,cy1,cx2,cy2,x1,y1).Stroke();
+}
+PdfCanvas& PdfCanvas::FillBezier(double x0,double y0,double cx1,double cy1,double cx2,double cy2,double x1,double y1){
+    return MoveTo(x0,y0).CurveTo(cx1,cy1,cx2,cy2,x1,y1).Fill();
+}
 PdfCanvas& PdfCanvas::BeginText(){Append("BT\n");return *this;}
 PdfCanvas& PdfCanvas::SetFontAndSize(std::string font,double size){ if(!font.empty()&&font.front()=='/')font.erase(font.begin()); auto& page=state_->pages[pageIndex_]; page.fontName=std::move(font); page.currentFontSize=size; page.activeEmbeddedFontIndex.reset(); Append("/F1 "+number(size)+" Tf\n");return *this;}
 PdfCanvas& PdfCanvas::SetTrueTypeFontAndSize(const PdfTrueTypeFont& font,double size){

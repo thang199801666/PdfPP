@@ -1067,7 +1067,33 @@ void TestCffFontEmbedding() {
     std::filesystem::remove(output);
 }
 
-void TestTaggedPdf() {    const auto output = TempPath("pdfpp_feature_tagged.pdf");
+void TestPolygonAndBezierPaths() {
+    const auto output = TempPath("pdfpp_feature_paths.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 200, 200});
+    auto canvas = writer.GetCanvas(page);
+    const std::vector<PdfPoint> triangle{{10, 10}, {100, 10}, {55, 90}};
+    const double dashPattern[] = {4.0, 2.0};
+    canvas.SetLineWidth(2.0).SetLineCap(PdfLineCap::Round).SetLineJoin(PdfLineJoin::Round);
+    canvas.SetLineDash(dashPattern, 0.0);
+    canvas.FillPolygon(triangle);
+    canvas.DrawPolygon(triangle);
+    canvas.DrawBezier(10, 10, 50, 100, 100, -50, 150, 60);
+    canvas.SaveState().EndPath().RestoreState();
+    writer.Save(output);
+    auto document = PdfDocument::Open(output);
+    PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+    // The page must render (paths + bezier) without errors.
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0U, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 200U);
+    PDFPP_TEST_CHECK(bitmap.GetHeight() == 200U);
+    std::filesystem::remove(output);
+}
+
+void TestTaggedPdf() {
+    const auto output = TempPath("pdfpp_feature_tagged.pdf");
     PdfWriter writer;
     writer.AddPage({0, 0, 200, 200});
     writer.SetTaggedPdf(true);
@@ -1596,6 +1622,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
     runner.Run("Feature.TaggedPdf", TestTaggedPdf);
+    runner.Run("Feature.PolygonAndBezierPaths", TestPolygonAndBezierPaths);
     runner.Run("Feature.CffFontEmbedding", TestCffFontEmbedding);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);

@@ -8,6 +8,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <cstdint>
 
 namespace CPPPdf {
 namespace Internal { struct PdfWriterState; }
@@ -74,6 +75,18 @@ public:
     PdfCanvas& Clip();
     PdfCanvas& ClipEvenOdd();
     PdfCanvas& EndPath();
+
+    // Path styling.
+    PdfCanvas& SetLineDash(std::span<const double> pattern, double phase = 0.0);
+
+    // Polygon and curve construction. Each call starts a new subpath.
+    PdfCanvas& DrawPolyline(std::span<const PdfPoint> points);
+    PdfCanvas& DrawPolygon(std::span<const PdfPoint> points);
+    PdfCanvas& FillPolygon(std::span<const PdfPoint> points);
+    PdfCanvas& DrawBezier(double x0, double y0, double cx1, double cy1,
+                          double cx2, double cy2, double x1, double y1);
+    PdfCanvas& FillBezier(double x0, double y0, double cx1, double cy1,
+                          double cx2, double cy2, double x1, double y1);
     PdfCanvas& BeginText();
     PdfCanvas& SetFontAndSize(std::string base14Font, double size);
     PdfCanvas& SetTrueTypeFontAndSize(const PdfTrueTypeFont& font, double size);

@@ -1,3 +1,10 @@
+## 0.90.0
+
+- Path construction: `PdfCanvas` gains `SetLineDash`, `DrawPolyline`,
+  `DrawPolygon`, `FillPolygon`, and cubic `DrawBezier`/`FillBezier` helpers.
+- Tests: `Feature.PolygonAndBezierPaths` writes a dashed stroked triangle and
+  bezier curve and verifies the page renders cleanly. All suites green.
+
 ## 0.89.0
 
 - ICC color management: the renderer detects standard sRGB ICC profiles on
