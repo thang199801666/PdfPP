@@ -1,3 +1,11 @@
+## 0.110.0
+
+- Renderer applies GPOS mark-to-mark positioning for stacked diacritics: a
+  mark over another mark is nudged onto the mark anchor (falls back to
+  mark-to-base anchors).
+- Tests: `Feature.TextLayoutAndFallback` exercises the positioning path. All
+  suites green.
+
 ## 0.109.0
 
 - GPOS MarkMarkPos: the TrueType parser reads lookup-type-6 mark-to-mark
