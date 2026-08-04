@@ -87,6 +87,12 @@ public:
                           double cx2, double cy2, double x1, double y1);
     PdfCanvas& FillBezier(double x0, double y0, double cx1, double cy1,
                           double cx2, double cy2, double x1, double y1);
+
+    // Ellipse/circle constructed from two cubic bezier segments (k=0.5523).
+    PdfCanvas& DrawEllipse(double centerX, double centerY, double radiusX, double radiusY);
+    PdfCanvas& FillEllipse(double centerX, double centerY, double radiusX, double radiusY);
+    PdfCanvas& DrawCircle(double centerX, double centerY, double radius);
+    PdfCanvas& FillCircle(double centerX, double centerY, double radius);
     PdfCanvas& BeginText();
     PdfCanvas& SetFontAndSize(std::string base14Font, double size);
     PdfCanvas& SetTrueTypeFontAndSize(const PdfTrueTypeFont& font, double size);

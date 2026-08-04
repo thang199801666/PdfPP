@@ -1,3 +1,11 @@
+## 0.91.0
+
+- Ellipse/circle drawing: `PdfCanvas` gains `DrawEllipse`, `FillEllipse`,
+  `DrawCircle`, and `FillCircle`, built from two cubic bezier segments
+  (k = 0.5523).
+- Tests: `Feature.PolygonAndBezierPaths` adds a stroked circle and filled
+  ellipse and verifies rendering. All suites green.
+
 ## 0.90.0
 
 - Path construction: `PdfCanvas` gains `SetLineDash`, `DrawPolyline`,

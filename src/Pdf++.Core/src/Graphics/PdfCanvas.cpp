@@ -147,6 +147,34 @@ PdfCanvas& PdfCanvas::DrawBezier(double x0,double y0,double cx1,double cy1,doubl
 PdfCanvas& PdfCanvas::FillBezier(double x0,double y0,double cx1,double cy1,double cx2,double cy2,double x1,double y1){
     return MoveTo(x0,y0).CurveTo(cx1,cy1,cx2,cy2,x1,y1).Fill();
 }
+namespace {
+// Constructs a full ellipse path using two cubic beziers (k = 0.5523).
+void AppendEllipsePath(PdfCanvas& canvas, const double cx, const double cy,
+                       const double rx, const double ry) {
+    if (rx <= 0.0 || ry <= 0.0 || !std::isfinite(rx) || !std::isfinite(ry)) {
+        throw std::invalid_argument("Ellipse radii must be positive and finite.");
+    }
+    const double k = 0.5522847498307936;
+    canvas.MoveTo(cx - rx, cy);
+    canvas.CurveTo(cx - rx, cy + k * ry, cx - k * rx, cy + ry, cx, cy + ry);
+    canvas.CurveTo(cx + k * rx, cy + ry, cx + rx, cy + k * ry, cx + rx, cy);
+    canvas.CurveTo(cx + rx, cy - k * ry, cx + k * rx, cy - ry, cx, cy - ry);
+    canvas.CurveTo(cx - k * rx, cy - ry, cx - rx, cy - k * ry, cx - rx, cy);
+    canvas.ClosePath();
+}
+} // namespace
+PdfCanvas& PdfCanvas::DrawEllipse(double centerX,double centerY,double radiusX,double radiusY){
+    AppendEllipsePath(*this,centerX,centerY,radiusX,radiusY);return Stroke();
+}
+PdfCanvas& PdfCanvas::FillEllipse(double centerX,double centerY,double radiusX,double radiusY){
+    AppendEllipsePath(*this,centerX,centerY,radiusX,radiusY);return Fill();
+}
+PdfCanvas& PdfCanvas::DrawCircle(double centerX,double centerY,double radius){
+    return DrawEllipse(centerX,centerY,radius,radius);
+}
+PdfCanvas& PdfCanvas::FillCircle(double centerX,double centerY,double radius){
+    return FillEllipse(centerX,centerY,radius,radius);
+}
 PdfCanvas& PdfCanvas::BeginText(){Append("BT\n");return *this;}
 PdfCanvas& PdfCanvas::SetFontAndSize(std::string font,double size){ if(!font.empty()&&font.front()=='/')font.erase(font.begin()); auto& page=state_->pages[pageIndex_]; page.fontName=std::move(font); page.currentFontSize=size; page.activeEmbeddedFontIndex.reset(); Append("/F1 "+number(size)+" Tf\n");return *this;}
 PdfCanvas& PdfCanvas::SetTrueTypeFontAndSize(const PdfTrueTypeFont& font,double size){

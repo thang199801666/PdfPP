@@ -1079,6 +1079,8 @@ void TestPolygonAndBezierPaths() {
     canvas.FillPolygon(triangle);
     canvas.DrawPolygon(triangle);
     canvas.DrawBezier(10, 10, 50, 100, 100, -50, 150, 60);
+    canvas.DrawCircle(100, 100, 40);
+    canvas.FillEllipse(40, 150, 25, 12);
     canvas.SaveState().EndPath().RestoreState();
     writer.Save(output);
     auto document = PdfDocument::Open(output);
