@@ -1,3 +1,11 @@
+## 0.79.0
+
+- OpenType GSUB ligature substitution: `PdfTrueTypeFont` parses the GSUB
+  LigatureSubst lookups (type 4) and `ApplyLigatures` replaces matched component
+  glyph sequences with the ligature glyph (e.g. fi -> fi ligature).
+- Tests: `Feature.TextLayoutAndFallback` substitutes an f+i pair when the font
+  has GSUB ligatures. All suites green.
+
 ## 0.78.0
 
 - Page duplication: `PdfPageOrganizer::DuplicatePages` appends copies of the

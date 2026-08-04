@@ -161,6 +161,47 @@ PdfTrueTypeFont PdfTrueTypeFont::Parse(std::vector<std::uint8_t> bytes,std::stri
             }
         }
     }
+    if(const auto gsub=tables.find("GSUB");gsub!=tables.end()&&gsub->second.length>=10U){
+        // GSUB header: version, scriptListOffset, featureListOffset, lookupListOffset.
+        const std::size_t gb=gsub->second.offset;
+        const std::uint32_t lookupListOff=Read32(bytes,gb+8U);
+        if(lookupListOff+6U<=gsub->second.length){
+            const std::size_t ll=gb+lookupListOff;
+            const std::uint16_t lookupCount=Read16(bytes,ll);
+            for(std::uint16_t l=0;l<lookupCount;++l){
+                const std::uint16_t lookupOff=Read16(bytes,ll+2U+std::size_t(l)*2U);
+                if(lookupOff==0U||ll+lookupOff+8U>gb+gsub->second.length)continue;
+                const std::size_t lookup=ll+lookupOff;
+                const std::uint16_t lookupType=Read16(bytes,lookup);
+                if(lookupType!=4U)continue; // LigatureSubst
+                const std::uint16_t subCount=Read16(bytes,lookup+4U);
+                for(std::uint16_t s=0;s<subCount;++s){
+                    const std::uint16_t subOff=Read16(bytes,lookup+6U+std::size_t(s)*2U);
+                    if(subOff==0U||lookup+subOff+8U>gb+gsub->second.length)continue;
+                    const std::size_t sub=lookup+subOff;
+                    const std::uint16_t firstGlyph=Read16(bytes,sub);
+                    const std::uint16_t ligCount=Read16(bytes,sub+2U);
+                    for(std::uint16_t lig=0;lig<ligCount;++lig){
+                        const std::size_t at=sub+4U+std::size_t(lig)*2U;
+                        if(at+8U>gb+gsub->second.length)break;
+                        const std::uint16_t ligOff=Read16(bytes,at);
+                        if(ligOff==0U||sub+ligOff+6U>gb+gsub->second.length)continue;
+                        const std::size_t ligEntry=sub+ligOff;
+                        const std::uint16_t ligGlyph=Read16(bytes,ligEntry);
+                        const std::uint16_t compCount=Read16(bytes,ligEntry+2U);
+                        if(compCount<2U||compCount>16U)continue;
+                        PdfTrueTypeFont::LigatureEntry entry;
+                        entry.ligatureGlyph=ligGlyph;
+                        entry.components.push_back(firstGlyph);
+                        for(std::uint16_t c=0;c+1U<compCount;++c){
+                            entry.components.push_back(Read16(bytes,ligEntry+4U+std::size_t(c)*2U));
+                        }
+                        f.ligatures_.push_back(std::move(entry));
+                    }
+                }
+            }
+        }
+    }
     f.bytes_=std::move(bytes);return f;
 }
 const std::string& PdfTrueTypeFont::GetSourceName()const noexcept{return sourceName_;} const std::vector<std::uint8_t>& PdfTrueTypeFont::GetBytes()const noexcept{return bytes_;}
@@ -177,6 +218,36 @@ double PdfTrueTypeFont::GetCachedAdvanceWidth(std::uint16_t gid,double size)cons
 void PdfTrueTypeFont::ClearGlyphCaches() const noexcept { outlineCache_.clear(); outlineLru_.clear(); advanceCache_.clear(); advanceLru_.clear(); kerningCache_.clear(); kerningLru_.clear(); }
 double PdfTrueTypeFont::MeasureTextUtf8(std::string_view text,double size)const{if(size<=0||!std::isfinite(size))throw std::invalid_argument("Font size must be positive and finite.");double w=0;for(auto cp:DecodeUtf8(text)){auto gid=GetGlyphId(cp);if(!gid)throw std::invalid_argument("The TrueType font does not contain a requested Unicode code point.");w+=GetCachedAdvanceWidth(*gid,size);}return w;}
 double PdfTrueTypeFont::GetLineHeight(double size,double spacing)const{if(size<=0||!std::isfinite(size)||spacing<=0||!std::isfinite(spacing))throw std::invalid_argument("Font size and line spacing must be positive and finite.");return double(metrics_.ascent-metrics_.descent+metrics_.lineGap)*size/metrics_.unitsPerEm*spacing;}
+
+std::vector<std::uint16_t> PdfTrueTypeFont::ApplyLigatures(
+    const std::span<const std::uint16_t> glyphs) const {
+    if (ligatures_.empty() || glyphs.empty()) return {glyphs.begin(), glyphs.end()};
+    std::vector<std::uint16_t> result;
+    result.reserve(glyphs.size());
+    std::size_t i = 0U;
+    while (i < glyphs.size()) {
+        bool matched = false;
+        for (const auto& entry : ligatures_) {
+            const std::size_t len = entry.components.size();
+            if (i + len > glyphs.size()) continue;
+            bool allMatch = true;
+            for (std::size_t k = 0U; k < len; ++k) {
+                if (glyphs[i + k] != entry.components[k]) { allMatch = false; break; }
+            }
+            if (allMatch) {
+                result.push_back(entry.ligatureGlyph);
+                i += len;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            result.push_back(glyphs[i]);
+            ++i;
+        }
+    }
+    return result;
+}
 
 double PdfTrueTypeFont::GetKerning(const std::uint16_t left, const std::uint16_t right,
                                    const double size) const {

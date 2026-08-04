@@ -712,6 +712,16 @@ void TestTextLayoutAndFallback() {
             PDFPP_TEST_CHECK(std::abs(kern) < 100.0);
             PDFPP_TEST_CHECK(font.GetCachedKerning(*gidA, *gidV, 100.0) == kern);
         }
+        // Ligature substitution: fi -> fi ligature glyph when the font has GSUB.
+        const auto gidF = font.GetGlyphId(U'f');
+        const auto gidI = font.GetGlyphId(U'i');
+        if (gidF && gidI && font.HasLigatures()) {
+            const std::array<std::uint16_t, 2> pair{*gidF, *gidI};
+            const auto substituted = font.ApplyLigatures(pair);
+            PDFPP_TEST_CHECK(substituted.size() == 1U);
+            PDFPP_TEST_CHECK(substituted[0] != *gidF);
+            PDFPP_TEST_CHECK(font.GetLigatureCount() > 0U);
+        }
         // Fallback: primary font without 'Ω' would fall back; here both fonts
         // support it, so the round trip still works.
         const auto output = TempPath("pdfpp_feature_fallback.pdf");
