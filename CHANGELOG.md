@@ -1,3 +1,11 @@
+## 0.120.0
+
+- Encryption introspection: `PdfDocument::GetEncryptionInfo` exposes the
+  encryption algorithm, permission bits, owner authentication state, and
+  metadata encryption flag.
+- Tests: `Security.PasswordEncryptionRoundTrips` verifies the algorithm for
+  both AES-128 and RC4-128 documents. All suites green.
+
 ## 0.119.0
 
 - Writer crop box: `PdfWriter::SetPageCropBox` emits a page `/CropBox` (empty

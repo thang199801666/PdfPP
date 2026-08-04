@@ -3522,6 +3522,18 @@ std::string PdfDocument::GetPageContentStream(const std::size_t pageIndex) const
     return joinDecodedStreams(contentReferences(pageObject), decoder);
 }
 
+PdfEncryptionInfo PdfDocument::GetEncryptionInfo() const noexcept {
+    PdfEncryptionInfo info;
+    info.encrypted = encryption_ != nullptr;
+    if (encryption_) {
+        info.algorithm = encryption_->Algorithm();
+        info.permissionBits = encryption_->PermissionBits();
+        info.ownerAuthenticated = encryption_->IsOwnerAuthenticated();
+        info.encryptMetadata = encryption_->EncryptMetadata();
+    }
+    return info;
+}
+
 std::string PdfDocument::GetAllPagesText() const {
     std::string all;
     const auto count = pageCount();

@@ -15,6 +15,7 @@
 #include <functional>
 #include <list>
 #include <CPPPdf/IO/PdfReader.hpp>
+#include <CPPPdf/Security/PdfSecurity.hpp>
 #include <CPPPdf/Core/PdfTypes.hpp>
 #include <CPPPdf/Content/PdfContentProcessor.hpp>
 #include <CPPPdf/Rendering/PdfBitmap.hpp>
@@ -59,6 +60,15 @@ struct PdfPageLabelEntry final {
     std::string prefix;
     unsigned int startNumber{1};
 };
+
+// Encryption summary for an encrypted document.
+struct PdfEncryptionInfo final {
+    bool encrypted{};
+    PdfEncryptionAlgorithm algorithm{PdfEncryptionAlgorithm::Aes128};
+    std::int32_t permissionBits{};
+    bool ownerAuthenticated{};
+    bool encryptMetadata{true};
+};
 class PdfDocument final {public:
     PdfDocument();
     ~PdfDocument();
@@ -89,6 +99,8 @@ class PdfDocument final {public:
     [[nodiscard]] std::size_t pageCount() const;
     [[nodiscard]] const std::string& GetTrailerDictionary() const noexcept { return trailerDictionary_; }
     [[nodiscard]] bool IsEncrypted() const noexcept { return encryption_ != nullptr; }
+    // Encryption details (algorithm, permissions) for an encrypted document.
+    [[nodiscard]] PdfEncryptionInfo GetEncryptionInfo() const noexcept;
     [[nodiscard]] bool IsPasswordRequired() const noexcept;
     [[nodiscard]] bool AuthenticatePassword(std::string_view password);
     [[nodiscard]] bool IsOwnerPasswordAuthenticated() const noexcept;

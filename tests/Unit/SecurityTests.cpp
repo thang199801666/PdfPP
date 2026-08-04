@@ -112,6 +112,10 @@ void verifyEncryptedRoundTrip(const PdfEncryptionAlgorithm algorithm, const char
     PDFPP_TEST_CHECK(locked.IsPasswordRequired());
     PDFPP_TEST_CHECK(!locked.AuthenticatePassword("wrong"));
     PDFPP_TEST_CHECK(locked.AuthenticatePassword("reader-pass"));
+    const auto encryptionInfo = locked.GetEncryptionInfo();
+    PDFPP_TEST_CHECK(encryptionInfo.encrypted);
+    PDFPP_TEST_CHECK(encryptionInfo.algorithm == algorithm);
+    PDFPP_TEST_CHECK(!encryptionInfo.ownerAuthenticated);
     PDFPP_TEST_CHECK(!locked.IsPasswordRequired());
     PDFPP_TEST_CHECK(!locked.IsOwnerPasswordAuthenticated());
     PDFPP_TEST_CHECK(locked.GetPageCount() == 1U);
