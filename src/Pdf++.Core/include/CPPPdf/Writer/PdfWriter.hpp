@@ -227,6 +227,11 @@ public:
     void SetCreationDate(std::string creationDate);
     void SetModificationDate(std::string modificationDate);
 
+    // Embeds an XMP metadata packet (built from the document info) as the
+    // catalog /Metadata stream. PDF/A compliance requires one.
+    void SetXmpMetadata(bool enabled = true);
+    [[nodiscard]] bool GetXmpMetadataEnabled() const noexcept;
+
     void SetViewerPreferences(const PdfViewerPreferences& preferences);
     [[nodiscard]] const PdfViewerPreferences& GetViewerPreferences() const noexcept;
     void SetOpenAction(const PdfDestinationOptions& destination);

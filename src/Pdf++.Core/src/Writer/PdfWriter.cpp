@@ -321,7 +321,8 @@ PdfCanvas PdfWriter::GetCanvas(std::size_t i){if(i>=state_->pages.size())throw s
 void PdfWriter::SetDocumentInfo(const PdfDocumentInfo& info) { state_->documentInfo = info; }
 const PdfDocumentInfo& PdfWriter::GetDocumentInfo() const noexcept { return state_->documentInfo; }
 void PdfWriter::SetTitle(std::string value) { state_->documentInfo.title = std::move(value); }
-void PdfWriter::SetAuthor(std::string value) { state_->documentInfo.author = std::move(value); }
+void PdfWriter::SetXmpMetadata(const bool enabled) { state_->writeXmpMetadata = enabled; }
+bool PdfWriter::GetXmpMetadataEnabled() const noexcept { return state_->writeXmpMetadata; }void PdfWriter::SetAuthor(std::string value) { state_->documentInfo.author = std::move(value); }
 void PdfWriter::SetSubject(std::string value) { state_->documentInfo.subject = std::move(value); }
 void PdfWriter::SetKeywords(std::string value) { state_->documentInfo.keywords = std::move(value); }
 void PdfWriter::SetCreator(std::string value) { state_->documentInfo.creator = std::move(value); }
@@ -708,6 +709,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     std::vector<int> ocgIds(state_->ocgs.size()); for(auto& id:ocgIds) id=allocate();
     const int ocPropertiesObject = state_->ocgs.empty() ? 0 : allocate();
     const int structTreeObject = state_->tagged ? allocate() : 0;
+    const int metadataObject = state_->writeXmpMetadata ? allocate() : 0;
     struct EmbeddedIds { int file{}, descriptor{}, cid{}, toUnicode{}, type0{}; };
     std::vector<EmbeddedIds> fontIds(state_->embeddedFonts.size());
     for(auto& ids:fontIds){ ids.file=allocate(); ids.descriptor=allocate(); ids.cid=allocate(); ids.toUnicode=allocate(); ids.type0=allocate(); }
@@ -749,6 +751,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         objects[catalog] += "]";
     }
     if (pageLabelsObject != 0) objects[catalog] += " /PageLabels " + std::to_string(pageLabelsObject) + " 0 R";
+    if (metadataObject != 0) objects[catalog] += " /Metadata " + std::to_string(metadataObject) + " 0 R";
     if (ocPropertiesObject != 0) objects[catalog] += " /OCProperties " + std::to_string(ocPropertiesObject) + " 0 R";
     if (state_->portfolio) {
         objects[catalog] += " /Collection << /Type /Collection /View /" +
@@ -818,6 +821,26 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         appendInfoEntry(infoDictionary, "ModDate", state_->documentInfo.modificationDate);
         infoDictionary << " >>";
         objects[infoObject] = infoDictionary.str();
+    }
+    if (metadataObject != 0) {
+        std::ostringstream xmp;
+        const auto& info = state_->documentInfo;
+        xmp << "<?xpacket begin=\"\xEF\xBB\xBF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n"
+            << "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Pdf++ Core\">\n"
+            << "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+            << "<rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
+            << "xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" "
+            << "xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\">\n";
+        if (!info.title.empty()) xmp << "<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">" << info.title << "</rdf:li></rdf:Alt></dc:title>\n";
+        if (!info.author.empty()) xmp << "<dc:creator><rdf:Seq><rdf:li>" << info.author << "</rdf:li></rdf:Seq></dc:creator>\n";
+        if (!info.subject.empty()) xmp << "<dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">" << info.subject << "</rdf:li></rdf:Alt></dc:description>\n";
+        if (!info.keywords.empty()) xmp << "<dc:subject><rdf:Bag><rdf:li>" << info.keywords << "</rdf:li></rdf:Bag></dc:subject>\n";
+        if (!info.creator.empty()) xmp << "<xmp:CreatorTool>" << info.creator << "</xmp:CreatorTool>\n";
+        if (!info.producer.empty()) xmp << "<pdf:Producer>" << info.producer << "</pdf:Producer>\n";
+        xmp << "</rdf:Description>\n</rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>";
+        const std::string packet = xmp.str();
+        objects[metadataObject] = "<< /Type /Metadata /Subtype /XML /Length " +
+            std::to_string(packet.size()) + " >>\nstream\n" + packet + "\nendstream";
     }
     std::ostringstream kids; for(int id:pageIds)kids<<id<<" 0 R "; objects[pages]="<< /Type /Pages /Count "+std::to_string(pageIds.size())+" /Kids [ "+kids.str()+"] >>";
     if (outlinesObject != 0) {

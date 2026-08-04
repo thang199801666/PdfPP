@@ -106,6 +106,7 @@ struct PdfWriterState {
     PdfViewerPreferences viewerPreferences{};
     std::optional<PdfDestinationOptions> openAction{};
     bool tagged{false};
+    bool writeXmpMetadata{false};
     std::string language;
     std::vector<PdfWriterPageLabel> pageLabels;
     std::vector<PdfWriterPage> pages;

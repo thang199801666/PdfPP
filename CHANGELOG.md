@@ -1,3 +1,10 @@
+## 0.103.0
+
+- XMP metadata: `PdfWriter::SetXmpMetadata` embeds an XMP packet (built from
+  the document info) as the catalog `/Metadata` stream, required for PDF/A.
+- Tests: `API.WriterDocumentInfo` verifies the `/Metadata` object and packet
+  contents. All suites green.
+
 ## 0.102.0
 
 - Content inspection: `PdfDocument::GetPageContentStream` returns a page's
