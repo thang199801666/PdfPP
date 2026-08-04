@@ -1,6 +1,7 @@
 #pragma once
 
 #include <CPPPdf/Core/PdfTypes.hpp>
+#include <CPPPdf/IO/PdfReader.hpp>
 
 #include <cstddef>
 #include <filesystem>
@@ -45,6 +46,13 @@ public:
         const std::filesystem::path& inputPath,
         const std::filesystem::path& outputPath,
         const PdfKeywordHighlightOptions& options);
+
+    // Searches a PDF without modifying it; returns every match with its page
+    // and bounding rectangles.
+    [[nodiscard]] static PdfKeywordHighlightResult FindMatches(
+        const std::filesystem::path& inputPath,
+        const PdfKeywordHighlightOptions& options,
+        const PdfReaderOptions& readerOptions = {});
 };
 
 } // namespace CPPPdf

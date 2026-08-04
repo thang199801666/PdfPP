@@ -1,3 +1,11 @@
+## 0.94.0
+
+- Keyword search without modification: `PdfKeywordHighlighter::FindMatches`
+  locates every occurrence of a keyword and returns page indices and bounding
+  rectangles without writing a highlighted copy.
+- Tests: `API.AnnotationsAndHighlight` asserts the search finds the same two
+  matches as highlighting, without touching the input. All suites green.
+
 ## 0.93.0
 
 - PNG output: `PdfBitmap::SavePng` writes a true-color RGBA PNG (IHDR/IDAT/IEND,

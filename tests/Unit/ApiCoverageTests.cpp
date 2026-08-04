@@ -412,6 +412,11 @@ void TestAnnotationsAndHighlight(const std::filesystem::path& base) {
     const auto highlighted = TempPath("pdfpp_api_highlighted.pdf");
     const auto highlightResult = PdfKeywordHighlighter::HighlightFile(base, highlighted, highlight);
     PDFPP_TEST_CHECK(highlightResult.MatchCount() == 2);
+    // FindMatches searches without writing a new file.
+    const auto findMatches = PdfKeywordHighlighter::FindMatches(base, highlight);
+    PDFPP_TEST_CHECK(findMatches.MatchCount() == 2);
+    PDFPP_TEST_CHECK(findMatches.matches[0].pageIndex == 0);
+    PDFPP_TEST_CHECK(!findMatches.matches[0].rectangle.empty());
     ExpectThrows([&] {
         PdfKeywordHighlightOptions empty;
         (void)PdfKeywordHighlighter::HighlightFile(base, highlighted, empty);
@@ -977,7 +982,7 @@ void TestUnicodeTrueTypeWriting() {
 
 void TestPublicApiArchitecture() {
     static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 93U);
+    static_assert(CPPPdf::VersionMinor == 94U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -987,7 +992,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.93.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.94.0");
 }
 
 int RunApiCoverageTests() {

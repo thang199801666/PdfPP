@@ -216,11 +216,25 @@ void writeXrefEntry(std::ostream& output, const std::uint64_t offset, const std:
 
 } // namespace
 
+PdfKeywordHighlightResult PdfKeywordHighlighter::FindMatches(
+    const std::filesystem::path& inputPath,
+    const PdfKeywordHighlightOptions& options,
+    const PdfReaderOptions& readerOptions) {
+    PdfDocument document = PdfDocument::Open(inputPath, readerOptions);
+    if (document.IsEncrypted()) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Keyword search does not support encrypted PDFs yet.");
+    }
+    PdfKeywordHighlightResult result;
+    result.outputPath = inputPath;
+    result.matches = findMatches(document, options);
+    return result;
+}
+
 PdfKeywordHighlightResult PdfKeywordHighlighter::HighlightFile(
     const std::filesystem::path& inputPath,
     const std::filesystem::path& outputPath,
-    const PdfKeywordHighlightOptions& options) {
-    PdfDocument document = PdfDocument::Open(inputPath);
+    const PdfKeywordHighlightOptions& options) {    PdfDocument document = PdfDocument::Open(inputPath);
     if (document.IsEncrypted()) {
         throw PdfException(PdfErrorCode::UnsupportedFeature,
                            "Incremental keyword highlighting does not support encrypted PDFs yet.");
