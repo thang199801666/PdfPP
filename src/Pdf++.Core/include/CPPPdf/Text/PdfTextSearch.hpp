@@ -15,6 +15,7 @@ struct PdfTextSearchOptions final {
     bool caseInsensitive{true};
     bool ignoreAccents{false};
     bool allowAcrossLineBreaks{false};
+    std::size_t maxMatches{}; // Zero means unlimited.
     double lineTolerance{2.0};
     double maxHorizontalGap{6.0};
 };

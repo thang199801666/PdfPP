@@ -175,6 +175,7 @@ std::vector<PdfTextSearchMatch> PdfTextSearchIndex::Find(
         }
         auto match = impl_->createMatch(found, end);
         if (!match.rectangles.empty()) matches.push_back(std::move(match));
+        if (options.maxMatches != 0U && matches.size() >= options.maxMatches) break;
         searchOffset = found + std::max<std::size_t>(1U, needle.size());
     }
     return matches;

@@ -1,3 +1,10 @@
+## 0.140.0
+
+- Match limit: `PdfTextSearchOptions::maxMatches` caps literal search results
+  (zero = unlimited), matching the regex option.
+- Tests: `API.TextSearch` limits a repeated-letter search to one match. All
+  suites green.
+
 ## 0.139.0
 
 - Canvas text measurement: `PdfCanvas::MeasureTextUtf8` returns the advance
