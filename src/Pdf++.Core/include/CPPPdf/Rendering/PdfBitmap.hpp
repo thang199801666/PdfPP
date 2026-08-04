@@ -76,6 +76,15 @@ public:
     // True when every pixel has full alpha.
     [[nodiscard]] bool HasTransparency() const noexcept;
 
+    // Drawing helpers that mutate the bitmap in place.
+    void FillRectangle(std::int32_t x, std::int32_t y,
+                       std::int32_t width, std::int32_t height, PdfRgbaColor color);
+    void DrawRectangle(std::int32_t x, std::int32_t y,
+                       std::int32_t width, std::int32_t height,
+                       PdfRgbaColor color, std::uint8_t thickness = 1U);
+    void DrawLine(std::int32_t x0, std::int32_t y0,
+                  std::int32_t x1, std::int32_t y1, PdfRgbaColor color);
+
 private:
     std::size_t width_{};
     std::size_t height_{};

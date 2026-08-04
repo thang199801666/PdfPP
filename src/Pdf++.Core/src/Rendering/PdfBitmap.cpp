@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <vector>
@@ -477,6 +478,52 @@ bool PdfBitmap::HasTransparency() const noexcept {
         if (ToByte(pixels_[offset]) < 255U) return true;
     }
     return false;
+}
+
+void PdfBitmap::FillRectangle(const std::int32_t x, const std::int32_t y,
+                              const std::int32_t width, const std::int32_t height,
+                              const PdfRgbaColor color) {
+    if (width_ == 0U || height_ == 0U || width <= 0 || height <= 0) return;
+    const std::int32_t endX = std::min<std::int32_t>(static_cast<std::int32_t>(width_), x + width);
+    const std::int32_t endY = std::min<std::int32_t>(static_cast<std::int32_t>(height_), y + height);
+    for (std::int32_t row = std::max<std::int32_t>(0, y); row < endY; ++row) {
+        for (std::int32_t col = std::max<std::int32_t>(0, x); col < endX; ++col) {
+            BlendPixelInBounds(static_cast<std::size_t>(col), static_cast<std::size_t>(row), color);
+        }
+    }
+}
+
+void PdfBitmap::DrawRectangle(const std::int32_t x, const std::int32_t y,
+                              const std::int32_t width, const std::int32_t height,
+                              const PdfRgbaColor color, const std::uint8_t thickness) {
+    if (thickness == 0U) return;
+    const std::int32_t t = thickness;
+    FillRectangle(x, y, width, t, color);
+    FillRectangle(x, y + height - t, width, t, color);
+    FillRectangle(x, y + t, t, height - 2 * t, color);
+    FillRectangle(x + width - t, y + t, t, height - 2 * t, color);
+}
+
+void PdfBitmap::DrawLine(const std::int32_t x0, const std::int32_t y0,
+                         const std::int32_t x1, const std::int32_t y1,
+                         const PdfRgbaColor color) {
+    // Bresenham's line algorithm.
+    const std::int32_t dx = std::abs(x1 - x0);
+    const std::int32_t dy = -std::abs(y1 - y0);
+    const std::int32_t sx = x0 < x1 ? 1 : -1;
+    const std::int32_t sy = y0 < y1 ? 1 : -1;
+    std::int32_t error = dx + dy;
+    std::int32_t x = x0;
+    std::int32_t y = y0;
+    for (;;) {
+        if (x >= 0 && y >= 0 && static_cast<std::size_t>(x) < width_ && static_cast<std::size_t>(y) < height_) {
+            BlendPixelInBounds(static_cast<std::size_t>(x), static_cast<std::size_t>(y), color);
+        }
+        if (x == x1 && y == y1) break;
+        const std::int32_t e2 = 2 * error;
+        if (e2 >= dy) { error += dy; x += sx; }
+        if (e2 <= dx) { error += dx; y += sy; }
+    }
 }
 
 } // namespace CPPPdf

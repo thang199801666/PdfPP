@@ -1211,6 +1211,15 @@ void TestPngOutput() {
     const auto grayPixel = gray.GetPixel(20U, 15U);
     PDFPP_TEST_CHECK(grayPixel.red == grayPixel.green && grayPixel.green == grayPixel.blue);
     PDFPP_TEST_CHECK(!bitmap.HasTransparency());
+    // Direct bitmap drawing: fill, outline, and line.
+    PdfBitmap drawTarget(20U, 20U, PdfRgbaColor::White());
+    const PdfRgbaColor red{255U, 0U, 0U, 255U};
+    drawTarget.FillRectangle(2, 2, 6, 6, red);
+    PDFPP_TEST_CHECK(drawTarget.GetPixel(4U, 4U).red > 200U);
+    drawTarget.DrawRectangle(0, 0, 20, 20, red);
+    PDFPP_TEST_CHECK(drawTarget.GetPixel(0U, 0U).red > 200U);
+    drawTarget.DrawLine(0, 0, 19, 19, red);
+    PDFPP_TEST_CHECK(drawTarget.GetPixel(19U, 19U).red > 200U);
     std::filesystem::remove(pdfPath);
     std::filesystem::remove(pngPath);
     std::filesystem::remove(jpegPath);

@@ -1,3 +1,10 @@
+## 0.129.0
+
+- Bitmap drawing: `PdfBitmap::FillRectangle`, `DrawRectangle`, and `DrawLine`
+  (Bresenham) mutate bitmaps in place for borders, highlights, and overlays.
+- Tests: `Feature.PngOutput` verifies filled, outlined, and line pixels. All
+  suites green.
+
 ## 0.128.0
 
 - CFF font metrics: the writer now emits a `/Widths` array for embedded CFF
