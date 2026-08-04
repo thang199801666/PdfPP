@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.111.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.112.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

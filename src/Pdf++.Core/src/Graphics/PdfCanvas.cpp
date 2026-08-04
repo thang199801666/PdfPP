@@ -286,6 +286,11 @@ PdfCanvas& PdfCanvas::ShowTextVertical(std::string utf8Text) {
 }
 PdfCanvas& PdfCanvas::SetTextMatrix(double a,double b,double c,double d,double e,double f){Append(number(a)+" "+number(b)+" "+number(c)+" "+number(d)+" "+number(e)+" "+number(f)+" Tm\n");return *this;}
 PdfCanvas& PdfCanvas::MoveText(double x,double y){Append(number(x)+" "+number(y)+" Td\n");return *this;}
+PdfCanvas& PdfCanvas::SetTextLeading(double leading){Append(number(leading)+" TL\n");return *this;}
+PdfCanvas& PdfCanvas::SetTextRise(double rise){Append(number(rise)+" Ts\n");return *this;}
+PdfCanvas& PdfCanvas::SetHorizontalScaling(double scale){if(scale<0)throw std::invalid_argument("Horizontal scaling must be non-negative.");Append(number(scale)+" Tz\n");return *this;}
+PdfCanvas& PdfCanvas::SetCharSpacing(double spacing){Append(number(spacing)+" Tc\n");return *this;}
+PdfCanvas& PdfCanvas::SetWordSpacing(double spacing){Append(number(spacing)+" Tw\n");return *this;}
 PdfCanvas& PdfCanvas::ShowText(std::string text){Append("("+escape(text)+") Tj\n");return *this;}
 PdfCanvas& PdfCanvas::ShowTextUtf8(std::string text){
     auto& page=state_->pages[pageIndex_]; if(!page.activeEmbeddedFontIndex) throw std::logic_error("ShowTextUtf8 requires SetTrueTypeFontAndSize first.");

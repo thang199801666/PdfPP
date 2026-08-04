@@ -1233,6 +1233,38 @@ void TestTilingPatternWrite() {
     std::filesystem::remove(output);
 }
 
+void TestTextStateOperators() {
+    const auto output = TempPath("pdfpp_feature_text_state.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 300, 300});
+    auto canvas = writer.GetCanvas(page);
+    canvas.BeginText()
+        .SetTextLeading(18.0)
+        .SetCharSpacing(0.5)
+        .SetWordSpacing(1.0)
+        .SetHorizontalScaling(110.0)
+        .SetFontAndSize("Helvetica", 14)
+        .SetTextMatrix(1, 0, 0, 1, 30, 250)
+        .MoveText(0, 0)
+        .ShowText("Spaced line")
+        .EndText();
+    canvas.BeginText().SetTextRise(5.0).SetFontAndSize("Helvetica", 14)
+        .MoveText(30, 200).ShowText("Rise").EndText();
+    writer.Save(output);
+    auto document = PdfDocument::Open(output);
+    const std::string content = document.GetPageContentStream(0U);
+    PDFPP_TEST_CHECK(content.find(" TL") != std::string::npos);
+    PDFPP_TEST_CHECK(content.find(" Tc") != std::string::npos);
+    PDFPP_TEST_CHECK(content.find(" Tw") != std::string::npos);
+    PDFPP_TEST_CHECK(content.find(" Tz") != std::string::npos);
+    PDFPP_TEST_CHECK(content.find(" Ts") != std::string::npos);
+    PdfRenderOptions options;
+    options.dpi = 72.0;
+    const auto bitmap = PdfPageRenderer::Render(document, 0U, options);
+    PDFPP_TEST_CHECK(bitmap.GetWidth() == 300U);
+    std::filesystem::remove(output);
+}
+
 void TestTaggedPdf() {
     const auto output = TempPath("pdfpp_feature_tagged.pdf");
     PdfWriter writer;
@@ -1763,6 +1795,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
     runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
     runner.Run("Feature.TaggedPdf", TestTaggedPdf);
+    runner.Run("Feature.TextStateOperators", TestTextStateOperators);
     runner.Run("Feature.TilingPatternWrite", TestTilingPatternWrite);
     runner.Run("Feature.PageContentStream", TestPageContentStream);
     runner.Run("Feature.PngOutput", TestPngOutput);

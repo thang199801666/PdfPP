@@ -110,6 +110,11 @@ public:
     PdfCanvas& SetEmbeddedCffFontAndSize(const PdfCffFont& font, double size);
     PdfCanvas& SetTextMatrix(double a, double b, double c, double d, double e, double f);
     PdfCanvas& MoveText(double x, double y);
+    PdfCanvas& SetTextLeading(double leading);
+    PdfCanvas& SetTextRise(double rise);
+    PdfCanvas& SetHorizontalScaling(double scale);
+    PdfCanvas& SetCharSpacing(double spacing);
+    PdfCanvas& SetWordSpacing(double spacing);
     PdfCanvas& ShowText(std::string text);
     PdfCanvas& ShowTextUtf8(std::string utf8Text);
     // Shows UTF-8 text using the active font and, when a code point is missing,

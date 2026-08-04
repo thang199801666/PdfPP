@@ -1,3 +1,10 @@
+## 0.112.0
+
+- Text state operators: `PdfCanvas` gains `SetTextLeading`, `SetTextRise`,
+  `SetHorizontalScaling`, `SetCharSpacing`, and `SetWordSpacing`.
+- Tests: `Feature.TextStateOperators` writes and renders text using all five
+  operators. All suites green.
+
 ## 0.111.0
 
 - GPOS PairPosFormat2 (class-based kerning): the TrueType parser now reads
