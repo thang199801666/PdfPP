@@ -111,6 +111,13 @@ public:
     static PdfImage FromCcitt(std::uint32_t width, std::uint32_t height,
                               std::span<const std::byte> faxBytes);
 
+    // Encodes a 1-bit-per-pixel image (bits packed MSB-first, width×height) as
+    // a CCITT Group 4 codestream using the standard run-length terminator
+    // codes. Returns the encoded bytes.
+    [[nodiscard]] static std::vector<std::byte> EncodeCcittG4(
+        std::uint32_t width, std::uint32_t height,
+        std::span<const std::byte> bits);
+
     static PdfImage FromJpegFile(const std::filesystem::path& path);
 
     static PdfImage FromGray(

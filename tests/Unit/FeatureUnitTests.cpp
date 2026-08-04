@@ -863,6 +863,11 @@ void TestJpxImageWrite() {
     PDFPP_TEST_CHECK(!images.empty());
     PDFPP_TEST_CHECK(images[0].info.encoding == PdfImageEncoding::Jpx);
     std::filesystem::remove(output);
+
+    // CCITT G4 encoding produces a non-empty payload for a 1-bit image.
+    const std::vector<std::byte> oneBit{std::byte{0xAA}, std::byte{0x55}};
+    const auto g4 = PdfImage::EncodeCcittG4(16U, 1U, oneBit);
+    PDFPP_TEST_CHECK(!g4.empty());
 }
 
 void TestType1FontEmbedding() {

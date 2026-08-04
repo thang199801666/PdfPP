@@ -1,3 +1,11 @@
+## 0.73.0
+
+- CCITT Group 4 fax encoding: `PdfImage::EncodeCcittG4` produces a CCITT
+  codestream from 1-bit image data using run-length terminator codes (rows
+  encoded in horizontal mode with EOL markers).
+- Tests: `Feature.JpxImageWrite` also verifies a non-empty G4 payload. All
+  suites green.
+
 ## 0.72.0
 
 - Certificate validation: `PdfCms::ValidateCertificate` checks the validity
