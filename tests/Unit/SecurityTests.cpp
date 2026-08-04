@@ -334,6 +334,12 @@ void verifyCertificateInfo() {
     PDFPP_TEST_CHECK(info.selfSigned);
     PDFPP_TEST_CHECK(info.hasValidity);
     PDFPP_TEST_CHECK(info.notAfter > info.notBefore);
+    // Within validity (2024..2035): valid at 2026, self-signed.
+    const auto status = CPPPdf::PdfCms::ValidateCertificate(cert, {}, 1767225600U); // 2026-01-01
+    PDFPP_TEST_CHECK(status == CPPPdf::PdfCms::CertificateStatus::SelfSigned);
+    // After expiry (2040): Expired.
+    const auto expired = CPPPdf::PdfCms::ValidateCertificate(cert, {}, 2208988800U); // 2040-01-01
+    PDFPP_TEST_CHECK(expired == CPPPdf::PdfCms::CertificateStatus::Expired);
 }
 
 void verifyDss() {

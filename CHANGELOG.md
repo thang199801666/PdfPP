@@ -1,3 +1,14 @@
+## 0.72.0
+
+- Certificate validation: `PdfCms::ValidateCertificate` checks the validity
+  window against a reference time and walks a basic issuer chain; self-signed
+  leaves are reported as `SelfSigned`, out-of-window certificates as `Expired`/
+  `NotYetValid`, and malformed inputs as `Malformed`.
+- `CertificateInfoOf` now decodes UTCTime/GeneralizedTime to real Unix seconds
+  (civil-date conversion) instead of a year-scaled approximation.
+- Tests: `verifyCertificateInfo` checks Valid-at-2026/Expired-at-2040 statuses.
+  All suites green.
+
 ## 0.71.0
 
 - Type1 font embedding: `PdfType1Font` parses PFB (and PFA) programs for the

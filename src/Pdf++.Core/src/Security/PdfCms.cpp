@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <ctime>
 #include <string_view>
 
 #if defined(_WIN32)
@@ -17,6 +18,26 @@
 
 namespace CPPPdf {
 namespace {
+
+// Converts a civil (Gregorian) date/time to Unix seconds (Howard Hinnant's
+// days_from_civil). Returns 0 for invalid input.
+std::uint64_t CivilToUnix(const std::uint64_t year, const std::uint64_t month,
+                          const std::uint64_t day, const std::uint64_t hour,
+                          const std::uint64_t minute, const std::uint64_t second) {
+    if (month < 1U || month > 12U || day < 1U || day > 31U ||
+        hour > 23U || minute > 59U || second > 60U) {
+        return 0U;
+    }
+    const std::int64_t y = static_cast<std::int64_t>(year) - (static_cast<std::int64_t>(month) <= 2U ? 1 : 0);
+    const std::int64_t era = (y >= 0 ? y : y - 399) / 400;
+    const std::int64_t yoe = y - era * 400;
+    const std::int64_t mp = (static_cast<std::int64_t>(month) + 9U) % 12U;
+    const std::int64_t doy = (153 * mp + 2) / 5 + static_cast<std::int64_t>(day) - 1;
+    const std::int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const std::int64_t days = era * 146097 + doe - 719468;
+    return static_cast<std::uint64_t>(days) * 86400U +
+           hour * 3600U + minute * 60U + second;
+}
 
 // Minimal big-endian bignum for RSA modular exponentiation. Numbers are stored
 // little-endian limbs (base 2^32) for the multiply/divide core and converted
@@ -942,18 +963,21 @@ PdfCms::CertificateInfo PdfCms::CertificateInfoOf(
             return out;
         };
         if (value[0] == '2' && value.size() >= 15U) { // GeneralizedTime YYYYMMDD
-            std::uint64_t year = digits(0, 4);
-            std::uint64_t month = digits(4, 2);
-            std::uint64_t day = digits(6, 2);
-            std::uint64_t hour = digits(8, 2);
-            std::uint64_t minute = digits(10, 2);
-            std::uint64_t second = digits(12, 2);
-            (void)month; (void)day; (void)hour; (void)minute;
-            return year * 365U * 86400U + second;
+            const std::uint64_t year = digits(0, 4);
+            const std::uint64_t month = digits(4, 2);
+            const std::uint64_t day = digits(6, 2);
+            const std::uint64_t hour = digits(8, 2);
+            const std::uint64_t minute = digits(10, 2);
+            const std::uint64_t second = digits(12, 2);
+            return CivilToUnix(year, month, day, hour, minute, second);
         }
-        std::uint64_t year = 2000U + digits(0, 2); // UTCTime YYMMDD
-        std::uint64_t second = digits(10, 2);
-        return year * 365U * 86400U + second;
+        const std::uint64_t year = 2000U + digits(0, 2); // UTCTime YYMMDD
+        const std::uint64_t month = digits(2, 2);
+        const std::uint64_t day = digits(4, 2);
+        const std::uint64_t hour = digits(6, 2);
+        const std::uint64_t minute = digits(8, 2);
+        const std::uint64_t second = digits(10, 2);
+        return CivilToUnix(year, month, day, hour, minute, second);
     };
     const auto findName = [](std::span<const std::uint8_t> name, std::string& out) {
         // Name ::= SEQUENCE OF RelativeDistinguishedName (SET OF AttributeTypeAndValue)
@@ -1012,6 +1036,32 @@ PdfCms::CertificateInfo PdfCms::CertificateInfoOf(
     findName(element, info.subject);
     info.selfSigned = info.subject == info.issuer && !info.subject.empty();
     return info;
+}
+
+PdfCms::CertificateStatus PdfCms::ValidateCertificate(
+    const std::span<const std::uint8_t> certificateDer,
+    const std::span<const std::span<const std::uint8_t>> chain,
+    const std::uint64_t nowSeconds) {
+    const auto now = nowSeconds != 0U ? nowSeconds :
+        static_cast<std::uint64_t>(std::time(nullptr));
+    const auto info = CertificateInfoOf(certificateDer);
+    if (!info.hasValidity) return CertificateStatus::Malformed;
+    if (info.notAfter != 0U && now > info.notAfter) return CertificateStatus::Expired;
+    if (info.notBefore != 0U && now < info.notBefore) return CertificateStatus::NotYetValid;
+    // Self-signed leaf with no issuer chain: valid, but a CA is not established.
+    if (info.selfSigned && chain.empty()) return CertificateStatus::SelfSigned;
+    // Verify that each chain issuer's subject matches the previous cert's issuer
+    // (a basic chain walk; full signature verification is future work).
+    std::string expectedIssuer = info.issuer;
+    for (const auto& issuerCert : chain) {
+        const auto issuerInfo = CertificateInfoOf(issuerCert);
+        if (!expectedIssuer.empty() && issuerInfo.subject != expectedIssuer) {
+            return CertificateStatus::Malformed;
+        }
+        if (issuerInfo.notAfter != 0U && now > issuerInfo.notAfter) return CertificateStatus::Expired;
+        expectedIssuer = issuerInfo.issuer;
+    }
+    return CertificateStatus::Valid;
 }
 
 } // namespace CPPPdf

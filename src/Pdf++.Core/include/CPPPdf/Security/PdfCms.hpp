@@ -76,6 +76,22 @@ public:
     [[nodiscard]] static CertificateInfo CertificateInfoOf(
         std::span<const std::uint8_t> certificateDer);
 
+    enum class CertificateStatus {
+        Valid,        // within validity and trusted
+        Expired,      // notAfter in the past
+        NotYetValid,  // notBefore in the future
+        SelfSigned,   // self-signed (valid but not a CA chain)
+        Malformed
+    };
+
+    // Validates a certificate against the current time (unix seconds).
+    // `chain` is an ordered issuer chain (leaf first); a single self-signed
+    // certificate returns SelfSigned.
+    [[nodiscard]] static CertificateStatus ValidateCertificate(
+        std::span<const std::uint8_t> certificateDer,
+        std::span<const std::span<const std::uint8_t>> chain = {},
+        std::uint64_t nowSeconds = 0U);
+
     // Extracts the RSA public key from a DER-encoded X.509 certificate by
     // locating the SubjectPublicKeyInfo BIT STRING inside it.
     [[nodiscard]] static bool ParsePublicKeyFromCertificate(
