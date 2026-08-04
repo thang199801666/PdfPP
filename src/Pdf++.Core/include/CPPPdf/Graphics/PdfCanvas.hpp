@@ -3,6 +3,7 @@
 #include <CPPPdf/Graphics/PdfImage.hpp>
 #include <CPPPdf/Rendering/PdfBitmap.hpp>
 #include <CPPPdf/Fonts/PdfTrueTypeFont.hpp>
+#include <CPPPdf/Fonts/PdfType1Font.hpp>
 #include <memory>
 #include <span>
 #include <string>
@@ -76,6 +77,11 @@ public:
     PdfCanvas& SetFontAndSize(std::string base14Font, double size);
     PdfCanvas& SetTrueTypeFontAndSize(const PdfTrueTypeFont& font, double size);
     [[nodiscard]] double GetCurrentFontSize() const noexcept;
+    // Selects an embedded Type1 font for subsequent text. The font program is
+    // stored in the document and written as a /FontFile stream.
+    PdfCanvas& SetType1FontAndSize(const PdfType1Font& font, double size);
+    // Shows Latin-1 text using the active Type1 font.
+    PdfCanvas& ShowType1Text(std::string latin1Text);
     PdfCanvas& SetTextMatrix(double a, double b, double c, double d, double e, double f);
     PdfCanvas& MoveText(double x, double y);
     PdfCanvas& ShowText(std::string text);

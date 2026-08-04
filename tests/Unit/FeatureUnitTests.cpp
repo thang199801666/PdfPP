@@ -865,6 +865,48 @@ void TestJpxImageWrite() {
     std::filesystem::remove(output);
 }
 
+void TestType1FontEmbedding() {
+    // Build a minimal PFB: segment header + ASCII Type1 program with /FontName.
+    std::vector<std::byte> pfb;
+    const std::string program =
+        "%!FontType1-1.0: TestType1 001.000\n"
+        "/FontName /TestType1 def\n"
+        "/FontType 1 def\n"
+        "/PaintType 0 def\n"
+        "/FontMatrix [0.001 0 0 0.001 0 0] readonly def\n";
+    pfb.push_back(std::byte{0x80}); pfb.push_back(std::byte{1});
+    const std::uint32_t len = static_cast<std::uint32_t>(program.size());
+    pfb.push_back(static_cast<std::byte>(len & 0xFFU));
+    pfb.push_back(static_cast<std::byte>((len >> 8) & 0xFFU));
+    pfb.push_back(static_cast<std::byte>((len >> 16) & 0xFFU));
+    pfb.push_back(static_cast<std::byte>((len >> 24) & 0xFFU));
+    for (const char c : program) pfb.push_back(static_cast<std::byte>(c));
+    // End segment.
+    pfb.push_back(std::byte{0x80}); pfb.push_back(std::byte{3});
+    pfb.push_back(std::byte{0}); pfb.push_back(std::byte{0});
+    pfb.push_back(std::byte{0}); pfb.push_back(std::byte{0});
+
+    std::vector<std::uint8_t> pfbBytes(pfb.size());
+    for (std::size_t i = 0; i < pfb.size(); ++i) pfbBytes[i] = std::to_integer<std::uint8_t>(pfb[i]);
+    const auto font = PdfType1Font::Parse(std::move(pfbBytes), "test.pfb");
+    PDFPP_TEST_CHECK(font.GetFontName() == "TestType1");
+    PDFPP_TEST_CHECK(font.GetGlyphWidth('A') > 0U);
+
+    const auto output = TempPath("pdfpp_feature_type1.pdf");
+    PdfWriter writer;
+    const auto page = writer.AddPage({0, 0, 200, 200});
+    writer.GetCanvas(page).BeginText().SetType1FontAndSize(font, 12)
+        .MoveText(20, 150).ShowType1Text("Type1 text").EndText();
+    writer.Save(output);
+    const std::string bytes = ReadText(output);
+    PDFPP_TEST_CHECK(bytes.find("/Subtype /Type1") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/FontFile") != std::string::npos);
+    PDFPP_TEST_CHECK(bytes.find("/WinAnsiEncoding") != std::string::npos);
+    auto document = PdfDocument::Open(output);
+    PDFPP_TEST_CHECK(document.GetPageCount() == 1U);
+    std::filesystem::remove(output);
+}
+
 void TestPortfolio() {
     const auto output = TempPath("pdfpp_feature_portfolio.pdf");
     PdfWriter writer;
@@ -1370,6 +1412,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.Redaction", TestRedaction);
     runner.Run("Feature.ParallelRendering", TestParallelRendering);
     runner.Run("Feature.JpxImageWrite", TestJpxImageWrite);
+    runner.Run("Feature.Type1FontEmbedding", TestType1FontEmbedding);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);
     runner.Run("Feature.DocumentTextIndexMappedInputAndStreamWriter", TestDocumentTextIndexMappedInputAndStreamWriter);
     return runner.PrintSummary("Feature unit tests");

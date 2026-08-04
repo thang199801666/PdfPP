@@ -1,3 +1,13 @@
+## 0.71.0
+
+- Type1 font embedding: `PdfType1Font` parses PFB (and PFA) programs for the
+  font name and standard 256-character widths, and `PdfCanvas::SetType1FontAndSize`/
+  `ShowType1Text` write an embedded `/Subtype /Type1` font with a `/FontFile`
+  stream, `/WinAnsiEncoding`, and a `/Widths` array.
+- Tests: `Feature.Type1FontEmbedding` builds a minimal PFB, embeds it, and
+  verifies the `/Type1`, `/FontFile`, and `/WinAnsiEncoding` output. All suites
+  green (31 feature subtests).
+
 ## 0.70.0
 
 - Fixed `PdfCms::CertificateInfoOf`: the tbsCertificate walker read the

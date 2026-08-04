@@ -132,6 +132,33 @@ double PdfCanvas::GetCurrentFontSize() const noexcept {
     return state_->pages[pageIndex_].currentFontSize;
 }
 
+PdfCanvas& PdfCanvas::SetType1FontAndSize(const PdfType1Font& font, const double size) {
+    if (size <= 0.0 || !std::isfinite(size)) throw std::invalid_argument("Font size must be positive and finite.");
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    std::size_t index = state_->type1Fonts.size();
+    for (std::size_t i = 0; i < state_->type1Fonts.size(); ++i) {
+        if (state_->type1Fonts[i].font.GetBytes() == font.GetBytes()) { index = i; break; }
+    }
+    if (index == state_->type1Fonts.size()) {
+        state_->type1Fonts.push_back({font, "T1" + std::to_string(index + 1U)});
+    }
+    auto& page = state_->pages[pageIndex_];
+    page.activeType1FontIndex = index;
+    page.currentFontSize = size;
+    if (std::find(page.type1FontIndices.begin(), page.type1FontIndices.end(), index) == page.type1FontIndices.end()) {
+        page.type1FontIndices.push_back(index);
+    }
+    Append("/" + state_->type1Fonts[index].resourceName + " " + number(size) + " Tf\n");
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::ShowType1Text(std::string latin1Text) {
+    auto& page = state_->pages[pageIndex_];
+    if (!page.activeType1FontIndex) throw std::logic_error("ShowType1Text requires SetType1FontAndSize first.");
+    Append("(" + escape(latin1Text) + ") Tj\n");
+    return *this;
+}
+
 PdfCanvas& PdfCanvas::SetVerticalWriting(const bool vertical) {
     if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
     auto& page = state_->pages[pageIndex_];

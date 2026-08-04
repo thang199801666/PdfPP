@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PdfPP VERSION 0.70.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
+project(PdfPP VERSION 0.71.0 DESCRIPTION "Modern C++20 PDF library" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -48,6 +48,7 @@ set(PDFPP_PUBLIC_HEADERS
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfFont.hpp
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfFontResource.hpp
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfTrueTypeFont.hpp
+src/Pdf++.Core/include/CPPPdf/Fonts/PdfType1Font.hpp
     src/Pdf++.Core/include/CPPPdf/Fonts/PdfCff.hpp
     src/Pdf++.Core/include/CPPPdf/Content/PdfContentProcessor.hpp
     src/Pdf++.Core/include/CPPPdf/Writer/PdfWriter.hpp
@@ -98,6 +99,7 @@ src/Pdf++.Core/src/Document/PdfRedactor.cpp
     src/Pdf++.Core/src/Fonts/PdfFont.cpp
     src/Pdf++.Core/src/Fonts/PdfFontResource.cpp
     src/Pdf++.Core/src/Fonts/PdfTrueTypeFont.cpp
+src/Pdf++.Core/src/Fonts/PdfType1Font.cpp
     src/Pdf++.Core/src/Fonts/PdfCff.cpp
     src/Pdf++.Core/src/Content/PdfContentProcessor.cpp
     src/Pdf++.Core/src/Writer/PdfWriter.cpp

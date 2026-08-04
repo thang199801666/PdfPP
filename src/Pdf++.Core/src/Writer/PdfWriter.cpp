@@ -691,6 +691,12 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     struct EmbeddedIds { int file{}, descriptor{}, cid{}, toUnicode{}, type0{}; };
     std::vector<EmbeddedIds> fontIds(state_->embeddedFonts.size());
     for(auto& ids:fontIds){ ids.file=allocate(); ids.descriptor=allocate(); ids.cid=allocate(); ids.toUnicode=allocate(); ids.type0=allocate(); }
+    std::vector<int> type1Ids(state_->type1Fonts.size());
+    std::vector<int> type1FileIds(state_->type1Fonts.size());
+    std::vector<int> type1DescIds(state_->type1Fonts.size());
+    for (auto& id : type1Ids) id = allocate();
+    for (auto& id : type1FileIds) id = allocate();
+    for (auto& id : type1DescIds) id = allocate();
     std::vector<int> pageIds,contentIds; for(std::size_t i=0;i<state_->pages.size();++i){pageIds.push_back(allocate());contentIds.push_back(allocate());}
     std::vector<std::vector<int>> linkIds(state_->pages.size());
     std::vector<std::vector<int>> attachmentIds(state_->pages.size());
@@ -957,6 +963,24 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
         cmap<<"endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"; const auto cm=cmap.str(); objects[ids.toUnicode]="<< /Length "+std::to_string(cm.size())+" >>\nstream\n"+cm+"endstream";
         objects[ids.type0]="<< /Type /Font /Subtype /Type0 /BaseFont /"+base+" /Encoding /Identity-H /DescendantFonts ["+std::to_string(ids.cid)+" 0 R] /ToUnicode "+std::to_string(ids.toUnicode)+" 0 R >>";
     }
+    for (std::size_t i = 0; i < state_->type1Fonts.size(); ++i) {
+        const auto& t1 = state_->type1Fonts[i].font;
+        const std::string base = t1.GetFontName().empty() ? "PdfPPType1" : t1.GetFontName();
+        const auto& raw = t1.GetBytes();
+        std::string fontFile(reinterpret_cast<const char*>(raw.data()), raw.size());
+        objects[type1FileIds[i]] = "<< /Length " + std::to_string(fontFile.size()) + " /Length1 "
+            + std::to_string(fontFile.size()) + " >>\nstream\n" + fontFile + "\nendstream";
+        objects[type1DescIds[i]] = "<< /Type /FontDescriptor /FontName /" + base
+            + " /Flags 32 /FontBBox [-123 -251 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 "
+            + "/CapHeight 700 /StemV 80 /FontFile " + std::to_string(type1FileIds[i]) + " 0 R >>";
+        objects[type1Ids[i]] = "<< /Type /Font /Subtype /Type1 /BaseFont /" + base
+            + " /FirstChar 32 /LastChar 255 /Encoding /WinAnsiEncoding /FontDescriptor "
+            + std::to_string(type1DescIds[i]) + " 0 R /Widths [";
+        for (int c = 32; c <= 255; ++c) {
+            objects[type1Ids[i]] += std::to_string(t1.GetGlyphWidth(static_cast<std::uint8_t>(c))) + " ";
+        }
+        objects[type1Ids[i]] += "] >>";
+    }
     for (std::size_t i = 0; i < state_->ocgs.size(); ++i) {
         objects[ocgIds[i]] = "<< /Type /OCG /Name (" + escapePdfString(state_->ocgs[i].name) + ") /Usage << >> >>";
     }
@@ -976,7 +1000,7 @@ void PdfWriter::Save(std::ostream& out, const PdfSaveOptions& options) const {
     }
     for(std::size_t i=0;i<state_->pages.size();++i){
         const auto&p=state_->pages[i];std::ostringstream box;box<<p.mediaBox.left<<' '<<p.mediaBox.bottom<<' '<<p.mediaBox.right<<' '<<p.mediaBox.top;
-        std::ostringstream fonts; fonts<<"/F1 "<<base14Font<<" 0 R "; for(const auto fi:p.embeddedFontIndices)fonts<<'/'<<state_->embeddedFonts.at(fi).resourceName<<' '<<fontIds.at(fi).type0<<" 0 R ";
+        std::ostringstream fonts; fonts<<"/F1 "<<base14Font<<" 0 R "; for(const auto fi:p.embeddedFontIndices)fonts<<'/'<<state_->embeddedFonts.at(fi).resourceName<<' '<<fontIds.at(fi).type0<<" 0 R "; for(const auto ti:p.type1FontIndices)fonts<<'/'<<state_->type1Fonts.at(ti).resourceName<<' '<<type1Ids.at(ti)<<" 0 R ";
         std::ostringstream xObjects;for(const auto ii:p.imageIndices)xObjects<<'/'<<state_->images.at(ii).resourceName<<' '<<imageIds.at(ii)<<" 0 R ";
         std::string resources="<< /Font << "+fonts.str()+">>";if(!p.imageIndices.empty())resources+=" /XObject << "+xObjects.str()+">>";if(!p.extGStateIndices.empty()){std::ostringstream gs;for(const auto gi:p.extGStateIndices)gs<<'/'<<state_->extGStates.at(gi).resourceName<<' '<<extGStateIds.at(gi)<<" 0 R ";resources+=" /ExtGState << "+gs.str()+">>";}if(!p.ocgResources.empty()){std::ostringstream props;props<<" /Properties << ";for(const auto& name:p.ocgResources){const std::size_t index=name.size()>2?static_cast<std::size_t>(std::stoul(name.substr(2)))-1U:0U;if(index<state_->ocgs.size())props<<'/'<<name<<' '<<ocgIds[index]<<" 0 R ";}props<<">>";resources+=props.str();}resources+=" >>";
         std::string annotations;

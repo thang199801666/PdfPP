@@ -48,6 +48,7 @@ secondary scope.
 
 - Add Type1, CFF, CIDFont and OpenType support.
 - Embedded CFF fonts (Type1C, CIDFontType0C, OpenType with CFF outlines) are parsed through charset/CharStrings/Private DICTs, and a bounded Type 2 charstring interpreter produces glyph outlines that the CPU renderer rasterizes with cubic flattening. Identity-encoded CID fonts map character codes to glyphs directly.
+- `PdfType1Font` parses PFB/PFA programs and the writer embeds `/Subtype /Type1` fonts with `/FontFile`, `/WinAnsiEncoding`, and `/Widths`.
 - Improve font fallback, kerning, vertical writing and subsetting.
 - `kern` table parsing with cached kerning pairs, `PdfCanvas::ShowTextUtf8WithFallback` for glyph-coverage fallback across fonts, and vertical writing (`SetVerticalWriting`/`ShowTextVertical`) for top-to-bottom CJK runs.
 - Add Unicode grapheme handling, bidirectional text and complex shaping.
