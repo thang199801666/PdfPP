@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  default:
+    name: Default (GCC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build zlib1g-dev poppler-utils
+      - name: Configure
+        run: cmake -S . -B build/default -G Ninja -DCMAKE_BUILD_TYPE=Release -DPDFPP_BUILD_TESTS=ON -DBUILD_SHARED_LIBS=ON
+      - name: Build
+        run: cmake --build build/default --parallel
+      - name: Test
+        run: ctest --test-dir build/default --output-on-failure
+      - name: Install package
+        run: cmake --install build/default --prefix "$PWD/build/install"
+      - name: Test downstream find_package consumer
+        run: |
+          cmake -S tests/consumer -B build/consumer -G Ninja -DCMAKE_PREFIX_PATH="$PWD/build/install"
+          cmake --build build/consumer --parallel
+          ./build/consumer/pdfpp_consumer
+      - name: Check C ABI
+        run: python3 tools/check_abi.py build/default/libPdfPP.Core.so
+
+  strict:
+    name: Strict (Clang)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build zlib1g-dev poppler-utils
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S . -B build/strict -G Ninja -DCMAKE_BUILD_TYPE=Release -DPDFPP_BUILD_TESTS=ON -DPDFPP_STRICT=ON -DBUILD_SHARED_LIBS=ON
+      - name: Build
+        run: cmake --build build/strict --parallel
+      - name: Test
+        run: ctest --test-dir build/strict --output-on-failure
+
+  asan:
+    name: ASan + UBSan (GCC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build zlib1g-dev poppler-utils
+      - name: Configure
+        run: cmake -S . -B build/asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPDFPP_BUILD_TESTS=ON -DPDFPP_ENABLE_ASAN=ON -DBUILD_SHARED_LIBS=OFF
+      - name: Build
+        run: cmake --build build/asan --parallel
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:check_initialization_order=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir build/asan --output-on-failure
+
+  msvc:
+    name: MSVC
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install zlib
+        shell: pwsh
+        run: '& "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows'
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build/msvc -A x64 -DCMAKE_BUILD_TYPE=Release -DPDFPP_BUILD_TESTS=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+      - name: Build
+        run: cmake --build build/msvc --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build/msvc -C Release --output-on-failure

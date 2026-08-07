@@ -13,7 +13,7 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{6F3B9899-6ECF-4C55-A9A0-36F6B2B76A38}</ProjectGuid>
+    <ProjectGuid>{A6D33D6C-5A4F-4F50-A1EA-2D8C0A4CB9E2}</ProjectGuid>
     <RootNamespace>PdfPPWin32</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
@@ -21,13 +21,17 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
+    <ZlibLibraryName>zlibstaticd.lib</ZlibLibraryName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
+    <ZlibLibraryName>zlibstatic.lib</ZlibLibraryName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup>
@@ -40,52 +44,59 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;$(SolutionDir)src\Pdf++.Core\include;$(SolutionDir)src\PdfPP.ModernWin32\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(SolutionDir)src\Pdf++.Core\include;$(SolutionDir)src\PdfPP.ModernWin32\include;$(SolutionDir)third_party\zlib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/Zc:__cplusplus /utf-8 %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebugDLL</RuntimeLibrary>
       <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>comdlg32.lib;gdiplus.lib;$(OutDir)PdfPP.Native.lib;$(OutDir)PdfPP.ModernWin32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>comdlg32.lib;gdiplus.lib;ole32.lib;windowsapp.lib;bcrypt.lib;$(ZlibLibraryName);$(OutDir)PdfPP.ModernWin32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\AppSettings.cpp" />
     <ClCompile Include="src\Main.cpp" />
-    <ClCompile Include="src\NativePdf.cpp" />
+    <ClCompile Include="src\ReaderPdfDocument.cpp" />
     <ClCompile Include="src\PageCache.cpp" />
     <ClCompile Include="src\ReaderApplication.cpp" />
     <ClCompile Include="src\ReaderDocument.cpp" />
     <ClCompile Include="src\ReaderRendering.cpp" />
     <ClCompile Include="src\ReaderSettings.cpp" />
     <ClCompile Include="src\ReaderTabs.cpp" />
+    <ClCompile Include="src\ReaderTools.cpp" />
     <ClCompile Include="src\ReaderUtils.cpp" />
     <ClCompile Include="src\ReaderView.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\PdfPP\Win32\AppCommands.hpp" />
     <ClInclude Include="include\PdfPP\Win32\AppSettings.hpp" />
-    <ClInclude Include="include\PdfPP\Win32\NativePdf.hpp" />
+    <ClInclude Include="include\PdfPP\Win32\ReaderPdfDocument.hpp" />
     <ClInclude Include="include\PdfPP\Win32\PageCache.hpp" />
     <ClInclude Include="include\PdfPP\Win32\ReaderApplication.hpp" />
     <ClInclude Include="include\PdfPP\Win32\ReaderState.hpp" />
     <None Include="$(SolutionDir)icons\PDF++.png" />
+    <None Include="resources\Hand.cur" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\PdfPP.Native\PdfPP.Native.vcxproj">
-      <Project>{D9B7B2F7-39F0-4C35-9C8A-7F30C86A4D41}</Project>
+    <ProjectReference Include="..\..\src\Pdf++.Core\Pdf++.Core.vcxproj">
+      <Project>{2EA9D488-A5DF-4A18-8F15-7EB7F6AD4901}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\third_party\zlib\zlibstatic.vcxproj">
+      <Project>{8F14538D-A037-4B3D-B0F8-BB30BFD1428D}</Project>
     </ProjectReference>
     <ProjectReference Include="..\..\src\PdfPP.ModernWin32\PdfPP.ModernWin32.vcxproj">
       <Project>{C4B4FA0A-EA3B-4B34-9B42-8E92D99BAA47}</Project>
     </ProjectReference>
   </ItemGroup>
-  <Target Name="CopyNativeBridge" AfterTargets="Build">
-    <Copy SourceFiles="$(OutDir)PdfPP.Native.dll" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
-  </Target>
   <Target Name="CopyApplicationIcon" AfterTargets="Build">
     <MakeDir Directories="$(OutDir)icons" />
     <Copy SourceFiles="$(SolutionDir)icons\PDF++.png" DestinationFolder="$(OutDir)icons" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyHandCursor" AfterTargets="Build">
+    <MakeDir Directories="$(OutDir)resources" />
+    <Copy SourceFiles="$(ProjectDir)resources\Hand.cur" DestinationFolder="$(OutDir)resources" SkipUnchangedFiles="true" />
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

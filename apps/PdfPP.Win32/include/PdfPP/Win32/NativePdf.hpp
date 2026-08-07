@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -36,6 +37,42 @@ struct TocItem final {
 class NativePdfDocument final {
 public:
     static std::shared_ptr<NativePdfDocument> Open(const std::wstring& path, std::string& error);
+
+    // Document-level operations are implemented by PdfPP.Native so the Win32
+    // UI remains a thin client and does not link Pdf++.Core directly. Page
+    // indices are zero-based.
+    [[nodiscard]] static bool MergeDocuments(
+        const std::vector<std::wstring>& inputPaths, const std::wstring& outputPath,
+        std::string& error);
+    [[nodiscard]] static bool ExtractPages(
+        const std::wstring& inputPath, const std::wstring& outputPath,
+        const std::vector<std::size_t>& pageIndices, std::string& error);
+    [[nodiscard]] static bool RemovePages(
+        const std::wstring& inputPath, const std::wstring& outputPath,
+        const std::vector<std::size_t>& pageIndices, std::string& error);
+    [[nodiscard]] static bool DuplicatePages(
+        const std::wstring& inputPath, const std::wstring& outputPath,
+        const std::vector<std::size_t>& pageIndices, std::string& error);
+    [[nodiscard]] static bool MovePage(
+        const std::wstring& inputPath, const std::wstring& outputPath,
+        std::size_t fromIndex, std::size_t toIndex, std::string& error);
+    [[nodiscard]] static bool ReorderPages(
+        const std::wstring& inputPath, const std::wstring& outputPath,
+        const std::vector<std::size_t>& pageOrder, std::string& error);
+    [[nodiscard]] static bool SplitEvery(
+        const std::wstring& inputPath, const std::wstring& outputDirectory,
+        std::size_t pagesPerFile, const std::wstring& filePrefix, std::string& error);
+    [[nodiscard]] static bool AddPassword(
+        const std::wstring& inputPath, const std::wstring& outputPath,
+        const std::string& currentPassword, const std::string& userPassword,
+        const std::string& ownerPassword, std::string& error);
+    [[nodiscard]] static bool RemovePassword(
+        const std::wstring& inputPath, const std::wstring& outputPath,
+        const std::string& currentPassword, std::string& error);
+    [[nodiscard]] static bool ChangePassword(
+        const std::wstring& inputPath, const std::wstring& outputPath,
+        const std::string& currentPassword, const std::string& userPassword,
+        const std::string& ownerPassword, std::string& error);
 
     NativePdfDocument(const NativePdfDocument&) = delete;
     NativePdfDocument& operator=(const NativePdfDocument&) = delete;

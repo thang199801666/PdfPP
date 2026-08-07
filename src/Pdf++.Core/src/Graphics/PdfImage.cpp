@@ -41,18 +41,18 @@ struct JpegInfo {
         throw PdfException(PdfErrorCode::InvalidArgument, "Input is not a JPEG stream.");
     }
     std::size_t offset = 2U;
-    while (offset + 3U < bytes.size()) {
+    while (offset < bytes.size()) {
         while (offset < bytes.size() && std::to_integer<unsigned>(bytes[offset]) != 0xFFU) ++offset;
         while (offset < bytes.size() && std::to_integer<unsigned>(bytes[offset]) == 0xFFU) ++offset;
         if (offset >= bytes.size()) break;
         const unsigned marker = std::to_integer<unsigned>(bytes[offset++]);
         if (marker == 0xD9U || marker == 0xDAU) break;
         if (marker >= 0xD0U && marker <= 0xD7U) continue;
-        if (offset + 1U >= bytes.size()) break;
+        if (bytes.size() - offset < 2U) break;
         const std::size_t length =
             (std::to_integer<unsigned>(bytes[offset]) << 8U) |
             std::to_integer<unsigned>(bytes[offset + 1U]);
-        if (length < 2U || offset + length > bytes.size()) {
+        if (length < 2U || length > bytes.size() - offset) {
             throw PdfException(PdfErrorCode::InvalidArgument, "Malformed JPEG segment length.");
         }
         const bool sof = marker == 0xC0U || marker == 0xC1U || marker == 0xC2U ||
@@ -89,9 +89,12 @@ PdfImage::PdfImage(const std::uint32_t width,
                    const PdfImageColorSpace colorSpace,
                    const PdfImageEncoding encoding,
                    const std::uint16_t bitsPerComponent,
-                   std::vector<std::byte> bytes)
+                   std::vector<std::byte> bytes,
+                   std::vector<std::byte> softMaskBytes,
+                   std::vector<double> matte)
     : width_(width), height_(height), colorSpace_(colorSpace), encoding_(encoding),
-      bitsPerComponent_(bitsPerComponent), bytes_(std::move(bytes)) {}
+      bitsPerComponent_(bitsPerComponent), bytes_(std::move(bytes)),
+      softMaskBytes_(std::move(softMaskBytes)), matte_(std::move(matte)) {}
 
 PdfImage PdfImage::FromRgb(
     const std::uint32_t width,
@@ -107,6 +110,38 @@ PdfImage PdfImage::FromRgb(
                     std::vector<std::byte>(rgbBytes.begin(), rgbBytes.end()));
 }
 
+PdfImage PdfImage::FromRgba(
+    const std::uint32_t width,
+    const std::uint32_t height,
+    const std::span<const std::byte> rgbaBytes,
+    const std::span<const double> matte) {
+    const auto pixelCount = checkedSampleSize(width, height, 1U);
+    if (rgbaBytes.size() != checkedSampleSize(width, height, 4U)) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "RGBA image byte count does not match width x height x 4.");
+    }
+    if (!matte.empty() && matte.size() != 3U) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "RGB soft-mask matte must contain exactly three components.");
+    }
+    std::vector<std::byte> rgb;
+    std::vector<std::byte> alpha;
+    rgb.reserve(pixelCount * 3U);
+    alpha.reserve(pixelCount);
+    bool opaque = true;
+    for (std::size_t offset = 0; offset < rgbaBytes.size(); offset += 4U) {
+        rgb.push_back(rgbaBytes[offset]);
+        rgb.push_back(rgbaBytes[offset + 1U]);
+        rgb.push_back(rgbaBytes[offset + 2U]);
+        alpha.push_back(rgbaBytes[offset + 3U]);
+        opaque = opaque && std::to_integer<std::uint8_t>(rgbaBytes[offset + 3U]) == 255U;
+    }
+    if (opaque) alpha.clear();
+    return PdfImage(width, height, PdfImageColorSpace::DeviceRGB,
+                    PdfImageEncoding::Raw, 8U, std::move(rgb), std::move(alpha),
+                    std::vector<double>(matte.begin(), matte.end()));
+}
+
 PdfImage PdfImage::FromGray(
     const std::uint32_t width,
     const std::uint32_t height,
@@ -119,6 +154,55 @@ PdfImage PdfImage::FromGray(
     return PdfImage(width, height, PdfImageColorSpace::DeviceGray,
                     PdfImageEncoding::Raw, 8U,
                     std::vector<std::byte>(grayBytes.begin(), grayBytes.end()));
+}
+
+PdfImage PdfImage::FromGrayAlpha(
+    const std::uint32_t width,
+    const std::uint32_t height,
+    const std::span<const std::byte> grayBytes,
+    const std::span<const std::byte> alphaBytes,
+    const std::span<const double> matte) {
+    auto image = FromGray(width, height, grayBytes);
+    return image.WithSoftMask(alphaBytes, matte);
+}
+
+PdfImage PdfImage::WithSoftMask(const std::span<const std::byte> alphaBytes,
+                                const std::span<const double> matte) const {
+    const auto expected = checkedSampleSize(width_, height_, 1U);
+    if (alphaBytes.size() != expected) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "Soft-mask byte count does not match image width x height.");
+    }
+    std::size_t components = 0U;
+    switch (colorSpace_) {
+    case PdfImageColorSpace::DeviceGray: components = 1U; break;
+    case PdfImageColorSpace::DeviceRGB: components = 3U; break;
+    case PdfImageColorSpace::DeviceCMYK: components = 4U; break;
+    default:
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Soft-mask writing currently requires a device color space.");
+    }
+    if (!matte.empty() && matte.size() != components) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "Soft-mask matte component count does not match the base color space.");
+    }
+    for (const double component : matte) {
+        if (!std::isfinite(component) || component < 0.0 || component > 1.0) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "Soft-mask matte components must be finite values in [0, 1].");
+        }
+    }
+    auto result = *this;
+    result.softMaskBytes_.assign(alphaBytes.begin(), alphaBytes.end());
+    result.matte_.assign(matte.begin(), matte.end());
+    return result;
+}
+
+PdfImage PdfImage::WithoutSoftMask() const {
+    auto result = *this;
+    result.softMaskBytes_.clear();
+    result.matte_.clear();
+    return result;
 }
 
 PdfImage PdfImage::ConvertToRgb() const {
@@ -152,7 +236,10 @@ PdfImage PdfImage::ConvertToRgb() const {
         return *this;
     }
     return PdfImage(width_, height_, PdfImageColorSpace::DeviceRGB,
-                    PdfImageEncoding::Raw, 8U, std::move(rgb));
+                    PdfImageEncoding::Raw, 8U, std::move(rgb), softMaskBytes_,
+                    colorSpace_ == PdfImageColorSpace::DeviceGray && !matte_.empty()
+                        ? std::vector<double>{matte_[0], matte_[0], matte_[0]}
+                        : matte_);
 }
 
 PdfImage PdfImage::FromJpeg(const std::span<const std::byte> jpegBytes) {
@@ -242,76 +329,82 @@ PdfImage PdfImage::FromPng(const std::span<const std::byte> pngBytes) {
         pngBytes[5] != std::byte{0x0A} || pngBytes[6] != std::byte{0x1A} || pngBytes[7] != std::byte{0x0A}) {
         throw PdfException(PdfErrorCode::InvalidArgument, "Not a PNG file.");
     }
-    std::uint32_t width = 0U, height = 0U;
-    std::uint8_t bitDepth = 8U, colorType = 2U;
-    bool interlace = false;
+
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    std::uint8_t bitDepth = 8U;
+    std::uint8_t colorType = 2U;
+    std::uint8_t interlaceMethod = 0U;
     std::vector<std::uint8_t> palette;
-    std::vector<std::uint8_t> trns;
-    std::vector<std::uint8_t> rawData;
-    std::size_t cursor = 8U;
+    std::vector<std::uint8_t> transparency;
+    std::vector<std::uint8_t> compressed;
     bool haveIdat = false;
+    bool haveHeader = false;
+
+    std::size_t cursor = 8U;
     while (cursor + 12U <= pngBytes.size()) {
         const std::uint32_t length = readPngU32(pngBytes, cursor);
-        if (cursor + 12U + length > pngBytes.size()) break;
-        std::string type(reinterpret_cast<const char*>(&pngBytes[cursor + 4U]), 4);
-        const std::span<const std::byte> data = pngBytes.subspan(cursor + 8U, length);
+        if (length > pngBytes.size() - cursor - 12U) {
+            throw PdfException(PdfErrorCode::InvalidArgument, "Truncated PNG chunk.");
+        }
+        const std::string type(reinterpret_cast<const char*>(&pngBytes[cursor + 4U]), 4U);
+        const auto data = pngBytes.subspan(cursor + 8U, length);
         if (type == "IHDR") {
-            if (length < 13U) throw PdfException(PdfErrorCode::InvalidArgument, "Malformed PNG IHDR.");
+            if (haveHeader || length != 13U) {
+                throw PdfException(PdfErrorCode::InvalidArgument, "Malformed PNG IHDR.");
+            }
             width = readPngU32(data, 0U);
             height = readPngU32(data, 4U);
             bitDepth = std::to_integer<std::uint8_t>(data[8]);
             colorType = std::to_integer<std::uint8_t>(data[9]);
-            interlace = std::to_integer<std::uint8_t>(data[12]) != 0U;
+            const auto compressionMethod = std::to_integer<std::uint8_t>(data[10]);
+            const auto filterMethod = std::to_integer<std::uint8_t>(data[11]);
+            interlaceMethod = std::to_integer<std::uint8_t>(data[12]);
             if (width == 0U || height == 0U || width > 32768U || height > 32768U) {
                 throw PdfException(PdfErrorCode::InvalidArgument, "Invalid PNG dimensions.");
             }
-            if (interlace) {
+            if (compressionMethod != 0U || filterMethod != 0U || interlaceMethod > 1U) {
                 throw PdfException(PdfErrorCode::UnsupportedFeature,
-                                   "Interlaced PNG is not supported by PdfImage::FromPng.");
+                                   "Unsupported PNG compression, filter, or interlace method.");
             }
-            if (bitDepth != 1U && bitDepth != 2U && bitDepth != 4U && bitDepth != 8U && bitDepth != 16U) {
-                throw PdfException(PdfErrorCode::UnsupportedFeature, "Unsupported PNG bit depth.");
+            const bool validDepth =
+                (colorType == 0U && (bitDepth == 1U || bitDepth == 2U || bitDepth == 4U || bitDepth == 8U || bitDepth == 16U)) ||
+                (colorType == 2U && (bitDepth == 8U || bitDepth == 16U)) ||
+                (colorType == 3U && (bitDepth == 1U || bitDepth == 2U || bitDepth == 4U || bitDepth == 8U)) ||
+                (colorType == 4U && (bitDepth == 8U || bitDepth == 16U)) ||
+                (colorType == 6U && (bitDepth == 8U || bitDepth == 16U));
+            if (!validDepth) {
+                throw PdfException(PdfErrorCode::UnsupportedFeature,
+                                   "Unsupported PNG color type and bit-depth combination.");
             }
+            haveHeader = true;
         } else if (type == "PLTE") {
-            if (length % 3U != 0U) throw PdfException(PdfErrorCode::InvalidArgument, "Malformed PNG palette.");
+            if (!haveHeader || length == 0U || length % 3U != 0U || length > 768U) {
+                throw PdfException(PdfErrorCode::InvalidArgument, "Malformed PNG palette.");
+            }
             palette.assign(reinterpret_cast<const std::uint8_t*>(data.data()),
                            reinterpret_cast<const std::uint8_t*>(data.data() + data.size()));
         } else if (type == "tRNS") {
-            trns.assign(reinterpret_cast<const std::uint8_t*>(data.data()),
-                        reinterpret_cast<const std::uint8_t*>(data.data() + data.size()));
+            transparency.assign(reinterpret_cast<const std::uint8_t*>(data.data()),
+                                reinterpret_cast<const std::uint8_t*>(data.data() + data.size()));
         } else if (type == "IDAT") {
-            rawData.insert(rawData.end(),
-                           reinterpret_cast<const std::uint8_t*>(data.data()),
-                           reinterpret_cast<const std::uint8_t*>(data.data() + data.size()));
+            if (!haveHeader) throw PdfException(PdfErrorCode::InvalidArgument, "PNG IDAT precedes IHDR.");
+            compressed.insert(compressed.end(),
+                              reinterpret_cast<const std::uint8_t*>(data.data()),
+                              reinterpret_cast<const std::uint8_t*>(data.data() + data.size()));
             haveIdat = true;
         } else if (type == "IEND") {
             break;
         }
         cursor += 12U + length;
     }
-    if (!haveIdat || width == 0U || height == 0U) {
-        throw PdfException(PdfErrorCode::InvalidArgument, "PNG is missing IDAT data.");
+    if (!haveHeader || !haveIdat) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "PNG is missing IHDR or IDAT data.");
     }
-    // Inflate IDAT with zlib.
-    std::vector<std::uint8_t> inflated;
-    {
-        uLongf size = static_cast<uLongf>(rawData.size() * 2U + 1024U);
-        std::vector<std::uint8_t> buffer(size);
-        int ret;
-        do {
-            uLongf capacity = size;
-            ret = uncompress(buffer.data(), &capacity, rawData.data(), static_cast<uLong>(rawData.size()));
-            if (ret == Z_BUF_ERROR || ret == Z_OK) {
-                inflated.assign(buffer.data(), buffer.data() + capacity);
-                if (ret == Z_OK) break;
-                size = size * 2U + 1024U;
-                buffer.resize(size);
-                continue;
-            }
-            throw PdfException(PdfErrorCode::InvalidArgument, "PNG IDAT inflate failed.");
-        } while (ret == Z_BUF_ERROR);
+    if (colorType == 3U && palette.empty()) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Indexed PNG is missing PLTE.");
     }
-    // Determine channels per pixel (before expansion).
+
     std::size_t channels = 0U;
     switch (colorType) {
     case 0U: channels = 1U; break;
@@ -321,118 +414,199 @@ PdfImage PdfImage::FromPng(const std::span<const std::byte> pngBytes) {
     case 6U: channels = 4U; break;
     default: throw PdfException(PdfErrorCode::UnsupportedFeature, "Unsupported PNG color type.");
     }
-    const std::size_t bitsPerPixel = channels * bitDepth;
-    const std::size_t stride = (width * bitsPerPixel + 7U) / 8U;
-    if (inflated.size() < stride * height) {
-        throw PdfException(PdfErrorCode::InvalidArgument, "PNG decompressed data is too short.");
-    }
-    // Undo scanline filters.
-    std::vector<std::uint8_t> decoded(inflated.size());
-    const auto sampleAt = [&](const std::size_t row, const std::size_t byteIndex) -> std::uint8_t {
-        return decoded[row * stride + byteIndex];
+    const std::size_t bitsPerPixel = channels * static_cast<std::size_t>(bitDepth);
+    const std::size_t filterBytesPerPixel = std::max<std::size_t>(1U, (bitsPerPixel + 7U) / 8U);
+
+    struct Adam7Pass final {
+        std::uint32_t xStart;
+        std::uint32_t yStart;
+        std::uint32_t xStep;
+        std::uint32_t yStep;
     };
-    for (std::size_t row = 0; row < height; ++row) {
-        const std::uint8_t filter = inflated[row * (stride + 1U)];
-        const std::uint8_t* source = &inflated[row * (stride + 1U) + 1U];
-        std::uint8_t* target = &decoded[row * stride];
-        for (std::size_t i = 0; i < stride; ++i) {
-            const std::uint8_t raw = source[i];
-            const std::uint8_t left = i >= 1U ? target[i - 1U] : 0U;
-            const std::uint8_t up = row > 0U ? sampleAt(row - 1U, i) : 0U;
-            const std::uint8_t upperLeft = (row > 0U && i >= 1U) ? sampleAt(row - 1U, i - 1U) : 0U;
-            switch (filter) {
-            case 0U: target[i] = raw; break;
-            case 1U: target[i] = static_cast<std::uint8_t>(raw + left); break;
-            case 2U: target[i] = static_cast<std::uint8_t>(raw + up); break;
-            case 3U: target[i] = static_cast<std::uint8_t>(raw + ((left + up) >> 1U)); break;
-            case 4U: target[i] = static_cast<std::uint8_t>(raw + paethPredictor(left, up, upperLeft)); break;
-            default: throw PdfException(PdfErrorCode::InvalidArgument, "Unknown PNG filter type.");
-            }
+    static constexpr std::array<Adam7Pass, 7> adam7 = {{
+        {0U, 0U, 8U, 8U}, {4U, 0U, 8U, 8U}, {0U, 4U, 4U, 8U},
+        {2U, 0U, 4U, 4U}, {0U, 2U, 2U, 4U}, {1U, 0U, 2U, 2U},
+        {0U, 1U, 1U, 2U}}};
+    const auto dimensionInPass = [](const std::uint32_t total,
+                                    const std::uint32_t start,
+                                    const std::uint32_t step) -> std::uint32_t {
+        if (total <= start) return 0U;
+        return 1U + (total - 1U - start) / step;
+    };
+
+    std::vector<Adam7Pass> passes;
+    if (interlaceMethod == 0U) passes.push_back(Adam7Pass{0U, 0U, 1U, 1U});
+    else passes.assign(adam7.begin(), adam7.end());
+
+    std::size_t expectedInflated = 0U;
+    for (const auto& pass : passes) {
+        const auto passWidth = dimensionInPass(width, pass.xStart, pass.xStep);
+        const auto passHeight = dimensionInPass(height, pass.yStart, pass.yStep);
+        if (passWidth == 0U || passHeight == 0U) continue;
+        const auto passStride = (static_cast<std::size_t>(passWidth) * bitsPerPixel + 7U) / 8U;
+        if (passStride > std::numeric_limits<std::size_t>::max() - 1U ||
+            static_cast<std::size_t>(passHeight) >
+                (std::numeric_limits<std::size_t>::max() - expectedInflated) / (passStride + 1U)) {
+            throw PdfException(PdfErrorCode::InvalidArgument, "PNG dimensions overflow the decoded-size limit.");
         }
+        expectedInflated += (passStride + 1U) * static_cast<std::size_t>(passHeight);
     }
-    // Expand to 8-bit RGB (colorType 6 stays RGBA -> we drop to RGB via compositing).
-    std::vector<std::byte> rgb;
-    rgb.reserve(static_cast<std::size_t>(width) * height * 3U);
-    const auto sampleChannel = [&](const std::size_t row, const std::size_t col,
-                                   const std::size_t channel) -> std::uint16_t {
-        if (bitDepth == 8U) {
-            return decoded[row * stride + col * channels + channel];
-        }
+    if (expectedInflated == 0U || expectedInflated > static_cast<std::size_t>(std::numeric_limits<uLongf>::max()) ||
+        compressed.size() > static_cast<std::size_t>(std::numeric_limits<uLong>::max())) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature, "PNG decoded data exceeds zlib limits.");
+    }
+
+    std::vector<std::uint8_t> inflated(expectedInflated);
+    uLongf inflatedSize = static_cast<uLongf>(inflated.size());
+    const int inflateStatus = uncompress(inflated.data(), &inflatedSize,
+                                         compressed.data(), static_cast<uLong>(compressed.size()));
+    if (inflateStatus != Z_OK || inflatedSize != expectedInflated) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "PNG IDAT inflate failed or produced an unexpected size.");
+    }
+
+    if (static_cast<std::size_t>(width) > std::numeric_limits<std::size_t>::max() / height ||
+        static_cast<std::size_t>(width) * height > std::numeric_limits<std::size_t>::max() / channels) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "PNG sample buffer size overflow.");
+    }
+    std::vector<std::uint16_t> samples(static_cast<std::size_t>(width) * height * channels, 0U);
+
+    const auto readSample = [&](const std::vector<std::uint8_t>& bytes,
+                                const std::size_t stride,
+                                const std::size_t row,
+                                const std::size_t column,
+                                const std::size_t channel) -> std::uint16_t {
+        const std::size_t sampleIndex = column * channels + channel;
+        if (bitDepth == 8U) return bytes[row * stride + sampleIndex];
         if (bitDepth == 16U) {
-            const std::size_t index = row * stride + (col * channels + channel) * 2U;
-            return (static_cast<std::uint16_t>(decoded[index]) << 8U) | decoded[index + 1U];
+            const std::size_t index = row * stride + sampleIndex * 2U;
+            return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[index]) << 8U) |
+                                              bytes[index + 1U]);
         }
-        // Sub-byte bit depth: expand via repeated high bits.
-        const std::size_t bitsPerChannel = bitDepth;
-        const std::size_t bitsPerPixel = channels * bitsPerChannel;
-        const std::size_t byteIndex = row * stride + (col * bitsPerPixel) / 8U;
-        const std::size_t bitShift = 8U - bitsPerPixel - ((col * bitsPerPixel) % 8U);
-        const std::uint8_t rawSample = (decoded[byteIndex] >> bitShift) & ((1U << bitsPerChannel) - 1U);
-        if (bitsPerChannel == 1U) return rawSample ? 255U : 0U;
-        if (bitsPerChannel == 2U) return static_cast<std::uint16_t>(rawSample * 85U);
-        return static_cast<std::uint16_t>(rawSample * 17U);
+        const std::size_t bitOffset = sampleIndex * bitDepth;
+        const std::size_t byteIndex = row * stride + bitOffset / 8U;
+        const auto shift = static_cast<std::uint8_t>(8U - bitDepth - (bitOffset % 8U));
+        const auto mask = static_cast<std::uint8_t>((1U << bitDepth) - 1U);
+        return static_cast<std::uint16_t>((bytes[byteIndex] >> shift) & mask);
     };
-    std::size_t trnsIndex = 0U;
-    for (std::size_t row = 0; row < height; ++row) {
-        for (std::size_t col = 0; col < width; ++col) {
-            std::uint16_t r = 0U, g = 0U, b = 0U, a = 255U;
-            switch (colorType) {
-            case 0U: // grayscale
-                r = g = b = sampleChannel(row, col, 0U);
-                if (trns.size() >= 2U) {
-                    const std::uint16_t key = (static_cast<std::uint16_t>(trns[0]) << 8U) | trns[1U];
-                    if (r == key) a = 0U;
+
+    std::size_t inflatedOffset = 0U;
+    for (const auto& pass : passes) {
+        const auto passWidth = dimensionInPass(width, pass.xStart, pass.xStep);
+        const auto passHeight = dimensionInPass(height, pass.yStart, pass.yStep);
+        if (passWidth == 0U || passHeight == 0U) continue;
+        const auto passStride = (static_cast<std::size_t>(passWidth) * bitsPerPixel + 7U) / 8U;
+        const auto passFilteredSize = (passStride + 1U) * static_cast<std::size_t>(passHeight);
+        if (inflatedOffset + passFilteredSize > inflated.size()) {
+            throw PdfException(PdfErrorCode::InvalidArgument, "Truncated Adam7 PNG pass.");
+        }
+        std::vector<std::uint8_t> decoded(passStride * static_cast<std::size_t>(passHeight), std::uint8_t{0});
+        for (std::size_t row = 0U; row < passHeight; ++row) {
+            const auto filter = inflated[inflatedOffset + row * (passStride + 1U)];
+            const auto* source = inflated.data() + inflatedOffset + row * (passStride + 1U) + 1U;
+            auto* target = decoded.data() + row * passStride;
+            for (std::size_t byteIndex = 0U; byteIndex < passStride; ++byteIndex) {
+                const auto left = byteIndex >= filterBytesPerPixel ? target[byteIndex - filterBytesPerPixel] : 0U;
+                const auto up = row > 0U ? decoded[(row - 1U) * passStride + byteIndex] : 0U;
+                const auto upperLeft = row > 0U && byteIndex >= filterBytesPerPixel
+                    ? decoded[(row - 1U) * passStride + byteIndex - filterBytesPerPixel] : 0U;
+                switch (filter) {
+                case 0U: target[byteIndex] = source[byteIndex]; break;
+                case 1U: target[byteIndex] = static_cast<std::uint8_t>(source[byteIndex] + left); break;
+                case 2U: target[byteIndex] = static_cast<std::uint8_t>(source[byteIndex] + up); break;
+                case 3U: target[byteIndex] = static_cast<std::uint8_t>(
+                    source[byteIndex] + ((static_cast<unsigned>(left) + up) >> 1U)); break;
+                case 4U: target[byteIndex] = static_cast<std::uint8_t>(
+                    source[byteIndex] + paethPredictor(left, up, upperLeft)); break;
+                default: throw PdfException(PdfErrorCode::InvalidArgument, "Unknown PNG filter type.");
                 }
-                break;
-            case 2U: // RGB
-                r = sampleChannel(row, col, 0U);
-                g = sampleChannel(row, col, 1U);
-                b = sampleChannel(row, col, 2U);
-                if (trns.size() >= 6U) {
-                    const std::uint16_t kr = (static_cast<std::uint16_t>(trns[0]) << 8U) | trns[1U];
-                    const std::uint16_t kg = (static_cast<std::uint16_t>(trns[2]) << 8U) | trns[3U];
-                    const std::uint16_t kb = (static_cast<std::uint16_t>(trns[4]) << 8U) | trns[5U];
-                    if (r == kr && g == kg && b == kb) a = 0U;
+            }
+        }
+        inflatedOffset += passFilteredSize;
+
+        for (std::uint32_t passY = 0U; passY < passHeight; ++passY) {
+            const auto targetY = pass.yStart + passY * pass.yStep;
+            for (std::uint32_t passX = 0U; passX < passWidth; ++passX) {
+                const auto targetX = pass.xStart + passX * pass.xStep;
+                const auto targetBase = (static_cast<std::size_t>(targetY) * width + targetX) * channels;
+                for (std::size_t channel = 0U; channel < channels; ++channel) {
+                    samples[targetBase + channel] = readSample(decoded, passStride, passY, passX, channel);
                 }
-                break;
-            case 3U: { // palette
-                const std::uint16_t index = sampleChannel(row, col, 0U);
-                if (static_cast<std::size_t>(index) * 3U + 2U < palette.size()) {
-                    r = palette[index * 3U];
-                    g = palette[index * 3U + 1U];
-                    b = palette[index * 3U + 2U];
-                }
-                if (index < trns.size()) a = trns[index];
-                break;
             }
-            case 4U: // gray + alpha
-                r = g = b = sampleChannel(row, col, 0U);
-                a = sampleChannel(row, col, 1U);
-                break;
-            case 6U: // RGBA
-                r = sampleChannel(row, col, 0U);
-                g = sampleChannel(row, col, 1U);
-                b = sampleChannel(row, col, 2U);
-                a = sampleChannel(row, col, 3U);
-                break;
-            }
-            // Composite alpha over black for the RGB output.
-            if (a < 255U) {
-                const auto blend = [a](const std::uint16_t value) {
-                    return static_cast<std::uint8_t>(value * a / 255U);
-                };
-                rgb.push_back(std::byte{blend(r)});
-                rgb.push_back(std::byte{blend(g)});
-                rgb.push_back(std::byte{blend(b)});
-            } else {
-                rgb.push_back(std::byte{static_cast<std::uint8_t>(r & 0xFFU)});
-                rgb.push_back(std::byte{static_cast<std::uint8_t>(g & 0xFFU)});
-                rgb.push_back(std::byte{static_cast<std::uint8_t>(b & 0xFFU)});
-            }
-            (void)trnsIndex;
         }
     }
-    return PdfImage(width, height, PdfImageColorSpace::DeviceRGB, PdfImageEncoding::Raw, 8U, std::move(rgb));
+
+    const std::uint32_t maximumSample = bitDepth == 16U ? 65535U : ((1U << bitDepth) - 1U);
+    const auto toByte = [maximumSample](const std::uint16_t value) -> std::uint8_t {
+        return static_cast<std::uint8_t>((static_cast<std::uint32_t>(value) * 255U + maximumSample / 2U) /
+                                         maximumSample);
+    };
+    const auto transparentValue = [&](const std::size_t offset) -> std::uint16_t {
+        return static_cast<std::uint16_t>((static_cast<std::uint16_t>(transparency[offset]) << 8U) |
+                                          transparency[offset + 1U]);
+    };
+
+    std::vector<std::byte> rgb;
+    std::vector<std::byte> alphaBytes;
+    rgb.reserve(static_cast<std::size_t>(width) * height * 3U);
+    alphaBytes.reserve(static_cast<std::size_t>(width) * height);
+    bool fullyOpaque = true;
+    for (std::uint32_t row = 0U; row < height; ++row) {
+        for (std::uint32_t column = 0U; column < width; ++column) {
+            const auto base = (static_cast<std::size_t>(row) * width + column) * channels;
+            std::uint16_t redRaw = 0U;
+            std::uint16_t greenRaw = 0U;
+            std::uint16_t blueRaw = 0U;
+            std::uint16_t alphaRaw = static_cast<std::uint16_t>(maximumSample);
+            switch (colorType) {
+            case 0U:
+                redRaw = greenRaw = blueRaw = samples[base];
+                if (transparency.size() >= 2U && samples[base] == transparentValue(0U)) alphaRaw = 0U;
+                break;
+            case 2U:
+                redRaw = samples[base];
+                greenRaw = samples[base + 1U];
+                blueRaw = samples[base + 2U];
+                if (transparency.size() >= 6U && redRaw == transparentValue(0U) &&
+                    greenRaw == transparentValue(2U) && blueRaw == transparentValue(4U)) alphaRaw = 0U;
+                break;
+            case 3U: {
+                const auto index = static_cast<std::size_t>(samples[base]);
+                if (index * 3U + 2U >= palette.size()) {
+                    throw PdfException(PdfErrorCode::InvalidArgument, "PNG palette index is out of range.");
+                }
+                redRaw = palette[index * 3U];
+                greenRaw = palette[index * 3U + 1U];
+                blueRaw = palette[index * 3U + 2U];
+                alphaRaw = index < transparency.size() ? transparency[index] : 255U;
+                break;
+            }
+            case 4U:
+                redRaw = greenRaw = blueRaw = samples[base];
+                alphaRaw = samples[base + 1U];
+                break;
+            case 6U:
+                redRaw = samples[base];
+                greenRaw = samples[base + 1U];
+                blueRaw = samples[base + 2U];
+                alphaRaw = samples[base + 3U];
+                break;
+            default: break;
+            }
+
+            std::uint8_t red = colorType == 3U ? static_cast<std::uint8_t>(redRaw) : toByte(redRaw);
+            std::uint8_t green = colorType == 3U ? static_cast<std::uint8_t>(greenRaw) : toByte(greenRaw);
+            std::uint8_t blue = colorType == 3U ? static_cast<std::uint8_t>(blueRaw) : toByte(blueRaw);
+            const std::uint8_t alpha = colorType == 3U ? static_cast<std::uint8_t>(alphaRaw) : toByte(alphaRaw);
+            rgb.push_back(static_cast<std::byte>(red));
+            rgb.push_back(static_cast<std::byte>(green));
+            rgb.push_back(static_cast<std::byte>(blue));
+            alphaBytes.push_back(static_cast<std::byte>(alpha));
+            fullyOpaque = fullyOpaque && alpha == 255U;
+        }
+    }
+    if (fullyOpaque) alphaBytes.clear();
+    return PdfImage(width, height, PdfImageColorSpace::DeviceRGB,
+                    PdfImageEncoding::Raw, 8U, std::move(rgb), std::move(alphaBytes));
 }
 
 namespace {
@@ -682,7 +856,11 @@ PdfImageType PdfImage::DetectImageType(const std::span<const std::byte> bytes) {
         std::to_integer<std::uint8_t>(bytes[0]) == 0x89U &&
         std::to_integer<std::uint8_t>(bytes[1]) == 0x50U &&
         std::to_integer<std::uint8_t>(bytes[2]) == 0x4EU &&
-        std::to_integer<std::uint8_t>(bytes[3]) == 0x47U) {
+        std::to_integer<std::uint8_t>(bytes[3]) == 0x47U &&
+        std::to_integer<std::uint8_t>(bytes[4]) == 0x0DU &&
+        std::to_integer<std::uint8_t>(bytes[5]) == 0x0AU &&
+        std::to_integer<std::uint8_t>(bytes[6]) == 0x1AU &&
+        std::to_integer<std::uint8_t>(bytes[7]) == 0x0AU) {
         return PdfImageType::Png;
     }
     if (bytes.size() >= 3U &&
@@ -807,53 +985,78 @@ std::vector<std::byte> PdfImage::EncodeBmp(
     const std::uint32_t width,
     const std::uint32_t height,
     const std::span<const std::byte> rgbBytes) {
-    if (width == 0U || height == 0U || rgbBytes.size() != static_cast<std::size_t>(width) * height * 3U) {
+    if (width == 0U || height == 0U) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "BMP dimensions must be positive.");
+    }
+    constexpr std::size_t headerSize = 54U;
+    const std::size_t widthSize = static_cast<std::size_t>(width);
+    const std::size_t heightSize = static_cast<std::size_t>(height);
+    if (widthSize > std::numeric_limits<std::size_t>::max() / 3U) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "BMP row size overflows.");
+    }
+    const std::size_t sourceRowSize = widthSize * 3U;
+    if (heightSize > std::numeric_limits<std::size_t>::max() / sourceRowSize ||
+        rgbBytes.size() != sourceRowSize * heightSize) {
         throw PdfException(PdfErrorCode::InvalidArgument,
                            "BMP RGB byte count does not match width x height x 3.");
     }
-    const std::uint32_t rowSize = width * 3U;
-    const std::uint32_t dataSize = rowSize * height;
-    const std::uint32_t fileSize = 54U + dataSize;
-    const auto le = [](const std::uint32_t value) {
-        return std::array<std::uint8_t, 4>{static_cast<std::uint8_t>(value & 0xFFU),
-                                           static_cast<std::uint8_t>((value >> 8U) & 0xFFU),
-                                           static_cast<std::uint8_t>((value >> 16U) & 0xFFU),
-                                           static_cast<std::uint8_t>((value >> 24U) & 0xFFU)};
-    };
-    std::vector<std::byte> out;
-    out.reserve(fileSize);
-    const auto pushLe = [&](const std::uint32_t value, const std::size_t bytes) {
-        const auto bytes32 = le(value);
-        for (std::size_t i = 0; i < bytes; ++i) out.push_back(std::byte{bytes32[i]});
-    };
-    // BITMAPFILEHEADER.
-    out.push_back(std::byte{'B'}); out.push_back(std::byte{'M'});
-    pushLe(fileSize, 4U);
-    pushLe(0U, 4U);
-    pushLe(54U, 4U);
-    // BITMAPINFOHEADER.
-    pushLe(40U, 4U);
-    pushLe(width, 4U);
-    pushLe(height, 4U);
-    pushLe(1U, 2U);  // planes
-    pushLe(24U, 2U); // bit count
-    pushLe(0U, 4U);  // BI_RGB
-    pushLe(dataSize, 4U);
-    pushLe(2835U, 4U);
-    pushLe(2835U, 4U);
-    pushLe(0U, 4U);
-    pushLe(0U, 4U);
-    // Pixel data bottom-up, BGR.
-    for (std::uint32_t y = 0; y < height; ++y) {
-        const std::size_t sourceRow = static_cast<std::size_t>(height - 1U - y) * width * 3U;
-        for (std::uint32_t x = 0; x < width; ++x) {
-            const std::size_t pixel = sourceRow + static_cast<std::size_t>(x) * 3U;
-            out.push_back(rgbBytes[pixel + 2U]); // B
-            out.push_back(rgbBytes[pixel + 1U]); // G
-            out.push_back(rgbBytes[pixel]);      // R
-        }
+    if (sourceRowSize > std::numeric_limits<std::size_t>::max() - 3U) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "BMP aligned row size overflows.");
     }
-    return out;
+    const std::size_t rowSize = (sourceRowSize + 3U) & ~std::size_t{3U};
+    if (heightSize > (std::numeric_limits<std::size_t>::max() - headerSize) / rowSize) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "BMP output size overflows.");
+    }
+    const std::size_t dataSize = rowSize * heightSize;
+    const std::size_t fileSize = headerSize + dataSize;
+    if (fileSize > std::numeric_limits<std::uint32_t>::max()) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "BMP output exceeds the 32-bit format limit.");
+    }
+
+    std::vector<std::byte> output(fileSize, std::byte{0});
+    std::size_t cursor = 0U;
+    const auto putByte = [&output, &cursor](const std::byte value) {
+        output.at(cursor++) = value;
+    };
+    const auto putLittleEndian = [&putByte](const std::uint32_t value,
+                                            const std::size_t byteCount) {
+        for (std::size_t i = 0; i < byteCount; ++i) {
+            putByte(static_cast<std::byte>((value >> (8U * i)) & 0xFFU));
+        }
+    };
+
+    putByte(std::byte{'B'});
+    putByte(std::byte{'M'});
+    putLittleEndian(static_cast<std::uint32_t>(fileSize), 4U);
+    putLittleEndian(0U, 4U);
+    putLittleEndian(static_cast<std::uint32_t>(headerSize), 4U);
+    putLittleEndian(40U, 4U);
+    putLittleEndian(width, 4U);
+    putLittleEndian(height, 4U);
+    putLittleEndian(1U, 2U);
+    putLittleEndian(24U, 2U);
+    putLittleEndian(0U, 4U);
+    putLittleEndian(static_cast<std::uint32_t>(dataSize), 4U);
+    putLittleEndian(2835U, 4U);
+    putLittleEndian(2835U, 4U);
+    putLittleEndian(0U, 4U);
+    putLittleEndian(0U, 4U);
+
+    const std::size_t padding = rowSize - sourceRowSize;
+    for (std::size_t y = 0; y < heightSize; ++y) {
+        const std::size_t sourceRow = (heightSize - 1U - y) * sourceRowSize;
+        for (std::size_t x = 0; x < widthSize; ++x) {
+            const std::size_t pixel = sourceRow + x * 3U;
+            putByte(rgbBytes[pixel + 2U]);
+            putByte(rgbBytes[pixel + 1U]);
+            putByte(rgbBytes[pixel]);
+        }
+        cursor += padding; // Vector was zero-initialized, so BMP row padding is already zero.
+    }
+    if (cursor != output.size()) {
+        throw PdfException(PdfErrorCode::InvalidArgument, "Internal BMP size calculation mismatch.");
+    }
+    return output;
 }
 
 

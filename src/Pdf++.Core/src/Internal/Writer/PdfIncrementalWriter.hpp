@@ -49,7 +49,7 @@ private:
     std::ofstream output_;
     std::map<std::uint32_t, std::pair<std::uint64_t, std::uint16_t>> entries_;
     std::map<std::uint32_t, std::string> objectStreamBodies_;
-    std::map<std::uint32_t, std::uint32_t> objectStreamOffsets_;
+    std::map<std::uint32_t, std::uint32_t> objectStreamIndices_;
     std::uint32_t objectStreamNumber_{0U};
     std::uint32_t catalogObject_{0U};
     bool writeXrefStream_{false};

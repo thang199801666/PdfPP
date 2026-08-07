@@ -12,6 +12,17 @@ namespace {
 std::string number(double v) { std::ostringstream s; s << std::fixed << std::setprecision(3) << v; auto x=s.str(); while(x.size()>1&&x.back()=='0')x.pop_back(); if(x.back()=='.')x.pop_back(); return x; }
 std::string escape(std::string_view text) { std::string out; for(char c:text){ if(c=='('||c==')'||c=='\\')out.push_back('\\'); out.push_back(c);} return out; }
 double opacityValue(double value) { if (!std::isfinite(value)) throw std::invalid_argument("Opacity must be finite."); return std::clamp(value, 0.0, 1.0); }
+std::string pdfName(std::string name) {
+    if (!name.empty() && name.front() == '/') name.erase(name.begin());
+    if (name.empty()) throw std::invalid_argument("PDF name cannot be empty.");
+    constexpr std::string_view delimiters{"()<>[]{}/%#"};
+    for (const unsigned char ch : name) {
+        if (ch <= 0x20U || ch >= 0x7FU || delimiters.find(static_cast<char>(ch)) != std::string_view::npos) {
+            throw std::invalid_argument("PDF name contains an unsupported character.");
+        }
+    }
+    return name;
+}
 std::vector<std::uint32_t> decodeUtf8(std::string_view text) {
     std::vector<std::uint32_t> result;
     for (std::size_t i=0;i<text.size();) {
@@ -63,58 +74,303 @@ std::vector<std::string> wrapUtf8(const PdfTrueTypeFont& font, std::string_view 
     return lines;
 }
 std::string hex4(std::uint16_t value) { static constexpr char d[]="0123456789ABCDEF"; std::string out(4,'0'); for(int i=3;i>=0;--i){out[i]=d[value&15];value>>=4;} return out; }
+
+
+bool type3FontsEqual(const PdfType3Font& left, const PdfType3Font& right) {
+    if (left.GetFontName() != right.GetFontName() ||
+        left.GetFontBoundingBox().left != right.GetFontBoundingBox().left ||
+        left.GetFontBoundingBox().bottom != right.GetFontBoundingBox().bottom ||
+        left.GetFontBoundingBox().right != right.GetFontBoundingBox().right ||
+        left.GetFontBoundingBox().top != right.GetFontBoundingBox().top ||
+        left.GetFontMatrix() != right.GetFontMatrix() ||
+        left.GetGlyphs().size() != right.GetGlyphs().size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < left.GetGlyphs().size(); ++index) {
+        const auto& a = left.GetGlyphs()[index];
+        const auto& b = right.GetGlyphs()[index];
+        if (a.code != b.code || a.name != b.name || a.advanceWidth != b.advanceWidth ||
+            a.boundingBox.left != b.boundingBox.left ||
+            a.boundingBox.bottom != b.boundingBox.bottom ||
+            a.boundingBox.right != b.boundingBox.right ||
+            a.boundingBox.top != b.boundingBox.top ||
+            a.content != b.content || a.unicodeCodePoint != b.unicodeCodePoint) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::size_t imageHash(const PdfImage& image) {
+    std::size_t hash = sizeof(std::size_t) == 8U
+        ? static_cast<std::size_t>(1469598103934665603ULL)
+        : static_cast<std::size_t>(2166136261U);
+    const std::size_t prime = sizeof(std::size_t) == 8U
+        ? static_cast<std::size_t>(1099511628211ULL)
+        : static_cast<std::size_t>(16777619U);
+    auto mix = [&](const std::uint64_t value) {
+        for (std::size_t shift = 0U; shift < sizeof(value); ++shift) {
+            hash ^= static_cast<std::size_t>((value >> (shift * 8U)) & 0xFFU);
+            hash *= prime;
+        }
+    };
+    mix(image.GetWidth());
+    mix(image.GetHeight());
+    mix(static_cast<std::uint64_t>(image.GetColorSpace()));
+    mix(static_cast<std::uint64_t>(image.GetEncoding()));
+    mix(image.GetBitsPerComponent());
+    for (const auto value : image.GetBytes()) {
+        hash ^= static_cast<std::size_t>(std::to_integer<std::uint8_t>(value));
+        hash *= prime;
+    }
+    mix(image.HasSoftMask() ? 1U : 0U);
+    for (const auto value : image.GetSoftMaskBytes()) {
+        hash ^= static_cast<std::size_t>(std::to_integer<std::uint8_t>(value));
+        hash *= prime;
+    }
+    for (const double value : image.GetMatte()) {
+        mix(static_cast<std::uint64_t>(std::llround(value * 1000000000.0)));
+    }
+    return hash;
+}
+
+bool imagesEqual(const PdfImage& left, const PdfImage& right) {
+    return left.GetWidth() == right.GetWidth() && left.GetHeight() == right.GetHeight() &&
+           left.GetColorSpace() == right.GetColorSpace() && left.GetEncoding() == right.GetEncoding() &&
+           left.GetBitsPerComponent() == right.GetBitsPerComponent() &&
+           left.GetBytes().size() == right.GetBytes().size() &&
+           left.GetSoftMaskBytes().size() == right.GetSoftMaskBytes().size() &&
+           left.GetMatte().size() == right.GetMatte().size() &&
+           std::equal(left.GetBytes().begin(), left.GetBytes().end(), right.GetBytes().begin()) &&
+           std::equal(left.GetSoftMaskBytes().begin(), left.GetSoftMaskBytes().end(),
+                      right.GetSoftMaskBytes().begin()) &&
+           std::equal(left.GetMatte().begin(), left.GetMatte().end(), right.GetMatte().begin());
+}
+
+std::string inlineColorSpace(const PdfImageColorSpace colorSpace) {
+    switch (colorSpace) {
+    case PdfImageColorSpace::DeviceGray: return "/DeviceGray";
+    case PdfImageColorSpace::DeviceRGB: return "/DeviceRGB";
+    case PdfImageColorSpace::DeviceCMYK: return "/DeviceCMYK";
+    default: throw std::invalid_argument("Inline images support DeviceGray, DeviceRGB, and DeviceCMYK only.");
+    }
+}
+
+
+std::pair<std::string_view, std::size_t> patternBaseColorSpace(
+    const PdfPatternBaseColorSpace colorSpace) {
+    switch (colorSpace) {
+    case PdfPatternBaseColorSpace::Gray: return {"/DeviceGray", 1U};
+    case PdfPatternBaseColorSpace::Rgb: return {"/DeviceRGB", 3U};
+    case PdfPatternBaseColorSpace::Cmyk: return {"/DeviceCMYK", 4U};
+    }
+    return {"/DeviceRGB", 3U};
+}
+
+std::string asciiHex(const std::span<const std::byte> bytes) {
+    static constexpr char digits[] = "0123456789ABCDEF";
+    std::string output;
+    output.reserve(bytes.size() * 2U + bytes.size() / 32U + 2U);
+    std::size_t column = 0U;
+    for (const auto value : bytes) {
+        const auto byteValue = std::to_integer<std::uint8_t>(value);
+        output.push_back(digits[byteValue >> 4U]);
+        output.push_back(digits[byteValue & 0x0FU]);
+        column += 2U;
+        if (column >= 64U) {
+            output.push_back('\n');
+            column = 0U;
+        }
+    }
+    output += ">\n";
+    return output;
+}
 }
 PdfCanvas::PdfCanvas(std::shared_ptr<Internal::PdfWriterState> state, std::size_t pageIndex):state_(std::move(state)),pageIndex_(pageIndex){}
 void PdfCanvas::Append(const std::string& c){ if(!state_||pageIndex_>=state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page"); state_->pages[pageIndex_].content += c; }
-std::string PdfCanvas::RegisterOpacity(double strokeOpacity, double fillOpacity) {
-    strokeOpacity = opacityValue(strokeOpacity); fillOpacity = opacityValue(fillOpacity);
-    for (std::size_t i=0;i<state_->extGStates.size();++i) {
-        const auto& gs=state_->extGStates[i];
-        if (std::abs(gs.strokeOpacity-strokeOpacity)<1e-9 && std::abs(gs.fillOpacity-fillOpacity)<1e-9) {
-            auto& refs=state_->pages[pageIndex_].extGStateIndices;
-            if(std::find(refs.begin(),refs.end(),i)==refs.end()) refs.push_back(i);
+std::string PdfCanvas::RegisterOpacity(double strokeOpacity, double fillOpacity,
+                                       const PdfBlendMode blendMode) {
+    strokeOpacity = opacityValue(strokeOpacity);
+    fillOpacity = opacityValue(fillOpacity);
+    for (std::size_t i = 0; i < state_->extGStates.size(); ++i) {
+        const auto& gs = state_->extGStates[i];
+        if (std::abs(gs.strokeOpacity - strokeOpacity) < 1.0e-9 &&
+            std::abs(gs.fillOpacity - fillOpacity) < 1.0e-9 &&
+            gs.blendMode == blendMode) {
+            auto& refs = state_->pages[pageIndex_].extGStateIndices;
+            if (std::find(refs.begin(), refs.end(), i) == refs.end()) refs.push_back(i);
             return gs.resourceName;
         }
     }
-    const std::size_t index=state_->extGStates.size();
-    const std::string name="GS"+std::to_string(index+1U);
-    state_->extGStates.push_back({strokeOpacity,fillOpacity,PdfBlendMode::SourceOver,name});
+    const std::size_t index = state_->extGStates.size();
+    const std::string name = "GS" + std::to_string(index + 1U);
+    state_->extGStates.push_back({strokeOpacity, fillOpacity, blendMode, name});
     state_->pages[pageIndex_].extGStateIndices.push_back(index);
     return name;
 }
-PdfCanvas& PdfCanvas::SaveState(){Append("q\n");return *this;} PdfCanvas& PdfCanvas::RestoreState(){Append("Q\n");return *this;}
-PdfCanvas& PdfCanvas::SetStrokeColor(PdfColor c){Append(number(c.r)+" "+number(c.g)+" "+number(c.b)+" RG\n");return *this;}
-PdfCanvas& PdfCanvas::SetFillColor(PdfColor c){Append(number(c.r)+" "+number(c.g)+" "+number(c.b)+" rg\n");return *this;}
-PdfCanvas& PdfCanvas::SetPattern(std::string patternName,const bool applyToFill,const bool applyToStroke){
-    if(patternName.empty())throw std::invalid_argument("Pattern name must not be empty.");
-    if(patternName.front()=='/')patternName.erase(patternName.begin());
-    auto& page=state_->pages[pageIndex_];
-    std::size_t index=state_->tilingPatterns.size();
-    for(std::size_t i=0;i<state_->tilingPatterns.size();++i){
-        if(state_->tilingPatterns[i].options.name==patternName){index=i;break;}
-    }
-    if(index==state_->tilingPatterns.size()){
-        throw std::invalid_argument("Unknown tiling pattern: "+patternName);
-    }
-    if(std::find(page.patternIndices.begin(),page.patternIndices.end(),index)==page.patternIndices.end()){
-        page.patternIndices.push_back(index);
-    }
-    if(applyToFill)Append("/Pattern cs /"+patternName+" scn\n");
-    if(applyToStroke)Append("/Pattern CS /"+patternName+" SCN\n");
-    return *this;
-}
-PdfCanvas& PdfCanvas::SetStrokeOpacity(double opacity){Append("/"+RegisterOpacity(opacity,1.0)+" gs\n");return *this;}
-PdfCanvas& PdfCanvas::SetFillOpacity(double opacity){Append("/"+RegisterOpacity(1.0,opacity)+" gs\n");return *this;}
-PdfCanvas& PdfCanvas::SetOpacity(double opacity){Append("/"+RegisterOpacity(opacity,opacity)+" gs\n");return *this;}
-PdfCanvas& PdfCanvas::SetBlendMode(PdfBlendMode mode){
+PdfCanvas& PdfCanvas::SaveState() {
     if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
     auto& page = state_->pages[pageIndex_];
-    const auto name = mode == PdfBlendMode::Multiply ? "Multiply" : mode == PdfBlendMode::Screen ? "Screen" : mode == PdfBlendMode::Darken ? "Darken" : mode == PdfBlendMode::Lighten ? "Lighten" : mode == PdfBlendMode::Overlay ? "Overlay" : mode == PdfBlendMode::Difference ? "Difference" : mode == PdfBlendMode::Exclusion ? "Exclusion" : "Normal";
-    const auto resource = RegisterOpacity(1.0, 1.0);
-    state_->extGStates.back().blendMode = mode;
-    page.extGStateIndices.push_back(state_->extGStates.size() - 1U);
-    Append("/" + resource + " gs\n");
-    (void)name;
+    page.graphicsStateStack.push_back(page.graphicsState);
+    Append("q\n");
+    return *this;
+}
+PdfCanvas& PdfCanvas::RestoreState() {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& page = state_->pages[pageIndex_];
+    if (page.graphicsStateStack.empty()) throw std::logic_error("RestoreState has no matching SaveState.");
+    page.graphicsState = page.graphicsStateStack.back();
+    page.graphicsStateStack.pop_back();
+    Append("Q\n");
+    return *this;
+}
+PdfCanvas& PdfCanvas::SetStrokeColor(PdfColor c){Append(number(c.r)+" "+number(c.g)+" "+number(c.b)+" RG\n");return *this;}
+PdfCanvas& PdfCanvas::SetFillColor(PdfColor c){Append(number(c.r)+" "+number(c.g)+" "+number(c.b)+" rg\n");return *this;}
+PdfCanvas& PdfCanvas::SetStrokeColorSpace(std::string colorSpaceName,
+                                         const std::span<const double> components) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    colorSpaceName = pdfName(std::move(colorSpaceName));
+    const auto iterator = std::find_if(state_->colorSpaces.begin(), state_->colorSpaces.end(),
+        [&](const auto& item) { return item.resourceName == colorSpaceName; });
+    if (iterator == state_->colorSpaces.end()) throw std::invalid_argument("Unknown writer color space: " + colorSpaceName);
+    if (components.size() != iterator->components) throw std::invalid_argument("Stroke color component count does not match the color space.");
+    std::string command = "/" + colorSpaceName + " CS ";
+    for (const double component : components) {
+        if (!std::isfinite(component) || component < 0.0 || component > 1.0) {
+            throw std::invalid_argument("Stroke color components must be finite values in [0, 1].");
+        }
+        command += number(component) + " ";
+    }
+    command += "SCN\n";
+    auto& page = state_->pages[pageIndex_];
+    const auto index = static_cast<std::size_t>(iterator - state_->colorSpaces.begin());
+    if (std::find(page.colorSpaceIndices.begin(), page.colorSpaceIndices.end(), index) == page.colorSpaceIndices.end()) {
+        page.colorSpaceIndices.push_back(index);
+    }
+    Append(command);
+    return *this;
+}
+PdfCanvas& PdfCanvas::SetFillColorSpace(std::string colorSpaceName,
+                                       const std::span<const double> components) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    colorSpaceName = pdfName(std::move(colorSpaceName));
+    const auto iterator = std::find_if(state_->colorSpaces.begin(), state_->colorSpaces.end(),
+        [&](const auto& item) { return item.resourceName == colorSpaceName; });
+    if (iterator == state_->colorSpaces.end()) throw std::invalid_argument("Unknown writer color space: " + colorSpaceName);
+    if (components.size() != iterator->components) throw std::invalid_argument("Fill color component count does not match the color space.");
+    std::string command = "/" + colorSpaceName + " cs ";
+    for (const double component : components) {
+        if (!std::isfinite(component) || component < 0.0 || component > 1.0) {
+            throw std::invalid_argument("Fill color components must be finite values in [0, 1].");
+        }
+        command += number(component) + " ";
+    }
+    command += "scn\n";
+    auto& page = state_->pages[pageIndex_];
+    const auto index = static_cast<std::size_t>(iterator - state_->colorSpaces.begin());
+    if (std::find(page.colorSpaceIndices.begin(), page.colorSpaceIndices.end(), index) == page.colorSpaceIndices.end()) {
+        page.colorSpaceIndices.push_back(index);
+    }
+    Append(command);
+    return *this;
+}
+PdfCanvas& PdfCanvas::SetPattern(std::string patternName, const bool applyToFill,
+                                 const bool applyToStroke) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    patternName = pdfName(std::move(patternName));
+    auto& page = state_->pages[pageIndex_];
+    const auto iterator = std::find_if(state_->tilingPatterns.begin(), state_->tilingPatterns.end(),
+        [&](const auto& pattern) { return pattern.options.name == patternName; });
+    if (iterator == state_->tilingPatterns.end()) {
+        throw std::invalid_argument("Unknown tiling pattern: " + patternName);
+    }
+    if (!iterator->options.paintTypeColor) {
+        throw std::invalid_argument(
+            "SetPattern requires a colored PaintType 1 pattern; use SetUncoloredPattern for PaintType 2.");
+    }
+    const auto index = static_cast<std::size_t>(iterator - state_->tilingPatterns.begin());
+    if (std::find(page.patternIndices.begin(), page.patternIndices.end(), index) == page.patternIndices.end()) {
+        page.patternIndices.push_back(index);
+    }
+    if (applyToFill) Append("/Pattern cs /" + patternName + " scn\n");
+    if (applyToStroke) Append("/Pattern CS /" + patternName + " SCN\n");
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::SetUncoloredPattern(std::string patternName,
+                                          const PdfPatternBaseColorSpace baseColorSpace,
+                                          const std::span<const double> components,
+                                          const bool applyToFill,
+                                          const bool applyToStroke) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    patternName = pdfName(std::move(patternName));
+    auto& page = state_->pages[pageIndex_];
+    const auto iterator = std::find_if(state_->tilingPatterns.begin(), state_->tilingPatterns.end(),
+        [&](const auto& pattern) { return pattern.options.name == patternName; });
+    if (iterator == state_->tilingPatterns.end()) {
+        throw std::invalid_argument("Unknown tiling pattern: " + patternName);
+    }
+    if (iterator->options.paintTypeColor) {
+        throw std::invalid_argument(
+            "SetUncoloredPattern requires an uncolored PaintType 2 pattern.");
+    }
+    const auto [baseName, componentCount] = patternBaseColorSpace(baseColorSpace);
+    if (components.size() != componentCount) {
+        throw std::invalid_argument("Uncolored pattern component count does not match its base color space.");
+    }
+    std::string tint;
+    for (const double component : components) {
+        if (!std::isfinite(component) || component < 0.0 || component > 1.0) {
+            throw std::invalid_argument(
+                "Uncolored pattern components must be finite values in [0, 1].");
+        }
+        tint += number(component) + " ";
+    }
+    const auto index = static_cast<std::size_t>(iterator - state_->tilingPatterns.begin());
+    if (std::find(page.patternIndices.begin(), page.patternIndices.end(), index) == page.patternIndices.end()) {
+        page.patternIndices.push_back(index);
+    }
+    if (applyToFill) {
+        Append("[/Pattern " + std::string(baseName) + "] cs " + tint + "/" + patternName + " scn\n");
+    }
+    if (applyToStroke) {
+        Append("[/Pattern " + std::string(baseName) + "] CS " + tint + "/" + patternName + " SCN\n");
+    }
+    return *this;
+}
+PdfCanvas& PdfCanvas::SetStrokeOpacity(const double opacity) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& graphics = state_->pages[pageIndex_].graphicsState;
+    graphics.strokeOpacity = opacityValue(opacity);
+    Append("/" + RegisterOpacity(graphics.strokeOpacity, graphics.fillOpacity, graphics.blendMode) + " gs\n");
+    return *this;
+}
+PdfCanvas& PdfCanvas::SetFillOpacity(const double opacity) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& graphics = state_->pages[pageIndex_].graphicsState;
+    graphics.fillOpacity = opacityValue(opacity);
+    Append("/" + RegisterOpacity(graphics.strokeOpacity, graphics.fillOpacity, graphics.blendMode) + " gs\n");
+    return *this;
+}
+PdfCanvas& PdfCanvas::SetOpacity(const double opacity) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    return SetTransparency(opacity, opacity, state_->pages[pageIndex_].graphicsState.blendMode);
+}
+PdfCanvas& PdfCanvas::SetBlendMode(const PdfBlendMode mode) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& graphics = state_->pages[pageIndex_].graphicsState;
+    graphics.blendMode = mode;
+    Append("/" + RegisterOpacity(graphics.strokeOpacity, graphics.fillOpacity, graphics.blendMode) + " gs\n");
+    return *this;
+}
+PdfCanvas& PdfCanvas::SetTransparency(const double strokeOpacity, const double fillOpacity,
+                                      const PdfBlendMode mode) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& graphics = state_->pages[pageIndex_].graphicsState;
+    graphics.strokeOpacity = opacityValue(strokeOpacity);
+    graphics.fillOpacity = opacityValue(fillOpacity);
+    graphics.blendMode = mode;
+    Append("/" + RegisterOpacity(graphics.strokeOpacity, graphics.fillOpacity, graphics.blendMode) + " gs\n");
     return *this;
 }
 PdfCanvas& PdfCanvas::SetLineWidth(double w){if(w<0||!std::isfinite(w))throw std::invalid_argument("Line width must be finite and non-negative.");Append(number(w)+" w\n");return *this;}
@@ -197,11 +453,49 @@ PdfCanvas& PdfCanvas::BeginText(){Append("BT\n");return *this;}
 PdfCanvas& PdfCanvas::SetFontAndSize(std::string font,double size){ if(!font.empty()&&font.front()=='/')font.erase(font.begin()); auto& page=state_->pages[pageIndex_]; page.fontName=std::move(font); page.currentFontSize=size; page.activeEmbeddedFontIndex.reset(); Append("/F1 "+number(size)+" Tf\n");return *this;}
 PdfCanvas& PdfCanvas::SetTrueTypeFontAndSize(const PdfTrueTypeFont& font,double size){
     if(size<=0||!std::isfinite(size)) throw std::invalid_argument("Font size must be positive and finite.");
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
     std::size_t index=state_->embeddedFonts.size();
-    for(std::size_t i=0;i<state_->embeddedFonts.size();++i){ if(state_->embeddedFonts[i].font.GetBytes()==font.GetBytes()){ index=i; break; } }
-    if(index==state_->embeddedFonts.size()) state_->embeddedFonts.push_back({font,"FT"+std::to_string(index+1U),{}});
-    auto& page=state_->pages[pageIndex_]; page.activeEmbeddedFontIndex=index; page.currentFontSize=size; if(std::find(page.embeddedFontIndices.begin(),page.embeddedFontIndices.end(),index)==page.embeddedFontIndices.end()) page.embeddedFontIndices.push_back(index);
+    for(std::size_t i=0;i<state_->embeddedFonts.size();++i){
+        if(!state_->embeddedFonts[i].vertical && state_->embeddedFonts[i].font.GetBytes()==font.GetBytes()){ index=i; break; }
+    }
+    if(index==state_->embeddedFonts.size()) state_->embeddedFonts.push_back({font,"FT"+std::to_string(index+1U),{},false});
+    auto& page=state_->pages[pageIndex_];
+    page.activeEmbeddedFontIndex=index;
+    page.activeType1FontIndex.reset();
+    page.activeCffFontIndex.reset();
+    page.activeType3FontIndex.reset();
+    page.currentFontSize=size;
+    page.fontName=font.GetPostScriptName();
+    if(std::find(page.embeddedFontIndices.begin(),page.embeddedFontIndices.end(),index)==page.embeddedFontIndices.end()) page.embeddedFontIndices.push_back(index);
     Append("/"+state_->embeddedFonts[index].resourceName+" "+number(size)+" Tf\n"); return *this;
+}
+
+PdfCanvas& PdfCanvas::SetTrueTypeFontAndSizeVertical(const PdfTrueTypeFont& font, const double size) {
+    if (size <= 0.0 || !std::isfinite(size)) throw std::invalid_argument("Font size must be positive and finite.");
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    std::size_t index = state_->embeddedFonts.size();
+    for (std::size_t i = 0; i < state_->embeddedFonts.size(); ++i) {
+        if (state_->embeddedFonts[i].vertical && state_->embeddedFonts[i].font.GetBytes() == font.GetBytes()) {
+            index = i;
+            break;
+        }
+    }
+    if (index == state_->embeddedFonts.size()) {
+        state_->embeddedFonts.push_back({font, "FTV" + std::to_string(index + 1U), {}, true});
+    }
+    auto& page = state_->pages[pageIndex_];
+    page.activeEmbeddedFontIndex = index;
+    page.activeType1FontIndex.reset();
+    page.activeCffFontIndex.reset();
+    page.activeType3FontIndex.reset();
+    page.currentFontSize = size;
+    page.fontName = font.GetPostScriptName();
+    if (std::find(page.embeddedFontIndices.begin(), page.embeddedFontIndices.end(), index) ==
+        page.embeddedFontIndices.end()) {
+        page.embeddedFontIndices.push_back(index);
+    }
+    Append("/" + state_->embeddedFonts[index].resourceName + " " + number(size) + " Tf\n");
+    return *this;
 }
 
 double PdfCanvas::GetCurrentFontSize() const noexcept {
@@ -272,6 +566,72 @@ PdfCanvas& PdfCanvas::SetEmbeddedCffFontAndSize(const PdfCffFont& font, const do
     }
     Append("/" + state_->cffFonts[index].resourceName + " " + number(size) + " Tf\n");
     return *this;
+}
+
+
+PdfCanvas& PdfCanvas::SetType3FontAndSize(const PdfType3Font& font, const double size) {
+    if (size <= 0.0 || !std::isfinite(size)) {
+        throw std::invalid_argument("Font size must be positive and finite.");
+    }
+    if (font.Empty()) throw std::invalid_argument("Type3 font must contain at least one glyph.");
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    std::size_t index = state_->type3Fonts.size();
+    for (std::size_t i = 0; i < state_->type3Fonts.size(); ++i) {
+        if (type3FontsEqual(state_->type3Fonts[i].font, font)) {
+            index = i;
+            break;
+        }
+    }
+    if (index == state_->type3Fonts.size()) {
+        state_->type3Fonts.push_back({font, "T3" + std::to_string(index + 1U)});
+    }
+    auto& page = state_->pages[pageIndex_];
+    page.activeType3FontIndex = index;
+    page.activeEmbeddedFontIndex.reset();
+    page.activeType1FontIndex.reset();
+    page.activeCffFontIndex.reset();
+    page.currentFontSize = size;
+    page.fontName = font.GetFontName();
+    if (std::find(page.type3FontIndices.begin(), page.type3FontIndices.end(), index) ==
+        page.type3FontIndices.end()) {
+        page.type3FontIndices.push_back(index);
+    }
+    Append("/" + state_->type3Fonts[index].resourceName + " " + number(size) + " Tf\n");
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::ShowType3Text(std::string encodedBytes) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    const auto& page = state_->pages[pageIndex_];
+    if (!page.activeType3FontIndex || *page.activeType3FontIndex >= state_->type3Fonts.size()) {
+        throw std::logic_error("ShowType3Text requires SetType3FontAndSize first.");
+    }
+    const auto& font = state_->type3Fonts[*page.activeType3FontIndex].font;
+    for (const unsigned char code : encodedBytes) {
+        if (!font.FindGlyphByCode(code)) {
+            throw std::invalid_argument("Type3 text contains an undefined character code.");
+        }
+    }
+    Append("(" + escape(encodedBytes) + ") Tj\n");
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::ShowType3TextUtf8(std::string utf8Text) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    const auto& page = state_->pages[pageIndex_];
+    if (!page.activeType3FontIndex || *page.activeType3FontIndex >= state_->type3Fonts.size()) {
+        throw std::logic_error("ShowType3TextUtf8 requires SetType3FontAndSize first.");
+    }
+    const auto& font = state_->type3Fonts[*page.activeType3FontIndex].font;
+    std::string encoded;
+    for (const auto codePoint : decodeUtf8(utf8Text)) {
+        const auto* glyph = font.FindGlyphByUnicode(codePoint);
+        if (!glyph) {
+            throw std::invalid_argument("Type3 font does not define a requested Unicode code point.");
+        }
+        encoded.push_back(static_cast<char>(glyph->code));
+    }
+    return ShowType3Text(std::move(encoded));
 }
 
 PdfCanvas& PdfCanvas::SetVerticalWriting(const bool vertical) {
@@ -406,15 +766,162 @@ PdfTextLayoutResult PdfCanvas::MeasureTextLayout(
     return result;
 }
 
+PdfCanvas& PdfCanvas::BeginMarkedContent(std::string role,
+                                               std::string alternativeText,
+                                               std::string actualText) {
+    PdfMarkedContentOptions options;
+    options.role = std::move(role);
+    options.alternativeText = std::move(alternativeText);
+    options.actualText = std::move(actualText);
+    return BeginMarkedContent(options);
+}
+
+PdfCanvas& PdfCanvas::BeginMarkedContent(const PdfMarkedContentOptions& options) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    const auto role = pdfName(options.role);
+    state_->tagged = true;
+    auto& page = state_->pages[pageIndex_];
+    const auto itemIndex = page.markedContents.size();
+    const auto mcid = static_cast<std::uint32_t>(itemIndex);
+    Internal::PdfWriterMarkedContent item;
+    item.mcid = mcid;
+    item.role = role;
+    item.alternativeText = options.alternativeText;
+    item.actualText = options.actualText;
+    item.language = options.language;
+    item.title = options.title;
+    item.expandedText = options.expandedText;
+    item.identifier = options.identifier;
+    item.attributes = options.attributes;
+    if (item.attributes.rowSpan == 0U || item.attributes.columnSpan == 0U) {
+        throw std::invalid_argument("Structure table row/column spans must be at least one.");
+    }
+    const auto finiteOptional = [](const std::optional<double>& value) {
+        return !value || std::isfinite(*value);
+    };
+    if (!finiteOptional(item.attributes.width) || !finiteOptional(item.attributes.height)) {
+        throw std::invalid_argument("Structure layout dimensions must be finite.");
+    }
+    if (!page.markedContentStack.empty() && page.markedContentStack.back()) {
+        item.parentIndex = *page.markedContentStack.back();
+    }
+    page.markedContents.push_back(std::move(item));
+    if (page.markedContents[itemIndex].parentIndex) {
+        page.markedContents[*page.markedContents[itemIndex].parentIndex].childIndices.push_back(itemIndex);
+    }
+    page.markedContentStack.push_back(itemIndex);
+    page.openMarkedContentDepth = page.markedContentStack.size();
+
+    std::string properties = " /MCID " + std::to_string(mcid);
+    if (!options.actualText.empty()) properties += " /ActualText (" + escape(options.actualText) + ")";
+    Append("/" + role + " <<" + properties + " >> BDC\n");
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::BeginArtifact(std::string artifactType) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& page = state_->pages[pageIndex_];
+    page.markedContentStack.push_back(std::nullopt);
+    page.openMarkedContentDepth = page.markedContentStack.size();
+    if (artifactType.empty()) {
+        Append("/Artifact BMC\n");
+    } else {
+        artifactType = pdfName(std::move(artifactType));
+        Append("/Artifact << /Type /" + artifactType + " >> BDC\n");
+    }
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::EndMarkedContent() {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    auto& page = state_->pages[pageIndex_];
+    if (page.markedContentStack.empty()) {
+        throw std::logic_error("EndMarkedContent has no matching BeginMarkedContent or BeginArtifact.");
+    }
+    page.markedContentStack.pop_back();
+    page.openMarkedContentDepth = page.markedContentStack.size();
+    Append("EMC\n");
+    return *this;
+}
+
 PdfCanvas& PdfCanvas::DrawImage(const PdfImage& image, const PdfRectangle& rectangle){
     if(!state_||pageIndex_>=state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
-    const std::size_t imageIndex=state_->images.size();
-    const std::string resourceName="Im"+std::to_string(imageIndex+1U);
-    state_->images.push_back(Internal::PdfWriterImage{image,resourceName});
-    state_->pages[pageIndex_].imageIndices.push_back(imageIndex);
-    const double width=rectangle.right-rectangle.left;
-    const double height=rectangle.top-rectangle.bottom;
+    if (rectangle.empty()) throw std::invalid_argument("Image rectangle must be non-empty.");
+    const auto hash = imageHash(image);
+    std::size_t imageIndex = state_->images.size();
+    const auto bucket = state_->imageCache.find(hash);
+    if (bucket != state_->imageCache.end()) {
+        for (const auto candidate : bucket->second) {
+            if (candidate < state_->images.size() && imagesEqual(state_->images[candidate].image, image)) {
+                imageIndex = candidate;
+                break;
+            }
+        }
+    }
+    if (imageIndex == state_->images.size()) {
+        const std::string resourceName="Im"+std::to_string(imageIndex+1U);
+        state_->images.push_back(Internal::PdfWriterImage{image,resourceName});
+        state_->imageCache[hash].push_back(imageIndex);
+    }
+    auto& pageImages = state_->pages[pageIndex_].imageIndices;
+    if (std::find(pageImages.begin(), pageImages.end(), imageIndex) == pageImages.end()) {
+        pageImages.push_back(imageIndex);
+    }
+    const auto& resourceName = state_->images[imageIndex].resourceName;
+    const double width=rectangle.width();
+    const double height=rectangle.height();
     Append("q\n"+number(width)+" 0 0 "+number(height)+" "+number(rectangle.left)+" "+number(rectangle.bottom)+" cm\n/"+resourceName+" Do\nQ\n");
+    return *this;
+}
+
+PdfCanvas& PdfCanvas::DrawInlineImage(const PdfImage& image, const PdfRectangle& rectangle) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    if (rectangle.empty()) throw std::invalid_argument("Inline image rectangle must be non-empty.");
+    if (image.HasSoftMask()) {
+        throw std::invalid_argument("Inline images cannot carry a separate soft mask; use DrawImage instead.");
+    }
+    std::string filters = "/ASCIIHexDecode";
+    std::string decodeParameters;
+    switch (image.GetEncoding()) {
+    case PdfImageEncoding::Raw: break;
+    case PdfImageEncoding::Flate: filters = "[/ASCIIHexDecode /FlateDecode]"; break;
+    case PdfImageEncoding::Dct: filters = "[/ASCIIHexDecode /DCTDecode]"; break;
+    case PdfImageEncoding::Jpx: filters = "[/ASCIIHexDecode /JPXDecode]"; break;
+    case PdfImageEncoding::CcittFax:
+        filters = "[/ASCIIHexDecode /CCITTFaxDecode]";
+        decodeParameters = " /DecodeParms [null << /K -1 /Columns " +
+            std::to_string(image.GetWidth()) + " /Rows " + std::to_string(image.GetHeight()) + " >>]";
+        break;
+    default:
+        throw std::invalid_argument("This image encoding is not supported for inline images.");
+    }
+    std::ostringstream dictionary;
+    dictionary << "BI\n/W " << image.GetWidth() << " /H " << image.GetHeight()
+               << " /BPC " << image.GetBitsPerComponent() << " /CS "
+               << inlineColorSpace(image.GetColorSpace()) << " /F " << filters
+               << decodeParameters << "\nID\n";
+    Append("q\n" + number(rectangle.width()) + " 0 0 " + number(rectangle.height()) + " " +
+           number(rectangle.left) + " " + number(rectangle.bottom) + " cm\n" +
+           dictionary.str() + asciiHex(image.GetBytes()) + "EI\nQ\n");
+    return *this;
+}
+
+
+PdfCanvas& PdfCanvas::PaintShading(std::string shadingName) {
+    if (!state_ || pageIndex_ >= state_->pages.size()) throw std::runtime_error("Invalid PdfCanvas page");
+    shadingName = pdfName(std::move(shadingName));
+    const auto iterator = std::find_if(state_->meshShadings.begin(), state_->meshShadings.end(),
+        [&](const auto& shading) { return shading.resourceName == shadingName; });
+    if (iterator == state_->meshShadings.end()) {
+        throw std::invalid_argument("Unknown mesh shading: " + shadingName);
+    }
+    auto& page = state_->pages[pageIndex_];
+    const auto index = static_cast<std::size_t>(iterator - state_->meshShadings.begin());
+    if (std::find(page.shadingIndices.begin(), page.shadingIndices.end(), index) ==
+        page.shadingIndices.end()) {
+        page.shadingIndices.push_back(index);
+    }
+    Append("/" + shadingName + " sh\n");
     return *this;
 }
 

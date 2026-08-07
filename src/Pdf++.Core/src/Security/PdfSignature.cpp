@@ -447,11 +447,11 @@ PdfSignatureVerification PdfSignatureManager::VerifySignature(
     const PdfDocument& document, const std::size_t signatureIndex) {
     const auto signatures = GetSignatures(document);
     if (signatureIndex >= signatures.size()) {
-        return {PdfSignatureVerificationStatus::Malformed, "No signature field at the requested index."};
+        return {PdfSignatureVerificationStatus::Malformed, "No signature field at the requested index.", {}};
     }
     const auto& info = signatures[signatureIndex];
     if (!info.hasContents || !info.hasByteRange) {
-        return {PdfSignatureVerificationStatus::NotApplicable, "Signature field is empty or unsigned."};
+        return {PdfSignatureVerificationStatus::NotApplicable, "Signature field is empty or unsigned.", {}};
     }
 
     // Recompute the SHA-256 digest over the two ByteRange regions.
@@ -461,7 +461,7 @@ PdfSignatureVerification PdfSignatureManager::VerifySignature(
     const std::size_t c = static_cast<std::size_t>(info.byteRange[2]);
     const std::size_t d = static_cast<std::size_t>(info.byteRange[3]);
     if (a + b > file.size() || c + d > file.size()) {
-        return {PdfSignatureVerificationStatus::Malformed, "ByteRange extends beyond the file."};
+        return {PdfSignatureVerificationStatus::Malformed, "ByteRange extends beyond the file.", {}};
     }
     std::vector<std::uint8_t> digestInput;
     digestInput.reserve(b + d);
@@ -472,25 +472,50 @@ PdfSignatureVerification PdfSignatureManager::VerifySignature(
     // Parse the CMS/PKCS#7 value from /Contents (optional for digest check).
     std::vector<std::uint8_t> contents(info.contents.size());
     for (std::size_t i = 0; i < info.contents.size(); ++i) contents[i] = std::to_integer<std::uint8_t>(info.contents[i]);
-    std::vector<std::uint8_t> certificateDer;
-    std::vector<std::uint8_t> signatureValue;
-    const bool hasCms = PdfCms::ParseSignedData(contents, certificateDer, signatureValue);
+    PdfCms::SignedDataInfo cmsInfo;
+    const bool hasCms = PdfCms::ParseSignedData(contents, cmsInfo);
     PdfSignatureVerification result;
     result.status = PdfSignatureVerificationStatus::Valid;
     if (hasCms) {
-        result.certificateDer.assign(reinterpret_cast<const std::byte*>(certificateDer.data()),
-                                     reinterpret_cast<const std::byte*>(certificateDer.data()) + certificateDer.size());
-        // Recover the RSA public key from the embedded certificate and verify.
-        PdfCms::RsaPublicKey publicKey;
-        if (!PdfCms::ParsePublicKeyFromCertificate(certificateDer, publicKey) ||
-            !PdfCms::RsaSha256Verify(publicKey, digest, signatureValue)) {
-            result.status = PdfSignatureVerificationStatus::InvalidSignature;
-            result.detail = "RSA signature verification failed for the ByteRange digest.";
+        if (cmsInfo.certificates.empty()) {
+            result.status = PdfSignatureVerificationStatus::Malformed;
+            result.detail = "CMS SignedData does not contain a signer certificate.";
             return result;
         }
-        result.detail = "SHA-256 digest and RSA signature verified.";
+        const auto& certificateDer = cmsInfo.certificates.front();
+        result.certificateDer.assign(reinterpret_cast<const std::byte*>(certificateDer.data()),
+                                     reinterpret_cast<const std::byte*>(certificateDer.data()) + certificateDer.size());
+
+        std::array<std::uint8_t, 32> signatureDigest = digest;
+        if (cmsInfo.hasSignedAttributes) {
+            if (!cmsInfo.hasContentType || !cmsInfo.hasMessageDigest || cmsInfo.signedAttributesDer.empty()) {
+                result.status = PdfSignatureVerificationStatus::Malformed;
+                result.detail = "CMS signed attributes are missing content-type or message-digest.";
+                return result;
+            }
+            if (!std::equal(digest.begin(), digest.end(), cmsInfo.messageDigest.begin())) {
+                result.status = PdfSignatureVerificationStatus::DigestMismatch;
+                result.detail = "CMS message-digest does not match the PDF ByteRange digest.";
+                return result;
+            }
+            signatureDigest = Internal::Sha256(cmsInfo.signedAttributesDer);
+        }
+
+        // Recover the RSA public key from the embedded certificate and verify
+        // either the canonical signed-attributes digest or the legacy direct
+        // ByteRange digest when no signed attributes are present.
+        PdfCms::RsaPublicKey publicKey;
+        if (!PdfCms::ParsePublicKeyFromCertificate(certificateDer, publicKey) ||
+            !PdfCms::RsaSha256Verify(publicKey, signatureDigest, cmsInfo.signature)) {
+            result.status = PdfSignatureVerificationStatus::InvalidSignature;
+            result.detail = "RSA signature verification failed for the CMS signer information.";
+            return result;
+        }
+        result.detail = cmsInfo.hasSignedAttributes
+            ? "CMS signed attributes, SHA-256 ByteRange digest, and RSA signature verified."
+            : "SHA-256 ByteRange digest and legacy RSA signature verified.";
     } else {
-        result.detail = "ByteRange digest verified (no parseable CMS value for RSA check).";
+        result.detail = "ByteRange digest computed (no parseable CMS value for RSA verification).";
     }
     return result;
 }

@@ -245,7 +245,8 @@ std::vector<std::byte> makeSoftMaskImagePdf() {
     imageBody.push_back(char(10)); imageBody.push_back(char(20)); imageBody.push_back(char(30)); imageBody += "\nendstream";
     addObject(5, imageBody);
     std::string maskBody = "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n";
-    maskBody.push_back(char(128)); maskBody += "\nendstream";
+    maskBody.push_back(static_cast<char>(static_cast<unsigned char>(128U)));
+    maskBody += "\nendstream";
     addObject(6, maskBody);
     const std::size_t xrefOffset = pdf.size();
     std::ostringstream xref; xref << "xref\n0 7\n0000000000 65535 f \n";
@@ -788,12 +789,11 @@ int TestMalformedRejection() {
 
     try {
         (void)CPPPdf::PdfDocument::Open(std::span<const std::byte>(invalidBytes));
-        std::cerr << "Expected malformed input to fail.\n";
-        return 6;
     } catch (const CPPPdf::PdfException&) {
         return 0;
     }
-    return 0;
+    std::cerr << "Expected malformed input to fail.\n";
+    return 6;
 }
 
 int RunReaderIntegrationTests() {

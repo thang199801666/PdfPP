@@ -103,7 +103,11 @@ void writeSettings(const PdfPP::Win32::AppSettings& settings, const std::wstring
     stream << buffer;
     stream << "continuous=" << (settings.continuous ? "1" : "0") << "\n";
     stream << "sidebar=" << (settings.sidebarVisible ? "1" : "0") << "\n";
+    stream << "sidebarWidth=" << settings.sidebarWidth << "\n";
     stream << "handtool=" << (settings.handTool ? "1" : "0") << "\n";
+    stream << "toolsPanel=" << (settings.toolsVisible ? "1" : "0") << "\n";
+    stream << "toolsWidth=" << settings.toolsWidth << "\n";
+    stream << "pageShadow=" << (settings.showPageShadow ? "1" : "0") << "\n";
     stream << "recent=";
     for (std::size_t index = 0; index < settings.recentFiles.size(); ++index) {
         if (index != 0) stream << ";";
@@ -129,13 +133,23 @@ void parseSettings(PdfPP::Win32::AppSettings& settings, const std::wstring& path
         const std::string value = line.substr(separator + 1);
         if (key == "zoom") {
             settings.zoom = std::clamp(
-                static_cast<double>(std::strtod(value.c_str(), nullptr)), 0.25, 3.0);
+                static_cast<double>(std::strtod(value.c_str(), nullptr)),
+                PdfPP::Win32::AppSettings::kMinimumZoom,
+                PdfPP::Win32::AppSettings::kMaximumZoom);
         } else if (key == "continuous") {
             settings.continuous = value == "1";
         } else if (key == "sidebar") {
             settings.sidebarVisible = value == "1";
+        } else if (key == "sidebarWidth") {
+            settings.sidebarWidth = std::clamp(std::atoi(value.c_str()), 170, 520);
         } else if (key == "handtool") {
             settings.handTool = value == "1";
+        } else if (key == "toolsPanel") {
+            settings.toolsVisible = value == "1";
+        } else if (key == "toolsWidth") {
+            settings.toolsWidth = std::clamp(std::atoi(value.c_str()), 240, 420);
+        } else if (key == "pageShadow") {
+            settings.showPageShadow = value == "1";
         } else if (key == "recent") {
             settings.recentFiles.clear();
             std::size_t start = 0;

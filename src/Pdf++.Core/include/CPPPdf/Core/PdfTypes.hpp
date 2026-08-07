@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace CPPPdf {
@@ -63,6 +64,8 @@ struct PdfTextExtractionOptions {
     bool preserveLayout{true};
     bool insertSpaces{true};
     bool ignoreInvisibleText{true};
+    // When set, retain only text painted with this PDF Tr value (0-7).
+    std::optional<int> renderingMode;
     double lineTolerance{0.25};
     double wordGapThreshold{3.0};
 };

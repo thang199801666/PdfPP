@@ -24,14 +24,22 @@ namespace {
 
 struct FieldNode final {
     PdfReference reference{};
+    std::optional<PdfReference> parentReference;
     PdfDictionary dictionary;
     std::string fullName;
     std::string partialName;
     PdfName fieldType;
     std::uint32_t flags{};
     PdfObject inheritedValue;
+    std::vector<PdfReference> childFields;
     std::vector<PdfReference> widgets;
+    std::size_t hierarchyDepth{};
+    bool terminal{true};
 };
+
+constexpr std::uint32_t fieldFlag(const unsigned int oneBasedBit) noexcept {
+    return 1U << (oneBasedBit - 1U);
+}
 
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -131,6 +139,12 @@ std::uint32_t objectFlags(const PdfObject* value, std::uint32_t fallback) {
     return static_cast<std::uint32_t>(*integer);
 }
 
+std::optional<std::int64_t> dictionaryInteger(
+    const PdfDictionary& dictionary, const PdfName& name) {
+    const PdfObject* object = dictionary.Find(name);
+    return object ? object->AsInteger() : std::nullopt;
+}
+
 PdfFormFieldType fieldType(const PdfName& type) {
     if (type.value() == "Tx") return PdfFormFieldType::Text;
     if (type.value() == "Btn") return PdfFormFieldType::Button;
@@ -188,6 +202,8 @@ void collectFieldNodes(
     const PdfDocument& document,
     const PdfArray& fields,
     const std::string& parentName,
+    const std::optional<PdfReference>& parentReference,
+    const std::size_t hierarchyDepth,
     const PdfName& inheritedType,
     const std::uint32_t inheritedFlags,
     const PdfObject& inheritedValue,
@@ -211,6 +227,7 @@ void collectFieldNodes(
         PdfObject value = source->Contains(PdfName("V")) ? deepClone(source->Get(PdfName("V"))) : deepClone(inheritedValue);
 
         std::vector<PdfReference> widgets;
+        std::vector<PdfReference> childFieldReferences;
         if (isWidget(*source)) widgets.push_back(reference);
         const PdfArray* kids = source->GetAsArray(PdfName("Kids"));
         if (kids) {
@@ -220,20 +237,25 @@ void collectFieldNodes(
                 const PdfReference widgetRef{kidReference->first, kidReference->second};
                 const PdfDictionary* kidDictionary = document.GetObject(widgetRef).AsDictionary();
                 if (kidDictionary && isWidget(*kidDictionary)) widgets.push_back(widgetRef);
+                else if (kidDictionary) childFieldReferences.push_back(widgetRef);
             }
         }
 
-        const bool terminal = !kids || widgets.size() == kids->size() || !source->Find(PdfName("Kids"));
+        const bool terminal = childFieldReferences.empty();
         if (!full.empty() && (terminal || !type.empty())) {
             output.push_back(FieldNode{
                 reference,
+                parentReference,
                 deepCloneDictionary(*source),
                 full,
                 partial,
                 type,
                 flags,
                 value,
-                widgets});
+                childFieldReferences,
+                widgets,
+                hierarchyDepth,
+                terminal});
         }
 
         if (kids) {
@@ -245,7 +267,8 @@ void collectFieldNodes(
                 if (kidDictionary && !isWidget(*kidDictionary)) childFields.push_back(kid);
             }
             if (!childFields.empty()) {
-                collectFieldNodes(document, childFields, full, type, flags, value, output, active);
+                collectFieldNodes(document, childFields, full, reference, hierarchyDepth + 1U,
+                                  type, flags, value, output, active);
             }
         }
         active.erase(key);
@@ -259,7 +282,8 @@ std::vector<FieldNode> readFieldNodes(const PdfDocument& document) {
     if (!fields) return {};
     std::vector<FieldNode> result;
     std::unordered_set<std::uint64_t> active;
-    collectFieldNodes(document, *fields, {}, PdfName{}, 0U, PdfObject{}, result, active);
+    collectFieldNodes(document, *fields, {}, std::nullopt, 0U,
+                      PdfName{}, 0U, PdfObject{}, result, active);
     return result;
 }
 
@@ -289,32 +313,6 @@ std::string widgetOnState(const PdfDocument& document, const PdfReference& refer
         if (name.value() != "Off") return name.value();
     }
     return "Yes";
-}
-
-PdfDictionary parseTrailer(const PdfDocument& document) {
-    const PdfObject parsed = Internal::PdfObjectParser::Parse(document.trailerDictionary(), 256U);
-    const PdfDictionary* dictionary = parsed.AsDictionary();
-    if (!dictionary) throw PdfException(PdfErrorCode::MalformedXref, "Trailer is not a dictionary.");
-    return deepCloneDictionary(*dictionary);
-}
-
-void writeXrefEntries(
-    std::ostream& output,
-    const std::vector<std::pair<PdfReference, std::uint64_t>>& entries) {
-    std::size_t index = 0U;
-    while (index < entries.size()) {
-        const std::size_t begin = index;
-        std::uint32_t expected = entries[index].first.objectNumber;
-        while (index < entries.size() && entries[index].first.objectNumber == expected) {
-            ++index;
-            ++expected;
-        }
-        output << entries[begin].first.objectNumber << ' ' << (index - begin) << '\n';
-        for (std::size_t i = begin; i < index; ++i) {
-            output << std::setw(10) << std::setfill('0') << entries[i].second << ' '
-                   << std::setw(5) << std::setfill('0') << entries[i].first.generation << " n \n";
-        }
-    }
 }
 
 void writeIncrementalRevisions(
@@ -379,6 +377,48 @@ bool fieldSelected(const std::vector<std::string>& names, const std::string& fie
     return names.empty() || std::find(names.begin(), names.end(), fieldName) != names.end();
 }
 
+std::string displayText(const PdfObject& value) {
+    if (const PdfArray* array = value.AsArray()) {
+        std::string result;
+        for (const auto& item : array->values()) {
+            const std::string text = objectTextValue(&item);
+            if (text.empty()) continue;
+            if (!result.empty()) result += ", ";
+            result += text;
+        }
+        return result;
+    }
+    return objectTextValue(&value);
+}
+
+std::vector<std::string> wrapAppearanceText(
+    const std::string& text, const std::size_t maximumCharacters) {
+    std::vector<std::string> lines;
+    std::istringstream input(text);
+    std::string sourceLine;
+    while (std::getline(input, sourceLine)) {
+        if (sourceLine.empty()) {
+            lines.emplace_back();
+            continue;
+        }
+        std::size_t offset = 0U;
+        while (offset < sourceLine.size()) {
+            const std::size_t remaining = sourceLine.size() - offset;
+            if (remaining <= maximumCharacters) {
+                lines.push_back(sourceLine.substr(offset));
+                break;
+            }
+            std::size_t split = sourceLine.rfind(' ', offset + maximumCharacters);
+            if (split == std::string::npos || split < offset) split = offset + maximumCharacters;
+            lines.push_back(sourceLine.substr(offset, split - offset));
+            offset = split;
+            while (offset < sourceLine.size() && sourceLine[offset] == ' ') ++offset;
+        }
+    }
+    if (lines.empty()) lines.emplace_back();
+    return lines;
+}
+
 std::string appearanceCommands(
     const FieldNode& node,
     const PdfRectangle& localBox,
@@ -398,9 +438,44 @@ std::string appearanceCommands(
         stream << "0 G 0.75 w " << x << ' ' << y << ' ' << width << ' ' << height << " re S\n";
     }
     if (fieldType(node.fieldType) == PdfFormFieldType::Button) {
-        const std::string value = objectTextValue(&node.inheritedValue);
+        const bool radio = (node.flags & fieldFlag(16U)) != 0U;
+        const bool pushButton = (node.flags & fieldFlag(17U)) != 0U;
+        const std::string value = displayText(node.inheritedValue);
         const bool selected = buttonSelected.value_or(!value.empty() && value != "Off");
-        if (selected) {
+        if (radio) {
+            const double radius = std::max(1.0, std::min(width, height) * 0.40);
+            const double cx = x + width * 0.5;
+            const double cy = y + height * 0.5;
+            const double k = radius * 0.552284749831;
+            stream << cx + radius << ' ' << cy << " m "
+                   << cx + radius << ' ' << cy + k << ' ' << cx + k << ' ' << cy + radius << ' '
+                   << cx << ' ' << cy + radius << " c "
+                   << cx - k << ' ' << cy + radius << ' ' << cx - radius << ' ' << cy + k << ' '
+                   << cx - radius << ' ' << cy << " c "
+                   << cx - radius << ' ' << cy - k << ' ' << cx - k << ' ' << cy - radius << ' '
+                   << cx << ' ' << cy - radius << " c "
+                   << cx + k << ' ' << cy - radius << ' ' << cx + radius << ' ' << cy - k << ' '
+                   << cx + radius << ' ' << cy << " c S\n";
+            if (selected) {
+                const double dot = radius * 0.45;
+                const double dk = dot * 0.552284749831;
+                stream << cx + dot << ' ' << cy << " m "
+                       << cx + dot << ' ' << cy + dk << ' ' << cx + dk << ' ' << cy + dot << ' '
+                       << cx << ' ' << cy + dot << " c "
+                       << cx - dk << ' ' << cy + dot << ' ' << cx - dot << ' ' << cy + dk << ' '
+                       << cx - dot << ' ' << cy << " c "
+                       << cx - dot << ' ' << cy - dk << ' ' << cx - dk << ' ' << cy - dot << ' '
+                       << cx << ' ' << cy - dot << " c "
+                       << cx + dk << ' ' << cy - dot << ' ' << cx + dot << ' ' << cy - dk << ' '
+                       << cx + dot << ' ' << cy << " c f\n";
+            }
+        } else if (pushButton) {
+            const double fontSize = std::max(1.0, std::min(options.fontSize, height - 2.0 * options.padding));
+            const double baseline = y + std::max(options.padding, (height - fontSize) * 0.5);
+            stream << "BT /PPFormFont " << fontSize << " Tf 0 g "
+                   << (x + options.padding) << ' ' << baseline << " Td ("
+                   << Internal::PdfObjectSerializer::EscapeLiteral(value) << ") Tj ET\n";
+        } else if (selected) {
             const double inset = std::max(2.0, std::min(width, height) * 0.20);
             stream << "1 w " << (x + inset) << ' ' << (y + inset) << " m "
                    << (x + width - inset) << ' ' << (y + height - inset) << " l S\n"
@@ -408,12 +483,52 @@ std::string appearanceCommands(
                    << (x + width - inset) << ' ' << (y + inset) << " l S\n";
         }
     } else {
-        const std::string value = objectTextValue(&node.inheritedValue);
+        std::string value = displayText(node.inheritedValue);
+        const bool password = fieldType(node.fieldType) == PdfFormFieldType::Text &&
+                              (node.flags & fieldFlag(14U)) != 0U;
+        const bool multiline = fieldType(node.fieldType) == PdfFormFieldType::Text &&
+                               (node.flags & fieldFlag(13U)) != 0U;
+        const bool comb = fieldType(node.fieldType) == PdfFormFieldType::Text &&
+                          (node.flags & fieldFlag(25U)) != 0U;
+        if (password) value.assign(value.size(), '*');
         const double fontSize = std::max(1.0, std::min(options.fontSize, height - 2.0 * options.padding));
-        const double baseline = y + std::max(options.padding, (height - fontSize) * 0.5);
-        stream << "BT /PPFormFont " << fontSize << " Tf 0 g "
-               << (x + options.padding) << ' ' << baseline << " Td ("
-               << Internal::PdfObjectSerializer::EscapeLiteral(value) << ") Tj ET\n";
+        if (comb) {
+            const auto maxLengthObject = dictionaryInteger(node.dictionary, PdfName("MaxLen"));
+            const std::size_t cells = maxLengthObject && *maxLengthObject > 0
+                ? static_cast<std::size_t>(*maxLengthObject) : std::max<std::size_t>(1U, value.size());
+            const double cellWidth = width / static_cast<double>(cells);
+            for (std::size_t cell = 1U; cell < cells; ++cell) {
+                const double separator = x + cellWidth * static_cast<double>(cell);
+                stream << "0.5 w " << separator << ' ' << y << " m "
+                       << separator << ' ' << (y + height) << " l S\n";
+            }
+            const std::size_t count = std::min(cells, value.size());
+            const double baseline = y + std::max(options.padding, (height - fontSize) * 0.5);
+            for (std::size_t index = 0U; index < count; ++index) {
+                const double textX = x + cellWidth * static_cast<double>(index) + cellWidth * 0.35;
+                const std::string glyph(1U, value[index]);
+                stream << "BT /PPFormFont " << fontSize << " Tf 0 g "
+                       << textX << ' ' << baseline << " Td ("
+                       << Internal::PdfObjectSerializer::EscapeLiteral(glyph) << ") Tj ET\n";
+            }
+        } else if (multiline) {
+            const std::size_t maximumCharacters = std::max<std::size_t>(1U,
+                static_cast<std::size_t>((width - 2.0 * options.padding) / (fontSize * 0.55)));
+            const auto lines = wrapAppearanceText(value, maximumCharacters);
+            double baseline = y + height - options.padding - fontSize;
+            for (const auto& line : lines) {
+                if (baseline < y + options.padding) break;
+                stream << "BT /PPFormFont " << fontSize << " Tf 0 g "
+                       << (x + options.padding) << ' ' << baseline << " Td ("
+                       << Internal::PdfObjectSerializer::EscapeLiteral(line) << ") Tj ET\n";
+                baseline -= fontSize * 1.2;
+            }
+        } else {
+            const double baseline = y + std::max(options.padding, (height - fontSize) * 0.5);
+            stream << "BT /PPFormFont " << fontSize << " Tf 0 g "
+                   << (x + options.padding) << ' ' << baseline << " Td ("
+                   << Internal::PdfObjectSerializer::EscapeLiteral(value) << ") Tj ET\n";
+        }
     }
     stream << "Q\n";
     return stream.str();
@@ -475,6 +590,68 @@ void writeIncrementalObjects(
     writer.Finish(size);
 }
 
+std::uint64_t referenceKey(const PdfReference& reference) noexcept {
+    return (static_cast<std::uint64_t>(reference.objectNumber) << 16U) | reference.generation;
+}
+
+bool pruneFlattenedFieldTree(
+    const PdfDocument& document,
+    const PdfReference& reference,
+    const std::unordered_set<std::uint64_t>& removedFields,
+    const std::unordered_set<std::uint64_t>& removedWidgets,
+    IncrementalObjects& revisions,
+    std::unordered_set<std::uint64_t>& active) {
+    const std::uint64_t key = referenceKey(reference);
+    if (removedFields.contains(key)) return false;
+    if (!active.insert(key).second) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Cycle detected while pruning flattened AcroForm fields.");
+    }
+    const PdfDictionary* original = document.GetObject(reference).AsDictionary();
+    if (!original) {
+        active.erase(key);
+        return true;
+    }
+    const PdfArray* kids = original->GetAsArray(PdfName("Kids"));
+    if (!kids) {
+        active.erase(key);
+        return true;
+    }
+
+    PdfArray remaining;
+    bool changed = false;
+    for (const auto& kid : kids->values()) {
+        const auto rawReference = kid.AsReference();
+        if (!rawReference) {
+            remaining.push_back(deepClone(kid));
+            continue;
+        }
+        const PdfReference kidReference{rawReference->first, rawReference->second};
+        const std::uint64_t kidKey = referenceKey(kidReference);
+        if (removedWidgets.contains(kidKey) || removedFields.contains(kidKey)) {
+            changed = true;
+            continue;
+        }
+        const PdfDictionary* kidDictionary = document.GetObject(kidReference).AsDictionary();
+        if (kidDictionary && !isWidget(*kidDictionary) &&
+            !pruneFlattenedFieldTree(document, kidReference, removedFields,
+                                     removedWidgets, revisions, active)) {
+            changed = true;
+            continue;
+        }
+        remaining.push_back(deepClone(kid));
+    }
+    active.erase(key);
+
+    if (remaining.empty()) return false;
+    if (changed) {
+        PdfDictionary revised = deepCloneDictionary(*original);
+        revised.Put(PdfName("Kids"), PdfObject(std::move(remaining)));
+        revisions[reference.objectNumber] = {reference, PdfObject(std::move(revised))};
+    }
+    return true;
+}
+
 } // namespace
 
 std::vector<PdfFormFieldInfo> PdfAcroForm::GetFields(const PdfDocument& document) {
@@ -490,12 +667,51 @@ std::vector<PdfFormFieldInfo> PdfAcroForm::GetFields(const PdfDocument& document
         info.value = objectTextValue(&node.inheritedValue);
         info.options = parseOptions(node.dictionary.Find(PdfName("Opt")));
         info.reference = node.reference;
+        info.parentReference = node.parentReference;
+        info.childFieldReferences = node.childFields;
         info.widgetReferences = node.widgets;
+        info.hierarchyDepth = node.hierarchyDepth;
+        info.terminal = node.terminal;
         info.flags = node.flags;
-        info.readOnly = (node.flags & 1U) != 0U;
-        info.required = (node.flags & 2U) != 0U;
-        info.noExport = (node.flags & 4U) != 0U;
-        info.radio = info.type == PdfFormFieldType::Button && (info.flags & 32768U) != 0U;
+        info.readOnly = (node.flags & fieldFlag(1U)) != 0U;
+        info.required = (node.flags & fieldFlag(2U)) != 0U;
+        info.noExport = (node.flags & fieldFlag(3U)) != 0U;
+        info.noToggleToOff = info.type == PdfFormFieldType::Button &&
+            (info.flags & fieldFlag(15U)) != 0U;
+        info.radio = info.type == PdfFormFieldType::Button &&
+            (info.flags & fieldFlag(16U)) != 0U;
+        info.pushButton = info.type == PdfFormFieldType::Button &&
+            (info.flags & fieldFlag(17U)) != 0U;
+        info.radiosInUnison = info.type == PdfFormFieldType::Button &&
+            (info.flags & fieldFlag(26U)) != 0U;
+        info.multiline = info.type == PdfFormFieldType::Text &&
+            (info.flags & fieldFlag(13U)) != 0U;
+        info.password = info.type == PdfFormFieldType::Text &&
+            (info.flags & fieldFlag(14U)) != 0U;
+        info.fileSelect = info.type == PdfFormFieldType::Text &&
+            (info.flags & fieldFlag(21U)) != 0U;
+        info.doNotSpellCheck = (info.type == PdfFormFieldType::Text ||
+            info.type == PdfFormFieldType::Choice) && (info.flags & fieldFlag(23U)) != 0U;
+        info.doNotScroll = info.type == PdfFormFieldType::Text &&
+            (info.flags & fieldFlag(24U)) != 0U;
+        info.comb = info.type == PdfFormFieldType::Text &&
+            (info.flags & fieldFlag(25U)) != 0U;
+        info.richText = info.type == PdfFormFieldType::Text &&
+            (info.flags & fieldFlag(26U)) != 0U;
+        info.combo = info.type == PdfFormFieldType::Choice &&
+            (info.flags & fieldFlag(18U)) != 0U;
+        info.editableCombo = info.type == PdfFormFieldType::Choice &&
+            (info.flags & fieldFlag(19U)) != 0U;
+        info.sortOptions = info.type == PdfFormFieldType::Choice &&
+            (info.flags & fieldFlag(20U)) != 0U;
+        info.multiSelect = info.type == PdfFormFieldType::Choice &&
+            (info.flags & fieldFlag(22U)) != 0U;
+        info.commitOnSelectionChange = info.type == PdfFormFieldType::Choice &&
+            (info.flags & fieldFlag(27U)) != 0U;
+        if (const auto maxLength = dictionaryInteger(node.dictionary, PdfName("MaxLen"));
+            maxLength && *maxLength >= 0) {
+            info.maxLength = static_cast<std::size_t>(*maxLength);
+        }
         info.checked = info.type == PdfFormFieldType::Button && !info.value.empty() && info.value != "Off";
         if (info.type == PdfFormFieldType::Choice) {
             if (const PdfArray* selected = node.dictionary.Find(PdfName("I"))
@@ -552,31 +768,67 @@ PdfFormUpdateResult PdfAcroForm::SetFieldValues(
             throw PdfException(PdfErrorCode::InvalidArgument, "AcroForm field not found: " + update.name);
         }
         const FieldNode& node = *found->second;
+        if ((node.flags & fieldFlag(1U)) != 0U) {
+            if (options.ignoreReadOnlyFields) continue;
+            throw PdfException(PdfErrorCode::PermissionDenied,
+                               "AcroForm field is read-only: " + update.name);
+        }
         PdfDictionary revised = deepCloneDictionary(node.dictionary);
         const PdfFormFieldType type = fieldType(node.fieldType);
         if (type == PdfFormFieldType::Signature) {
             throw PdfException(PdfErrorCode::UnsupportedFeature, "Signature field values cannot be set as text.");
         }
         if (type == PdfFormFieldType::Button) {
-            const bool radio = (node.flags & 32768U) != 0U;
+            const bool radio = (node.flags & fieldFlag(16U)) != 0U;
+            const bool pushButton = (node.flags & fieldFlag(17U)) != 0U;
+            const bool noToggleToOff = (node.flags & fieldFlag(15U)) != 0U;
+            if (pushButton) {
+                throw PdfException(PdfErrorCode::InvalidArgument,
+                                   "Push-button fields do not have a settable value: " + update.name);
+            }
             const bool checked = checkedValue(update.value);
             const std::string onState = node.widgets.empty() ? "Yes" : widgetOnState(document, node.widgets.front());
-            revised.Put(PdfName("V"), PdfObject(PdfName(
-                radio ? (update.value == "Off" ? "Off" : update.value) : (checked ? onState : "Off"))));
+            std::string desiredState;
+            if (radio) {
+                desiredState = update.value;
+                if (checked) desiredState = onState;
+                if (desiredState.empty()) desiredState = "Off";
+                if (desiredState == "Off" && noToggleToOff &&
+                    objectTextValue(&node.inheritedValue) != "Off") {
+                    throw PdfException(PdfErrorCode::InvalidArgument,
+                                       "Radio field cannot be toggled off: " + update.name);
+                }
+                if (desiredState != "Off") {
+                    const bool knownState = std::any_of(node.widgets.begin(), node.widgets.end(),
+                        [&](const PdfReference& widget) {
+                            return widgetOnState(document, widget) == desiredState;
+                        });
+                    if (!knownState) {
+                        throw PdfException(PdfErrorCode::InvalidArgument,
+                                           "Radio export value not found: " + desiredState);
+                    }
+                }
+            } else {
+                desiredState = checked ? onState : "Off";
+            }
+            revised.Put(PdfName("V"), PdfObject(PdfName(desiredState)));
             for (const auto& widgetReference : node.widgets) {
                 const PdfDictionary* originalWidget = document.GetObject(widgetReference).AsDictionary();
                 if (!originalWidget) continue;
                 PdfDictionary widget = deepCloneDictionary(*originalWidget);
                 const std::string widgetState = radio
-                    ? (update.value != "Off" && widgetOnState(document, widgetReference) == update.value
-                        ? update.value : "Off")
-                    : (checked ? onState : "Off");
+                    ? (desiredState != "Off" && widgetOnState(document, widgetReference) == desiredState
+                        ? desiredState : "Off")
+                    : desiredState;
                 widget.Put(PdfName("AS"), PdfObject(PdfName(widgetState)));
                 revisions[widgetReference.objectNumber] = {widgetReference, std::move(widget)};
                 ++result.updatedWidgetCount;
             }
         } else if (type == PdfFormFieldType::Choice && !update.selections.empty()) {
-            if ((node.flags & (1U << 21U)) == 0U) {
+            const bool multiSelect = (node.flags & fieldFlag(22U)) != 0U;
+            const bool editableCombo = (node.flags & fieldFlag(18U)) != 0U &&
+                                       (node.flags & fieldFlag(19U)) != 0U;
+            if (update.selections.size() > 1U && !multiSelect) {
                 throw PdfException(PdfErrorCode::InvalidArgument,
                                    "Multiple selections require a multi-select choice field.");
             }
@@ -585,14 +837,46 @@ PdfFormUpdateResult PdfAcroForm::SetFieldValues(
             const auto optionsList = parseOptions(node.dictionary.Find(PdfName("Opt")));
             for (const auto& selection : update.selections) {
                 const auto option = std::find(optionsList.begin(), optionsList.end(), selection);
-                if (option == optionsList.end()) {
+                if (option == optionsList.end() && !editableCombo) {
                     throw PdfException(PdfErrorCode::InvalidArgument, "Choice option not found: " + selection);
                 }
                 values.push_back(PdfObject(selection));
-                indices.push_back(PdfObject(static_cast<std::int64_t>(option - optionsList.begin())));
+                if (option != optionsList.end()) {
+                    indices.push_back(PdfObject(static_cast<std::int64_t>(option - optionsList.begin())));
+                }
             }
-            revised.Put(PdfName("V"), PdfObject(std::move(values)));
-            revised.Put(PdfName("I"), PdfObject(std::move(indices)));
+            if (multiSelect) revised.Put(PdfName("V"), PdfObject(std::move(values)));
+            else revised.Put(PdfName("V"), PdfObject(update.selections.front()));
+            if (!indices.empty()) revised.Put(PdfName("I"), PdfObject(std::move(indices)));
+            else revised.Remove(PdfName("I"));
+        } else if (type == PdfFormFieldType::Choice) {
+            const bool editableCombo = (node.flags & fieldFlag(18U)) != 0U &&
+                                       (node.flags & fieldFlag(19U)) != 0U;
+            const auto optionsList = parseOptions(node.dictionary.Find(PdfName("Opt")));
+            const auto option = std::find(optionsList.begin(), optionsList.end(), update.value);
+            if (!update.value.empty() && option == optionsList.end() && !editableCombo) {
+                throw PdfException(PdfErrorCode::InvalidArgument,
+                                   "Choice option not found: " + update.value);
+            }
+            revised.Put(PdfName("V"), PdfObject(update.value));
+            if (option != optionsList.end()) {
+                PdfArray indices;
+                indices.push_back(PdfObject(static_cast<std::int64_t>(option - optionsList.begin())));
+                revised.Put(PdfName("I"), PdfObject(std::move(indices)));
+            } else {
+                revised.Remove(PdfName("I"));
+            }
+        } else if (type == PdfFormFieldType::Text) {
+            std::string value = update.value;
+            if (const auto maxLength = dictionaryInteger(node.dictionary, PdfName("MaxLen"));
+                maxLength && *maxLength >= 0 && value.size() > static_cast<std::size_t>(*maxLength)) {
+                if (!options.truncateTextToMaxLength) {
+                    throw PdfException(PdfErrorCode::InvalidArgument,
+                                       "Text exceeds /MaxLen for field: " + update.name);
+                }
+                value.resize(static_cast<std::size_t>(*maxLength));
+            }
+            revised.Put(PdfName("V"), PdfObject(std::move(value)));
         } else {
             revised.Put(PdfName("V"), PdfObject(update.value));
         }
@@ -659,31 +943,46 @@ PdfFormAppearanceResult PdfAcroForm::GenerateAppearances(
             if (!rectangle || rectangle->width() <= 0.0 || rectangle->height() <= 0.0) continue;
 
             const PdfRectangle local{0.0, 0.0, rectangle->width(), rectangle->height()};
-            PdfDictionary streamDictionary;
-            streamDictionary.Put(PdfName("Type"), PdfObject(PdfName("XObject")));
-            streamDictionary.Put(PdfName("Subtype"), PdfObject(PdfName("Form")));
-            streamDictionary.Put(PdfName("FormType"), PdfObject(static_cast<std::int64_t>(1)));
-            streamDictionary.Put(PdfName("BBox"), rectangleArray(local));
-            streamDictionary.Put(PdfName("Resources"), PdfObject(formResources()));
-            const std::optional<bool> selected = fieldType(node.fieldType) == PdfFormFieldType::Button
-                ? std::optional<bool>(objectTextValue(&node.inheritedValue) != "Off" &&
-                    objectTextValue(&node.inheritedValue) == widgetOnState(document, widgetReference))
-                : std::nullopt;
-            const std::string commands = appearanceCommands(node, local, options, false, selected);
-            const PdfReference appearanceReference{nextObject++, 0U};
-            revisions[appearanceReference.objectNumber] = {
-                appearanceReference,
-                PdfObject(PdfStream(std::move(streamDictionary), bytesFromString(commands)))};
-
             PdfDictionary widget = deepCloneDictionary(*originalWidget);
             PdfDictionary appearance;
             if (const PdfDictionary* oldAppearance = widget.GetAsDictionary(PdfName("AP"))) {
                 appearance = deepCloneDictionary(*oldAppearance);
             }
-            appearance.Put(PdfName("N"), PdfObject::IndirectReference(appearanceReference.objectNumber));
+            const auto makeAppearanceStream = [&](const std::optional<bool> selected) {
+                PdfDictionary streamDictionary;
+                streamDictionary.Put(PdfName("Type"), PdfObject(PdfName("XObject")));
+                streamDictionary.Put(PdfName("Subtype"), PdfObject(PdfName("Form")));
+                streamDictionary.Put(PdfName("FormType"), PdfObject(static_cast<std::int64_t>(1)));
+                streamDictionary.Put(PdfName("BBox"), rectangleArray(local));
+                streamDictionary.Put(PdfName("Resources"), PdfObject(formResources()));
+                const std::string commands = appearanceCommands(node, local, options, false, selected);
+                const PdfReference reference{nextObject++, 0U};
+                revisions[reference.objectNumber] = {
+                    reference,
+                    PdfObject(PdfStream(std::move(streamDictionary), bytesFromString(commands)))};
+                ++result.generatedAppearanceCount;
+                return reference;
+            };
+
+            const bool isButton = fieldType(node.fieldType) == PdfFormFieldType::Button;
+            const bool isPushButton = isButton && (node.flags & fieldFlag(17U)) != 0U;
+            if (isButton && !isPushButton) {
+                const std::string onState = widgetOnState(document, widgetReference);
+                const std::string value = objectTextValue(&node.inheritedValue);
+                const bool selected = value != "Off" && value == onState;
+                const PdfReference offReference = makeAppearanceStream(false);
+                const PdfReference onReference = makeAppearanceStream(true);
+                PdfDictionary normalStates;
+                normalStates.Put(PdfName("Off"), PdfObject::IndirectReference(offReference.objectNumber));
+                normalStates.Put(PdfName(onState), PdfObject::IndirectReference(onReference.objectNumber));
+                appearance.Put(PdfName("N"), PdfObject(std::move(normalStates)));
+                widget.Put(PdfName("AS"), PdfObject(PdfName(selected ? onState : "Off")));
+            } else {
+                const PdfReference appearanceReference = makeAppearanceStream(std::nullopt);
+                appearance.Put(PdfName("N"), PdfObject::IndirectReference(appearanceReference.objectNumber));
+            }
             widget.Put(PdfName("AP"), PdfObject(std::move(appearance)));
             revisions[widgetReference.objectNumber] = {widgetReference, PdfObject(std::move(widget))};
-            ++result.generatedAppearanceCount;
         }
     }
 
@@ -738,7 +1037,12 @@ PdfFormAppearanceResult PdfAcroForm::FlattenFields(
             const std::uint64_t widgetKey = (static_cast<std::uint64_t>(widgetReference.objectNumber) << 16U) | widgetReference.generation;
             const auto page = pageMap.find(widgetKey);
             if (page == pageMap.end()) continue;
-            pageCommands[page->second] += appearanceCommands(node, *rectangle, options, true);
+            const std::optional<bool> selected = fieldType(node.fieldType) == PdfFormFieldType::Button
+                ? std::optional<bool>(objectTextValue(&node.inheritedValue) != "Off" &&
+                    objectTextValue(&node.inheritedValue) == widgetOnState(document, widgetReference))
+                : std::nullopt;
+            pageCommands[page->second] += appearanceCommands(
+                node, *rectangle, options, true, selected);
             removedWidgets.insert(widgetKey);
             ++result.removedWidgetCount;
             flattened = true;
@@ -800,11 +1104,18 @@ PdfFormAppearanceResult PdfAcroForm::FlattenFields(
             PdfDictionary form = deepCloneDictionary(*originalForm);
             PdfArray remaining;
             if (const PdfArray* fields = originalForm->GetAsArray(PdfName("Fields"))) {
+                std::unordered_set<std::uint64_t> active;
                 for (const auto& field : fields->values()) {
                     const auto reference = field.AsReference();
-                    const std::uint64_t key = reference ?
-                        (static_cast<std::uint64_t>(reference->first) << 16U) | reference->second : 0U;
-                    if (!reference || !removedFields.contains(key)) remaining.push_back(deepClone(field));
+                    if (!reference) {
+                        remaining.push_back(deepClone(field));
+                        continue;
+                    }
+                    const PdfReference fieldReference{reference->first, reference->second};
+                    if (pruneFlattenedFieldTree(document, fieldReference, removedFields,
+                                                removedWidgets, revisions, active)) {
+                        remaining.push_back(deepClone(field));
+                    }
                 }
             }
             form.Put(PdfName("Fields"), PdfObject(std::move(remaining)));

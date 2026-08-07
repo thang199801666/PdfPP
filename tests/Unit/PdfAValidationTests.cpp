@@ -74,7 +74,7 @@ void TestPdfAConforming() {
 void TestPdfAMissingMetadataAndOutput() {
     const auto document = PdfDocument::Open(std::span<const std::byte>(buildConformancePdf(false, false)));
     const auto result = PdfConformanceValidator::Validate(document, PdfConformanceProfile::PdfA1B);
-    PDFPP_TEST_CHECK(hasIssue(result, "PDFA-METADATA-001"));
+    PDFPP_TEST_CHECK(hasIssue(result, "META-XMP-001"));
     PDFPP_TEST_CHECK(hasIssue(result, "PDFA-OUTPUT-001"));
 }
 
@@ -88,7 +88,7 @@ void TestPdfAPartMismatch() {
     for (std::size_t i = 0; i < bytes.size(); ++i) mismatched[i] = static_cast<std::byte>(text[i]);
     const auto document = PdfDocument::Open(std::span<const std::byte>(mismatched));
     const auto result = PdfConformanceValidator::Validate(document, PdfConformanceProfile::PdfA1B);
-    PDFPP_TEST_CHECK(hasIssue(result, "PDFA-METADATA-003"));
+    PDFPP_TEST_CHECK(hasIssue(result, "PDFA-METADATA-001"));
 }
 
 void TestPdfUAStructure() {

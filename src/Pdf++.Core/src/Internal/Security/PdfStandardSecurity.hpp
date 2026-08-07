@@ -44,6 +44,8 @@ private:
                                                   std::uint32_t objectNumber,
                                                   std::uint16_t generation,
                                                   bool encrypt) const;
+    [[nodiscard]] bool AuthenticateAes256(std::string_view password, bool owner);
+    [[nodiscard]] bool ValidateAes256Permissions() const;
 
     PdfEncryptionAlgorithm algorithm_{PdfEncryptionAlgorithm::Aes128};
     std::int32_t permissions_{-4};
@@ -51,9 +53,15 @@ private:
     bool authenticated_{false};
     bool ownerAuthenticated_{false};
     std::array<std::uint8_t, 16> fileId_{};
-    std::array<std::uint8_t, 32> ownerEntry_{};
-    std::array<std::uint8_t, 32> userEntry_{};
-    std::array<std::uint8_t, 16> fileKey_{};
+
+    // Revisions 2-4 use the first 32 bytes. Revision 6 uses all 48 bytes:
+    // 32-byte validation hash + 8-byte validation salt + 8-byte key salt.
+    std::array<std::uint8_t, 48> ownerEntry_{};
+    std::array<std::uint8_t, 48> userEntry_{};
+    std::array<std::uint8_t, 32> ownerEncryptedKey_{}; // /OE
+    std::array<std::uint8_t, 32> userEncryptedKey_{};  // /UE
+    std::array<std::uint8_t, 16> encryptedPermissions_{}; // /Perms
+    std::array<std::uint8_t, 32> fileKey_{};
 };
 
 [[nodiscard]] std::array<std::uint8_t, 16> GeneratePdfFileId();

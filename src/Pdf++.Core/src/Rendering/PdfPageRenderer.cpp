@@ -1442,7 +1442,10 @@ PdfBitmap PdfPageRenderer::Render(
                 return;
             }
             if (event.type == PdfContentEventType::SaveState) {
-                clipStack.push_back({clip, strokeAlpha, fillAlpha, blendMode, transparencyIsolated, transparencyKnockout, dashPattern, dashPhase});
+                clipStack.push_back({clip, strokeAlpha, fillAlpha, blendMode,
+                                     transparencyIsolated, transparencyKnockout,
+                                     dashPattern, dashPhase,
+                                     fillPatternName, strokePatternName});
                 return;
             }
             if (event.type == PdfContentEventType::RestoreState) {

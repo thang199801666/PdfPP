@@ -43,17 +43,20 @@ PdfIncrementalWriter::PdfIncrementalWriter(const std::filesystem::path& inputPat
                                            const std::filesystem::path& outputPath,
                                            const PdfDocument& document,
                                            const PdfIncrementalWriterOptions& options)
-    : document_(document), output_(outputPath, std::ios::binary | std::ios::trunc),
+    : document_(document),
       writeXrefStream_(options.writeXrefStream),
       writeObjectStreams_(options.writeObjectStreams) {
-    // A classic xref table cannot carry type-2 entries, so object-stream
-    // output requires an xref stream in the same revision.
-    if (writeObjectStreams_) writeXrefStream_ = true;
+    // Validate the paths before opening with std::ios::trunc. Opening first
+    // would destroy the source file when callers accidentally pass the same path.
     if (std::filesystem::absolute(inputPath).lexically_normal() ==
         std::filesystem::absolute(outputPath).lexically_normal()) {
         throw PdfException(PdfErrorCode::InvalidArgument,
                            "Incremental update requires different input and output paths.");
     }
+    // A classic xref table cannot carry type-2 entries, so object-stream
+    // output requires an xref stream in the same revision.
+    if (writeObjectStreams_) writeXrefStream_ = true;
+    output_.open(outputPath, std::ios::binary | std::ios::trunc);
     if (!output_) {
         throw PdfException(PdfErrorCode::FileOpenFailed,
                            "Cannot create incremental PDF: " + outputPath.string());
@@ -151,7 +154,7 @@ void PdfIncrementalWriter::writeObjectStream(std::uint32_t& size) {
     std::ostringstream header;
     std::string payload;
     for (const auto& [number, body] : objectStreamBodies_) {
-        objectStreamOffsets_[number] = static_cast<std::uint32_t>(payload.size());
+        objectStreamIndices_[number] = static_cast<std::uint32_t>(payload.size());
         header << number << ' ' << payload.size() << '\n';
         payload += body;
     }
@@ -190,6 +193,7 @@ void PdfIncrementalWriter::Finish(const std::uint32_t trailerSize) {
         writeClassicXref(size, document_.GetStartXrefOffset());
     }
     output_ << "\nstartxref\n" << xrefOffset << "\n%%EOF\n";
+    output_.flush();
     if (!output_) {
         throw PdfException(PdfErrorCode::FileOpenFailed,
                            "Failed while writing the incremental PDF revision.");
@@ -294,8 +298,8 @@ void PdfIncrementalWriter::writeXrefStream(const std::uint32_t trailerSize,
         }
         for (std::size_t i = runBegin; i < runEnd; ++i) {
             const std::uint32_t number = numbers[i];
-            if (const auto compressed = objectStreamOffsets_.find(number);
-                compressed != objectStreamOffsets_.end()) {
+            if (const auto compressed = objectStreamIndices_.find(number);
+                compressed != objectStreamIndices_.end()) {
                 appendBigEndian(2U, 1U);
                 appendBigEndian(objectStreamNumber_, 4U);
                 appendBigEndian(compressed->second, 2U);

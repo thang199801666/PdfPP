@@ -159,7 +159,7 @@ configs; image type detection covers PNG/JPEG/BMP/JP2/CCITT.
 |---|---|---|---|---|---|
 | `PdfTextExtractor` + `ITextExtractionStrategy` | `PdfTextExtractor`, `ExtractTextChunks` | LocationTextExtraction strategy (line-by-line, columns) | 1. Implement iText-style location strategy with line/column grouping | `Text.Extractor`, new `Text.LocationStrategy` | `compare_text.py` vs MuPDF |
 | `SimpleTextExtractionStrategy` | Partial | Match iText ordering | 1. Align simple strategy ordering with iText | `Text.Extractor` extended | `compare_text.py` |
-| Text render mode filtering | Missing | `ExtractTextChunks(mode=Fill)` option | 1. Filter invisible (`Tr 3`) text | `Text.RenderModeFilter` | compare |
+| Text render mode filtering | Implemented | `PdfTextExtractionOptions::renderingMode`, `PdfTextSearchOptions::renderingMode`, `PdfRegexSearchOptions::renderingMode` | Exact `Tr` filtering across extraction, literal/regex search, regions, and document indexes | `Text.Extractor`, `API.TextSearch`, `Feature.DocumentTextIndexMappedInputAndStreamWriter` | compare |
 | `PdfTextSearch` | Implemented (literal + regex, geometry, index) | — | 1. Keep. | `Text.Search`, `Text.SearchOptions`, `API.TextSearch` | none |
 | Tagged-text / marked-content extraction | Missing | Export marked-content structure (MCID) | 1. Parse `BDC`/`MCID` into structure spans | `Text.MarkedContentSpans`, `Validation.PdfUAStructure` | mupdf |
 
@@ -272,7 +272,7 @@ configs; image type detection covers PNG/JPEG/BMP/JP2/CCITT.
 
 | iText | Pdf++ today | Target API | Steps | Acceptance | External |
 |---|---|---|---|---|---|
-| `itext7` maven artifacts | CMake install + package config | `CPPPdf::Core` find_package works for consumers | 1. Test a downstream `find_package` consumer (see `examples/`). 2. Pkg-config file | `API.PublicArchitecture`, CI job `package-consumer` | cmake |
+| `itext7` maven artifacts | CMake install + package config | `PdfPP::Core` find_package works for consumers | 1. Test a downstream `find_package` consumer (see `examples/`). 2. Pkg-config file | `API.PublicArchitecture`, CI job `package-consumer` | cmake |
 | C ABI | `pdfpp_c.h` | Stable symbols + versioning | 1. Add `pdfpp_c_version()`; 2. ABI check script | `API.CApi` extended, `tools/abi/check.py` | none |
 | Versioning policy | `Version.hpp` | ABI version 1 | 1. Keep `Version.hpp`; set SOVERSION 1 | `API.PublicArchitecture` | none |
 | Cross-compiler | MSVC ok; GCC/Clang required | CI matrix GCC+Clang+MSVC, `/WX`/`-Werror` | 1. Add CI matrix; 2. Fix Clang/GCC warnings to zero | CI green on 3 compilers | none |

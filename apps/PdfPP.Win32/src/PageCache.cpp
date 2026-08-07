@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <utility>
 
 namespace PdfPP::Win32 {
@@ -33,6 +34,14 @@ bool PageCache::Contains(const int page, const double zoom, const unsigned int d
     return std::any_of(entries_.begin(), entries_.end(), [&](const PageBitmap& entry) {
         return Matches(entry, page, zoom, dpi);
     });
+}
+
+const PageBitmap* PageCache::Peek(const int page, const double zoom,
+                                  const unsigned int dpi) const noexcept {
+    const auto existing = std::find_if(entries_.begin(), entries_.end(), [&](const PageBitmap& entry) {
+        return Matches(entry, page, zoom, dpi);
+    });
+    return existing == entries_.end() ? nullptr : std::addressof(*existing);
 }
 
 std::optional<PageBitmap> PageCache::Get(const int page, const double zoom,

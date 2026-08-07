@@ -1,6 +1,6 @@
 #pragma once
 
-#include <PdfPP/Win32/NativePdf.hpp>
+#include <PdfPP/Win32/ReaderPdfDocument.hpp>
 
 #include <cstddef>
 #include <deque>
@@ -15,6 +15,11 @@ public:
     void Clear() noexcept;
     void Store(PageBitmap bitmap);
     [[nodiscard]] bool Contains(int page, double zoom, unsigned int dpi) const noexcept;
+    // Returns a stable, non-owning view without copying the (potentially very
+    // large) pixel buffer. The pointer remains valid until the cache is
+    // modified. Intended for immediate painting on the UI thread.
+    [[nodiscard]] const PageBitmap* Peek(int page, double zoom,
+                                         unsigned int dpi) const noexcept;
     [[nodiscard]] std::optional<PageBitmap> Get(int page, double zoom, unsigned int dpi);
     // Transfers ownership of a cached bitmap without copying its pixel buffer.
     [[nodiscard]] std::optional<PageBitmap> Take(int page, double zoom, unsigned int dpi);

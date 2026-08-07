@@ -32,6 +32,6 @@
     </ClCompile>
     <Link><AdditionalDependencies>comctl32.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
-  <ItemGroup><ClInclude Include="include\PdfPP\ModernWin32.hpp" /><ClCompile Include="src\ModernWin32.cpp" /></ItemGroup>
+  <ItemGroup><ClInclude Include="include\PdfPP\ModernWin32.hpp" /><ClCompile Include="src\ModernWin32.cpp" /><ClCompile Include="src\Components.cpp" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

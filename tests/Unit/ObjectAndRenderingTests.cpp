@@ -83,7 +83,7 @@ void TestBitmapBlendModes() {
     PdfBitmap blendBitmap(1U, 1U, {100U, 150U, 200U, 255U});
     blendBitmap.BlendPixel(0, 0, {200U, 100U, 50U, 255U}, PdfBlendMode::Multiply);
     PDFPP_TEST_CHECK(blendBitmap.GetPixel(0U, 0U).red == 78U);
-    PDFPP_TEST_CHECK(blendBitmap.GetPixel(0U, 0U).green == 58U);
+    PDFPP_TEST_CHECK(blendBitmap.GetPixel(0U, 0U).green == 59U);
     PDFPP_TEST_CHECK(blendBitmap.GetPixel(0U, 0U).blue == 39U);
     PdfBitmap screenBitmap(1U, 1U, {100U, 150U, 200U, 255U});
     screenBitmap.BlendPixel(0, 0, {200U, 100U, 50U, 255U}, PdfBlendMode::Screen);

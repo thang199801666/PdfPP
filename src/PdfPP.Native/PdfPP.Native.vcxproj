@@ -48,11 +48,11 @@
       <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link Condition="'$(Configuration)'=='Debug'">
-      <AdditionalDependencies>gdiplus.lib;windowsapp.lib;$(OutDir)Pdf++.Core.lib;$(OutDir)zlibstaticd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>gdiplus.lib;windowsapp.lib;zlibstaticd.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <Link Condition="'$(Configuration)'=='Release'">
-      <AdditionalDependencies>gdiplus.lib;windowsapp.lib;$(OutDir)Pdf++.Core.lib;$(OutDir)zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>gdiplus.lib;windowsapp.lib;zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -62,6 +62,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Pdf++.Core\Pdf++.Core.vcxproj">
       <Project>{2EA9D488-A5DF-4A18-8F15-7EB7F6AD4901}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\third_party\zlib\zlibstatic.vcxproj">
+      <Project>{8F14538D-A037-4B3D-B0F8-BB30BFD1428D}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

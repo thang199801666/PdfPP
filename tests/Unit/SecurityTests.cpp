@@ -260,7 +260,7 @@ void verifySignatureWorkflow() {
 
     // One-shot convenience: Sign() produces the same structure.
     const auto signedOutput = securityTemp("pdfpp-signature-once.pdf");
-    PdfSignatureManager::Sign(source, signedOutput, [](std::span<const std::byte> digestInput) {
+    (void)PdfSignatureManager::Sign(source, signedOutput, [](std::span<const std::byte> digestInput) {
         const auto hash = Internal::Sha256(std::span<const std::uint8_t>(
             reinterpret_cast<const std::uint8_t*>(digestInput.data()), digestInput.size()));
         std::vector<std::byte> result;
@@ -291,7 +291,7 @@ void verifySignatureVerification() {
     options.pageIndex = 0U;
     options.signerName = "Verifier";
     options.contentsSize = 512U;
-    PdfSignatureManager::Sign(source, signedPath, [](std::span<const std::byte> digestInput) {
+    (void)PdfSignatureManager::Sign(source, signedPath, [](std::span<const std::byte> digestInput) {
         const auto hash = Internal::Sha256(std::span<const std::uint8_t>(
             reinterpret_cast<const std::uint8_t*>(digestInput.data()), digestInput.size()));
         std::vector<std::byte> result;
@@ -327,13 +327,19 @@ void verifyEcdsa() {
         0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10,
         0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,0x20};
     const auto signature = CPPPdf::PdfCms::EcDsaSign(privateKey, digest);
-    PDFPP_TEST_CHECK(signature.size() >= 64U);
+#if defined(_WIN32)
+    PDFPP_TEST_CHECK(signature.size() == 64U);
     const bool ok = CPPPdf::PdfCms::EcDsaVerify(privateKey.publicKey, digest, signature);
     PDFPP_TEST_CHECK(ok);
     // A wrong digest must fail verification.
     std::array<std::uint8_t, 32> wrong = digest;
     wrong[0] ^= 0xFFU;
     PDFPP_TEST_CHECK(!CPPPdf::PdfCms::EcDsaVerify(privateKey.publicKey, wrong, signature));
+#else
+    // The built-in ECDSA backend is Windows CNG. Other platforms return an
+    // empty signature until an optional portable crypto backend is configured.
+    PDFPP_TEST_CHECK(signature.empty());
+#endif
 }
 
 void verifyCertificateInfo() {
@@ -377,7 +383,7 @@ void verifyDss() {
     const auto source = securityTemp("pdfpp-dss-source.pdf");
     const auto output = securityTemp("pdfpp-dss-output.pdf");
     PdfWriter writer;
-    writer.AddPage({0, 0, 200, 200});
+    (void)writer.AddPage({0, 0, 200, 200});
     writer.Save(source);
 
     // A small DER certificate payload (arbitrary bytes; DSS stores opaque data).
@@ -505,7 +511,7 @@ void TestEncryptedForms() {
     PdfReaderOptions formReader;
     formReader.password = "form-owner";
     const auto formResult = PdfAcroForm::SetFieldValues(
-        formEncrypted, formUpdated, {{"Name", "Updated encrypted form"}}, {}, formReader);
+        formEncrypted, formUpdated, {PdfFormFieldUpdate{"Name", "Updated encrypted form", {}}}, {}, formReader);
     PDFPP_TEST_CHECK(formResult.updatedFieldCount == 1U);
     PDFPP_TEST_CHECK(readBytes(formUpdated).find("Updated encrypted form") == std::string::npos);
     const auto formFields = PdfAcroForm::GetFields(formUpdated, formReader);

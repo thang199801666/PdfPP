@@ -35,7 +35,7 @@ void PdfObjectCollectionWriter::Write(std::ostream& out,
                                       const PdfStandardSecurity* security,
                                       const std::array<std::uint8_t, 16>& fileId) {
     const bool hasDocumentInfo = infoObject != 0U;
-    out << "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n";
+    out << "%PDF-" << options.pdfVersion << "\n%\xE2\xE3\xCF\xD3\n";
 
     std::vector<std::size_t> objectStreamMembers;
     if (options.writeXrefStream && options.writeObjectStreams) {
@@ -49,15 +49,16 @@ void PdfObjectCollectionWriter::Write(std::ostream& out,
     }
     const bool hasObjectStream = objectStreamMembers.size() >= 3U;
 
-    std::vector<std::size_t> objectStreamOffsets(objects.size(), std::string::npos);
+    std::vector<std::size_t> objectStreamIndices(objects.size(), std::string::npos);
     std::string objectStreamPayload;
     std::string objectStreamHeader;
     std::size_t objectStreamObject = 0U;
     if (hasObjectStream) {
         objectStreamObject = objects.size();
         std::ostringstream header;
-        for (const std::size_t member : objectStreamMembers) {
-            objectStreamOffsets[member] = objectStreamPayload.size();
+        for (std::size_t index = 0U; index < objectStreamMembers.size(); ++index) {
+            const std::size_t member = objectStreamMembers[index];
+            objectStreamIndices[member] = index;
             header << member << ' ' << objectStreamPayload.size() << '\n';
             objectStreamPayload += objects[member];
         }
@@ -66,7 +67,7 @@ void PdfObjectCollectionWriter::Write(std::ostream& out,
 
     std::vector<std::uint64_t> offsets(objects.size());
     for (std::size_t i = 1; i < objects.size(); ++i) {
-        if (hasObjectStream && objectStreamOffsets[i] != std::string::npos) continue;
+        if (hasObjectStream && objectStreamIndices[i] != std::string::npos) continue;
         offsets[i] = static_cast<std::uint64_t>(out.tellp());
         out << i << " 0 obj\n";
         const std::string body = security && i != encryptionObject
@@ -132,10 +133,10 @@ void PdfObjectCollectionWriter::Write(std::ostream& out,
     appendBigEndian(0U, 4U);   // next free object = 0
     appendBigEndian(65535U, 2U);
     for (std::size_t i = 1; i < objects.size(); ++i) {
-        if (hasObjectStream && objectStreamOffsets[i] != std::string::npos) {
+        if (hasObjectStream && objectStreamIndices[i] != std::string::npos) {
             appendBigEndian(2U, 1U);
             appendBigEndian(objectStreamObject, 4U);
-            appendBigEndian(objectStreamOffsets[i], 2U);
+            appendBigEndian(objectStreamIndices[i], 2U);
         } else {
             appendBigEndian(1U, 1U);
             appendBigEndian(offsets[i], 4U);

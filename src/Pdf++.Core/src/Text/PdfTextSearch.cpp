@@ -11,11 +11,18 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <stdexcept>
 
 namespace CPPPdf {
 namespace {
 
 constexpr std::size_t NoChunk = std::numeric_limits<std::size_t>::max();
+
+void ValidateRenderingMode(const std::optional<int>& mode) {
+    if (mode.has_value() && (*mode < 0 || *mode > 7)) {
+        throw std::invalid_argument("PDF text rendering mode must be between 0 and 7.");
+    }
+}
 
 struct ChunkSpan final {
     std::size_t textBegin{};
@@ -154,6 +161,7 @@ const std::vector<PdfTextChunk>& PdfTextSearchIndex::GetChunks() const noexcept 
 std::vector<PdfTextSearchMatch> PdfTextSearchIndex::Find(
     const std::string_view keyword,
     const PdfTextSearchOptions& options) const {
+    ValidateRenderingMode(options.renderingMode);
     if (keyword.empty()) {
         throw PdfException(PdfErrorCode::InvalidArgument, "Text search keyword cannot be empty.");
     }
@@ -181,6 +189,7 @@ std::vector<PdfTextSearchMatch> PdfTextSearchIndex::Find(
 std::vector<PdfTextSearchMatch> PdfTextSearchIndex::FindRegex(
     const std::string_view pattern,
     const PdfRegexSearchOptions& options) const {
+    ValidateRenderingMode(options.renderingMode);
     if (pattern.empty()) {
         throw PdfException(PdfErrorCode::InvalidArgument, "Text search regex cannot be empty.");
     }
@@ -198,6 +207,7 @@ std::vector<PdfTextSearchMatch> PdfTextSearchIndex::FindRegex(
 std::vector<PdfTextSearchMatch> PdfTextSearchIndex::FindRegex(
     const std::regex& expression,
     const PdfRegexSearchOptions& options) const {
+    ValidateRenderingMode(options.renderingMode);
     std::vector<PdfTextSearchMatch> matches;
     for (auto iterator = std::sregex_iterator(impl_->text.begin(), impl_->text.end(), expression);
          iterator != std::sregex_iterator(); ++iterator) {

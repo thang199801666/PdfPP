@@ -7,6 +7,7 @@
 
 namespace CPPPdf::Internal {
 
+[[nodiscard]] std::array<std::uint8_t, 16> Md5(std::span<const std::uint8_t> input);
 [[nodiscard]] std::array<std::uint8_t, 32> Sha256(std::span<const std::uint8_t> input);
 [[nodiscard]] std::array<std::uint8_t, 64> Sha512(std::span<const std::uint8_t> input);
 [[nodiscard]] std::array<std::uint8_t, 48> Sha384(std::span<const std::uint8_t> input);

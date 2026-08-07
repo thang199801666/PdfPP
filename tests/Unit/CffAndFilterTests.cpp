@@ -52,6 +52,30 @@ void TestFilters() {
         reinterpret_cast<const std::byte*>(asciiHex.data()), asciiHex.size()));
     PDFPP_TEST_CHECK(std::string(reinterpret_cast<const char*>(hex.data()), hex.size()) == "Hello");
 
+    const std::string oddAsciiHex = "48 65 6C 6C 6F 7>";
+    const auto oddHex = PdfFilterPipeline::DecodeAsciiHex(std::span(
+        reinterpret_cast<const std::byte*>(oddAsciiHex.data()), oddAsciiHex.size()));
+    PDFPP_TEST_CHECK(std::string(reinterpret_cast<const char*>(oddHex.data()), oddHex.size()) == "Hello\x70");
+
+    const std::string ascii85Zero = "z~>";
+    const auto zeroTuple = PdfFilterPipeline::DecodeAscii85(std::span(
+        reinterpret_cast<const std::byte*>(ascii85Zero.data()), ascii85Zero.size()));
+    PDFPP_TEST_CHECK(zeroTuple.size() == 4U);
+    PDFPP_TEST_CHECK(std::all_of(zeroTuple.begin(), zeroTuple.end(),
+                                 [](const std::byte value) { return value == std::byte{0}; }));
+
+    PDFPP_TEST_EXPECT_THROWS(([] {
+        const std::string invalid = "486g>";
+        (void)PdfFilterPipeline::DecodeAsciiHex(std::span(
+            reinterpret_cast<const std::byte*>(invalid.data()), invalid.size()));
+    }));
+
+    PDFPP_TEST_EXPECT_THROWS(([] {
+        const std::string invalid = "v";
+        (void)PdfFilterPipeline::DecodeAscii85(std::span(
+            reinterpret_cast<const std::byte*>(invalid.data()), invalid.size()));
+    }));
+
     const std::vector<std::byte> runLength{
         std::byte{2}, std::byte{'A'}, std::byte{'B'}, std::byte{'C'},
         std::byte{254}, std::byte{'Z'}, std::byte{128}};

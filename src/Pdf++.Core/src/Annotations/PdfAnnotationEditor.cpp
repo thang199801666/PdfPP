@@ -97,22 +97,6 @@ std::string readFile(const std::filesystem::path& path) {
     return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
-std::uint32_t nextObjectNumber(const PdfDocument& document) {
-    std::uint32_t maximum = 0U;
-    for (const auto number : document.objectNumbers()) maximum = std::max(maximum, number);
-    if (maximum == std::numeric_limits<std::uint32_t>::max()) {
-        throw PdfException(PdfErrorCode::UnsupportedFeature, "No free PDF object number remains.");
-    }
-    return maximum + 1U;
-}
-
-PdfDictionary parseTrailerDictionary(const PdfDocument& document) {
-    const PdfObject object = Internal::PdfObjectParser::Parse(document.trailerDictionary(), 256U);
-    const PdfDictionary* dictionary = object.AsDictionary();
-    if (!dictionary) throw PdfException(PdfErrorCode::MalformedXref, "Trailer is not a PDF dictionary.");
-    return *dictionary;
-}
-
 PdfDictionary copyPageDictionary(const PdfDocument& document, const PdfReference& pageReference) {
     const PdfObject& pageObject = document.GetObject(pageReference);
     const PdfDictionary* dictionary = pageObject.AsDictionary();
@@ -135,11 +119,6 @@ PdfArray collectExistingAnnotations(const PdfDocument& document, const PdfDictio
     return result;
 }
 
-void writeXrefEntry(std::ostream& output, std::uint64_t offset, std::uint16_t generation) {
-    output << std::setw(10) << std::setfill('0') << offset << ' '
-           << std::setw(5) << std::setfill('0') << generation << " n \n";
-}
-
 const char* subtypeName(PdfAnnotationType type) {
     switch (type) {
     case PdfAnnotationType::Highlight: return "Highlight";
@@ -157,6 +136,10 @@ const char* subtypeName(PdfAnnotationType type) {
     case PdfAnnotationType::Circle: return "Circle";
     case PdfAnnotationType::Stamp: return "Stamp";
     case PdfAnnotationType::Popup: return "Popup";
+    case PdfAnnotationType::Caret: return "Caret";
+    case PdfAnnotationType::Screen: return "Screen";
+    case PdfAnnotationType::Movie: return "Movie";
+    case PdfAnnotationType::Sound: return "Sound";
     }
     return "Text";
 }
@@ -265,7 +248,148 @@ std::optional<PdfReference> findEmbeddedFileSpec(
     return std::nullopt;
 }
 
-void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation,
+void writeNullableNumber(std::ostream& output, const std::optional<double>& value) {
+    if (value) output << *value;
+    else output << "null";
+}
+
+void writeLocalDestination(
+    std::ostream& output,
+    const PdfDocument& document,
+    const PdfAnnotationAction& action) {
+    if (action.destinationType == PdfAnnotationDestinationType::Named) {
+        if (action.destinationName.empty()) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "Named GoTo action requires a destination name.");
+        }
+        output << '(' << escapeLiteral(action.destinationName) << ')';
+        return;
+    }
+    if (action.pageIndex >= document.GetPageCount()) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "GoTo action page index is out of range.");
+    }
+    const PdfReference page = document.GetPageReference(action.pageIndex);
+    output << '[' << page.objectNumber << ' ' << page.generation << " R ";
+    switch (action.destinationType) {
+    case PdfAnnotationDestinationType::FitPage:
+        output << "/Fit";
+        break;
+    case PdfAnnotationDestinationType::FitWidth:
+        output << "/FitH ";
+        writeNullableNumber(output, action.top);
+        break;
+    case PdfAnnotationDestinationType::Xyz:
+        output << "/XYZ ";
+        writeNullableNumber(output, action.left);
+        output << ' ';
+        writeNullableNumber(output, action.top);
+        output << ' ';
+        writeNullableNumber(output, action.zoom);
+        break;
+    case PdfAnnotationDestinationType::Named:
+        break;
+    }
+    output << ']';
+}
+
+void writeRemoteDestination(std::ostream& output, const PdfAnnotationAction& action) {
+    if (!action.destinationName.empty()) {
+        output << '(' << escapeLiteral(action.destinationName) << ')';
+        return;
+    }
+    output << '[' << action.pageIndex << ' ';
+    switch (action.destinationType) {
+    case PdfAnnotationDestinationType::FitWidth:
+        output << "/FitH ";
+        writeNullableNumber(output, action.top);
+        break;
+    case PdfAnnotationDestinationType::Xyz:
+        output << "/XYZ ";
+        writeNullableNumber(output, action.left);
+        output << ' ';
+        writeNullableNumber(output, action.top);
+        output << ' ';
+        writeNullableNumber(output, action.zoom);
+        break;
+    case PdfAnnotationDestinationType::FitPage:
+    case PdfAnnotationDestinationType::Named:
+        output << "/Fit";
+        break;
+    }
+    output << ']';
+}
+
+void writeActionDictionary(
+    std::ostream& output,
+    const PdfDocument& document,
+    const PdfAnnotationAction& action,
+    const std::size_t depth = 0U) {
+    if (depth > 32U) {
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "Annotation action chain exceeds 32 levels.");
+    }
+    output << "<< ";
+    switch (action.type) {
+    case PdfAnnotationActionType::None:
+        throw PdfException(PdfErrorCode::InvalidArgument,
+                           "A chained annotation action cannot have type None.");
+    case PdfAnnotationActionType::Uri:
+        if (action.uri.empty()) {
+            throw PdfException(PdfErrorCode::InvalidArgument, "URI action cannot be empty.");
+        }
+        output << "/S /URI /URI (" << escapeLiteral(action.uri) << ')';
+        break;
+    case PdfAnnotationActionType::GoTo:
+        output << "/S /GoTo /D ";
+        writeLocalDestination(output, document, action);
+        break;
+    case PdfAnnotationActionType::GoToR:
+        if (action.fileName.empty()) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "GoToR action requires a remote file name.");
+        }
+        output << "/S /GoToR /F (" << escapeLiteral(action.fileName) << ") /D ";
+        writeRemoteDestination(output, action);
+        output << " /NewWindow " << (action.newWindow ? "true" : "false");
+        break;
+    case PdfAnnotationActionType::Launch:
+        if (action.fileName.empty()) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "Launch action requires a file name.");
+        }
+        output << "/S /Launch /F (" << escapeLiteral(action.fileName) << ')';
+        if (!action.launchParameters.empty()) {
+            output << " /Win << /F (" << escapeLiteral(action.fileName) << ") /P ("
+                   << escapeLiteral(action.launchParameters) << ") >>";
+        }
+        break;
+    case PdfAnnotationActionType::Named:
+        if (action.namedAction.empty()) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "Named action requires an action name.");
+        }
+        output << "/S /Named /N " << escapeName(action.namedAction);
+        break;
+    }
+    if (!action.next.empty()) {
+        output << " /Next ";
+        if (action.next.size() == 1U) {
+            writeActionDictionary(output, document, action.next.front(), depth + 1U);
+        } else {
+            output << '[';
+            for (const auto& next : action.next) {
+                writeActionDictionary(output, document, next, depth + 1U);
+                output << ' ';
+            }
+            output << ']';
+        }
+    }
+    output << " >>";
+}
+
+void writeAnnotation(std::ostream& output, const PdfDocument& document,
+                     const PdfAnnotation& annotation,
                      const std::optional<PdfReference>& replyTarget = std::nullopt,
                      const std::optional<PdfReference>& popupReference = std::nullopt,
                      const std::optional<PdfReference>& fileSpecReference = std::nullopt) {
@@ -315,6 +439,15 @@ void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation,
         const std::string stamp = annotation.stampName.empty() ? "Approved" : annotation.stampName;
         output << "/Name /" << stamp << "\n";
     }
+    if (annotation.type == PdfAnnotationType::Caret) {
+        if (annotation.caretSymbol == PdfCaretSymbol::Paragraph) output << "/Sy /P\n";
+        else if (annotation.caretSymbol == PdfCaretSymbol::Space) output << "/Sy /S\n";
+        const PdfRectangle& rd = annotation.rectangleDifferences;
+        if (rd.left != 0.0 || rd.bottom != 0.0 || rd.right != 0.0 || rd.top != 0.0) {
+            output << "/RD [" << rd.left << ' ' << rd.bottom << ' '
+                   << rd.right << ' ' << rd.top << "]\n";
+        }
+    }
     if (annotation.type == PdfAnnotationType::FileAttachment) {
         if (!fileSpecReference) {
             throw PdfException(PdfErrorCode::InvalidArgument,
@@ -323,11 +456,53 @@ void writeAnnotation(std::ostream& output, const PdfAnnotation& annotation,
         output << "/FS " << fileSpecReference->objectNumber << ' '
                << fileSpecReference->generation << " R\n/Name /PushPin\n";
     }
+    if (annotation.type == PdfAnnotationType::Movie) {
+        if (annotation.mediaReference) {
+            output << "/Movie " << annotation.mediaReference->objectNumber << ' '
+                   << annotation.mediaReference->generation << " R\n";
+        } else if (!annotation.mediaFileName.empty()) {
+            output << "/Movie << /F (" << escapeLiteral(annotation.mediaFileName) << ") >>\n";
+        } else {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "Movie annotation requires mediaFileName or mediaReference.");
+        }
+    }
+    if (annotation.type == PdfAnnotationType::Sound) {
+        if (!annotation.mediaReference) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "Sound annotation requires an existing sound-stream reference.");
+        }
+        if (!document.GetObject(*annotation.mediaReference).AsStream()) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "Sound annotation mediaReference must resolve to a stream object.");
+        }
+        output << "/Sound " << annotation.mediaReference->objectNumber << ' '
+               << annotation.mediaReference->generation << " R\n";
+    }
+    PdfAnnotationAction action = annotation.action;
+    if (action.type == PdfAnnotationActionType::None && !annotation.uri.empty()) {
+        action.type = PdfAnnotationActionType::Uri;
+        action.uri = annotation.uri;
+    }
     if (annotation.type == PdfAnnotationType::Link) {
-        if (annotation.uri.empty()) throw PdfException(PdfErrorCode::InvalidArgument, "Link annotation URI cannot be empty.");
-        output << "/Border [0 0 0]\n/A << /S /URI /URI (" << escapeLiteral(annotation.uri) << ") >>\n";
-    } else {
-        output << "/F 4\n";
+        if (action.type == PdfAnnotationActionType::None) {
+            throw PdfException(PdfErrorCode::InvalidArgument,
+                               "Link annotation requires an action or URI.");
+        }
+        output << "/Border [0 0 0]\n/A ";
+        writeActionDictionary(output, document, action);
+        output << '\n';
+    } else if (annotation.type == PdfAnnotationType::Screen &&
+               action.type != PdfAnnotationActionType::None) {
+        output << "/A ";
+        writeActionDictionary(output, document, action);
+        output << '\n';
+    }
+    if (annotation.structParent) {
+        output << "/StructParent " << *annotation.structParent << "\n";
+    }
+    if (annotation.flags != 0U) {
+        output << "/F " << annotation.flags << "\n";
     }
     output << ">>\n";
 }
@@ -400,7 +575,7 @@ PdfAnnotationEditResult PdfAnnotationEditor::AddAnnotations(
             const auto fileSpecReference = annotation->type == PdfAnnotationType::FileAttachment
                 ? findEmbeddedFileSpec(document, annotation->attachmentName) : std::nullopt;
             std::ostringstream body;
-            writeAnnotation(body, *annotation, replyTarget, popupReference, fileSpecReference);
+            writeAnnotation(body, document, *annotation, replyTarget, popupReference, fileSpecReference);
             writer.WriteRawObject(references[refIndex], body.str());
 
             // Emit the linked Popup annotation object when requested.

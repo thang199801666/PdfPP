@@ -20,6 +20,21 @@ void CheckAppend(std::size_t current, std::size_t additional, std::size_t max) {
                            "Decoded stream exceeds configured limit.");
     }
 }
+void CheckExpansion(std::size_t encoded, std::size_t decoded, std::size_t maximumRatio) {
+    if (maximumRatio == 0U) return;
+    if (encoded == 0U) {
+        if (decoded != 0U) {
+            throw PdfException(PdfErrorCode::UnsupportedFeature,
+                               "Decoded stream exceeds configured expansion ratio.");
+        }
+        return;
+    }
+    if (encoded > std::numeric_limits<std::size_t>::max() / maximumRatio) return;
+    if (decoded > encoded * maximumRatio) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Decoded stream exceeds configured expansion ratio.");
+    }
+}
 
 int Parameter(const std::string& dictionary, const char* key, int fallback) {
     const std::regex expression(std::string("/") + key + R"(\s+([+-]?\d+))");
@@ -159,6 +174,7 @@ std::vector<std::byte> PdfFilterPipeline::Decode(std::span<const std::byte> inpu
     Check(input.size(), maxDecodedSize_);
     std::vector<std::byte> data(input.begin(),input.end());
     for(const auto& f:filters){
+        const std::size_t encodedSize = data.size();
         if(f.name=="FlateDecode"||f.name=="Fl") {
             data=DecodeFlate(data,maxDecodedSize_);
             data=ApplyPredictor(std::move(data), f.decodeParameters, maxDecodedSize_);
@@ -173,6 +189,7 @@ std::vector<std::byte> PdfFilterPipeline::Decode(std::span<const std::byte> inpu
         }
         else throw PdfException(PdfErrorCode::UnsupportedFeature,"Unsupported PDF filter: "+f.name);
         Check(data.size(),maxDecodedSize_);
+        CheckExpansion(encodedSize, data.size(), maxExpansionRatio_);
     }
     return data;
 }

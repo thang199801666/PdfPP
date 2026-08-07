@@ -1,5 +1,8 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 
 namespace PdfPP::Win32::Command {
@@ -41,10 +44,63 @@ inline constexpr int ID_ADD_FAVORITE = 1034;
 inline constexpr int ID_FAVORITE_BASE = 1035;
 inline constexpr int ID_TABBAR = 1036;
 inline constexpr int ID_CLOSE_TAB = 1037;
+inline constexpr int ID_TOOLS_PANEL = 1038;
+inline constexpr int ID_TOOLS_TOGGLE = 1039;
+inline constexpr int ID_TOOLS_TITLE = 1040;
+inline constexpr int ID_TOOLS_SEARCH = 1041;
+inline constexpr int ID_TOOLS_TREE = 1042;
+
+inline constexpr int ID_SHOW_PAGE_SHADOW = 1100;
+inline constexpr int ID_MERGE_PDFS = 1101;
+inline constexpr int ID_EXTRACT_PAGES = 1102;
+inline constexpr int ID_SPLIT_PDF = 1103;
+inline constexpr int ID_DELETE_PAGES = 1104;
+inline constexpr int ID_MOVE_PAGE = 1105;
+inline constexpr int ID_REVERSE_PAGES = 1106;
+inline constexpr int ID_DUPLICATE_PAGES = 1107;
+inline constexpr int ID_ADD_PASSWORD = 1108;
+inline constexpr int ID_REMOVE_PASSWORD = 1109;
+inline constexpr int ID_CHANGE_PASSWORD = 1110;
+inline constexpr int ID_REORDER_PAGES = 1111;
+inline constexpr int ID_FIND_CLOSE = 1112;
+inline constexpr int ID_FIND_OPTIONS = 1113;
+inline constexpr int ID_FIND_SCOPE_WHOLE_PAGE = 1114;
+inline constexpr int ID_FIND_SCOPE_CURRENT_PAGE = 1115;
+inline constexpr int ID_FIND_CASE_SENSITIVE = 1116;
+inline constexpr int ID_FIND_CASE_INSENSITIVE = 1117;
+inline constexpr int ID_FIND_MODE_NORMAL = 1118;
+inline constexpr int ID_FIND_MODE_REGEX = 1119;
+inline constexpr int ID_FIND_INCLUDE_COMMENTS = 1120;
+inline constexpr int ID_FIND_INCLUDE_BOOKMARKS = 1121;
+inline constexpr int ID_CRACK_PASSWORD = 1122;
+
+inline constexpr int ID_TOOL_PDF_TEXT_EDITOR = 1201;
+inline constexpr int ID_TOOL_COMPARE = 1202;
+inline constexpr int ID_TOOL_COMPRESS = 1203;
+inline constexpr int ID_TOOL_CONVERT = 1204;
+inline constexpr int ID_TOOL_OCR = 1205;
+inline constexpr int ID_TOOL_REDACT = 1206;
+inline constexpr int ID_TOOL_MULTI_TOOL = 1207;
+inline constexpr int ID_TOOL_SIGN_WITH_CERTIFICATE = 1208;
+inline constexpr int ID_TOOL_TIMESTAMP_PDF = 1209;
+inline constexpr int ID_TOOL_SIGN = 1210;
+inline constexpr int ID_TOOL_SHARED_SIGNING = 1211;
+inline constexpr int ID_TOOL_ADD_WATERMARK = 1212;
+inline constexpr int ID_TOOL_ADD_STAMP = 1213;
+inline constexpr int ID_TOOL_SANITIZE = 1214;
+inline constexpr int ID_TOOL_FLATTEN = 1215;
+inline constexpr int ID_TOOL_UNLOCK_FORMS = 1216;
+inline constexpr int ID_TOOL_CHANGE_PERMISSIONS = 1217;
+inline constexpr int ID_TOOL_GET_ALL_INFO = 1218;
+inline constexpr int ID_TOOL_VALIDATE_SIGNATURE = 1219;
+inline constexpr int ID_TOOL_CHANGE_METADATA = 1220;
+inline constexpr int ID_TOOL_EDIT_TABLE_OF_CONTENTS = 1221;
+inline constexpr int ID_TOOL_READ = 1222;
 
 inline constexpr UINT WM_RENDER_COMPLETE = WM_APP + 41;
 inline constexpr UINT WM_OPEN_COMPLETE = WM_APP + 42;
 inline constexpr UINT_PTR RENDER_TIMER = 41;
 inline constexpr UINT_PTR ZOOM_TIMER = 42;
+inline constexpr UINT_PTR TEXT_GEOMETRY_TIMER = 43;
 
 } // namespace PdfPP::Win32::Command

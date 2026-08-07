@@ -8,6 +8,7 @@
 #include <charconv>
 #include <unordered_map>
 #include <utility>
+#include <stdexcept>
 
 namespace CPPPdf {
 namespace {
@@ -105,6 +106,10 @@ std::vector<PdfMarkedContentSpan> PdfTextExtractor::ExtractMarkedContent(
 std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
     const std::string_view content,
     const PdfTextExtractionRequest& request) {
+    if (request.options.renderingMode.has_value() &&
+        (*request.options.renderingMode < 0 || *request.options.renderingMode > 7)) {
+        throw std::invalid_argument("PDF text rendering mode must be between 0 and 7.");
+    }
     std::vector<PdfTextChunk> chunks;
     // Most text-showing operators carry several bytes. This conservative
     // estimate reduces vector growth without over-allocating large streams.
@@ -189,6 +194,11 @@ std::vector<PdfTextChunk> PdfTextExtractor::ExtractChunks(
         if (event.type != PdfContentEventType::RenderText || event.text.empty()) return;
 
         const bool invisibleText = event.textState.renderingMode == 3;
+
+        if (request.options.renderingMode.has_value() &&
+            event.textState.renderingMode != *request.options.renderingMode) {
+            return;
+        }
 
         if (!hasPosition) {
             currentX = event.textState.textMatrix[4];

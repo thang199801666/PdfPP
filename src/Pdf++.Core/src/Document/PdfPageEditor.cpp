@@ -93,29 +93,6 @@ void serializeObject(std::ostream& output, const PdfObject& object) {
     }
 }
 
-std::string readFile(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) throw PdfException(PdfErrorCode::FileOpenFailed, "Cannot open input PDF: " + path.string());
-    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-}
-
-std::uint32_t nextObjectNumber(const PdfDocument& document) {
-    std::uint32_t maximum = 0U;
-    for (const auto number : document.objectNumbers()) maximum = std::max(maximum, number);
-    if (maximum == std::numeric_limits<std::uint32_t>::max()) {
-        throw PdfException(PdfErrorCode::UnsupportedFeature, "No free PDF object number remains.");
-    }
-    return maximum + 1U;
-}
-
-PdfDictionary parseTrailerDictionary(const PdfDocument& document) {
-    const PdfObject object = Internal::PdfObjectParser::Parse(document.trailerDictionary(), 256U);
-    const PdfDictionary* dictionary = object.AsDictionary();
-    if (!dictionary) throw PdfException(PdfErrorCode::MalformedXref, "Trailer is not a PDF dictionary.");
-    return *dictionary;
-}
-
-
 PdfObject deepCloneObject(const PdfObject& object);
 
 PdfArray deepCloneArray(const PdfArray& source) {
@@ -190,12 +167,6 @@ PdfArray rectangleArray(const PdfRectangle& rectangle) {
     array.push_back(PdfObject(rectangle.top));
     return array;
 }
-
-void writeXrefEntry(std::ostream& output, std::uint64_t offset, std::uint16_t generation) {
-    output << std::setw(10) << std::setfill('0') << offset << ' '
-           << std::setw(5) << std::setfill('0') << generation << " n \n";
-}
-
 
 PdfDictionary resolveDictionaryValue(
     const PdfDocument& document,

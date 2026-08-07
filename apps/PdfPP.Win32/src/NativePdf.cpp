@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <sstream>
 #include <utility>
 
@@ -21,6 +22,16 @@ const char* pdfpp_toc(void*);
 struct PdfTextChunkView { char* text; double left; double bottom; double right; double top; };
 void* pdfpp_text_chunks(void*, int, int*);
 void pdfpp_free_text_chunks(void*, int);
+int pdfpp_merge_documents_w(const wchar_t* const*, std::size_t, const wchar_t*);
+int pdfpp_extract_pages_w(const wchar_t*, const wchar_t*, const std::size_t*, std::size_t);
+int pdfpp_remove_pages_w(const wchar_t*, const wchar_t*, const std::size_t*, std::size_t);
+int pdfpp_duplicate_pages_w(const wchar_t*, const wchar_t*, const std::size_t*, std::size_t);
+int pdfpp_move_page_w(const wchar_t*, const wchar_t*, std::size_t, std::size_t);
+int pdfpp_reorder_pages_w(const wchar_t*, const wchar_t*, const std::size_t*, std::size_t);
+int pdfpp_split_every_w(const wchar_t*, const wchar_t*, std::size_t, const wchar_t*);
+int pdfpp_add_password_w(const wchar_t*, const wchar_t*, const char*, const char*, const char*);
+int pdfpp_remove_password_w(const wchar_t*, const wchar_t*, const char*);
+int pdfpp_change_password_w(const wchar_t*, const wchar_t*, const char*, const char*, const char*);
 }
 
 namespace PdfPP::Win32 {
@@ -29,6 +40,21 @@ bool PageBitmap::IsValid() const noexcept {
     return width > 0 && height > 0 && stride >= width * 4 &&
            pixels.size() >= static_cast<std::size_t>(height) * stride;
 }
+
+namespace {
+
+bool operationSucceeded(const int result, std::string& error) {
+    if (result == 0) {
+        error.clear();
+        return true;
+    }
+    const char* nativeError = pdfpp_last_error();
+    error = nativeError && *nativeError
+        ? nativeError : "Pdf++ document operation failed.";
+    return false;
+}
+
+} // namespace
 
 NativePdfDocument::NativePdfDocument(void* handle) noexcept : handle_(handle) {}
 
@@ -46,6 +72,85 @@ std::shared_ptr<NativePdfDocument> NativePdfDocument::Open(
     }
     error.clear();
     return std::shared_ptr<NativePdfDocument>(new NativePdfDocument(handle));
+}
+
+bool NativePdfDocument::MergeDocuments(
+    const std::vector<std::wstring>& inputPaths, const std::wstring& outputPath,
+    std::string& error) {
+    std::vector<const wchar_t*> paths;
+    paths.reserve(inputPaths.size());
+    for (const auto& path : inputPaths) paths.push_back(path.c_str());
+    return operationSucceeded(pdfpp_merge_documents_w(
+        paths.data(), paths.size(), outputPath.c_str()), error);
+}
+
+bool NativePdfDocument::ExtractPages(
+    const std::wstring& inputPath, const std::wstring& outputPath,
+    const std::vector<std::size_t>& pageIndices, std::string& error) {
+    return operationSucceeded(pdfpp_extract_pages_w(
+        inputPath.c_str(), outputPath.c_str(), pageIndices.data(), pageIndices.size()), error);
+}
+
+bool NativePdfDocument::RemovePages(
+    const std::wstring& inputPath, const std::wstring& outputPath,
+    const std::vector<std::size_t>& pageIndices, std::string& error) {
+    return operationSucceeded(pdfpp_remove_pages_w(
+        inputPath.c_str(), outputPath.c_str(), pageIndices.data(), pageIndices.size()), error);
+}
+
+bool NativePdfDocument::DuplicatePages(
+    const std::wstring& inputPath, const std::wstring& outputPath,
+    const std::vector<std::size_t>& pageIndices, std::string& error) {
+    return operationSucceeded(pdfpp_duplicate_pages_w(
+        inputPath.c_str(), outputPath.c_str(), pageIndices.data(), pageIndices.size()), error);
+}
+
+bool NativePdfDocument::MovePage(
+    const std::wstring& inputPath, const std::wstring& outputPath,
+    const std::size_t fromIndex, const std::size_t toIndex, std::string& error) {
+    return operationSucceeded(pdfpp_move_page_w(
+        inputPath.c_str(), outputPath.c_str(), fromIndex, toIndex), error);
+}
+
+bool NativePdfDocument::ReorderPages(
+    const std::wstring& inputPath, const std::wstring& outputPath,
+    const std::vector<std::size_t>& pageOrder, std::string& error) {
+    return operationSucceeded(pdfpp_reorder_pages_w(
+        inputPath.c_str(), outputPath.c_str(), pageOrder.data(), pageOrder.size()), error);
+}
+
+bool NativePdfDocument::SplitEvery(
+    const std::wstring& inputPath, const std::wstring& outputDirectory,
+    const std::size_t pagesPerFile, const std::wstring& filePrefix,
+    std::string& error) {
+    return operationSucceeded(pdfpp_split_every_w(
+        inputPath.c_str(), outputDirectory.c_str(), pagesPerFile,
+        filePrefix.c_str()), error);
+}
+
+bool NativePdfDocument::AddPassword(
+    const std::wstring& inputPath, const std::wstring& outputPath,
+    const std::string& currentPassword, const std::string& userPassword,
+    const std::string& ownerPassword, std::string& error) {
+    return operationSucceeded(pdfpp_add_password_w(
+        inputPath.c_str(), outputPath.c_str(), currentPassword.c_str(),
+        userPassword.c_str(), ownerPassword.c_str()), error);
+}
+
+bool NativePdfDocument::RemovePassword(
+    const std::wstring& inputPath, const std::wstring& outputPath,
+    const std::string& currentPassword, std::string& error) {
+    return operationSucceeded(pdfpp_remove_password_w(
+        inputPath.c_str(), outputPath.c_str(), currentPassword.c_str()), error);
+}
+
+bool NativePdfDocument::ChangePassword(
+    const std::wstring& inputPath, const std::wstring& outputPath,
+    const std::string& currentPassword, const std::string& userPassword,
+    const std::string& ownerPassword, std::string& error) {
+    return operationSucceeded(pdfpp_change_password_w(
+        inputPath.c_str(), outputPath.c_str(), currentPassword.c_str(),
+        userPassword.c_str(), ownerPassword.c_str()), error);
 }
 
 int NativePdfDocument::PageCount() const noexcept {
@@ -137,16 +242,10 @@ PageBitmap NativePdfDocument::Render(const int page, const double zoom,
 
     bitmap.pixels.resize(static_cast<std::size_t>(bitmap.height) * bitmap.stride);
     const auto* source = static_cast<const std::uint8_t*>(bufferOwner.get());
-    for (int y = 0; y < bitmap.height; ++y) {
-        for (int x = 0; x < bitmap.width; ++x) {
-            const auto* src = source + static_cast<std::size_t>(y) * bitmap.stride + x * 4;
-            auto* dst = bitmap.pixels.data() + static_cast<std::size_t>(y) * bitmap.stride + x * 4;
-            dst[0] = src[2];
-            dst[1] = src[1];
-            dst[2] = src[0];
-            dst[3] = 255;
-        }
-    }
+    // pdfpp_render guarantees a top-down BGRA buffer matching the Win32 DIB
+    // layout. Adopt it with one contiguous copy; the former nested channel-swap
+    // loop was a noticeable part of every zoom render for large pages.
+    std::memcpy(bitmap.pixels.data(), source, bitmap.pixels.size());
     error.clear();
     return bitmap;
 }

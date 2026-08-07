@@ -13,6 +13,7 @@
 namespace CPPPdf::Internal {
 
 struct PdfObjectCollectionWriterOptions {
+    std::string pdfVersion{"1.7"};
     bool writeXrefStream{true};
     bool writeObjectStreams{false};
 };

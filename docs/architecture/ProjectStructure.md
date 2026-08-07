@@ -1,6 +1,6 @@
 # Pdf++ project structure
 
-`include/CPPPdf` is the supported consumer API. `src/Internal` is never installed and may change without compatibility guarantees.
+`src/Pdf++.Core/include/CPPPdf` is the canonical supported consumer API. `src/Pdf++.Core/src/Internal` is never installed and may change without compatibility guarantees.
 
 - `Core`: common value types and ABI-neutral primitives.
 - `IO`: reader options, limits, and input abstractions.
@@ -16,5 +16,5 @@ CMake consumers use:
 
 ```cmake
 find_package(PdfPP CONFIG REQUIRED)
-target_link_libraries(app PRIVATE CPPPdf::Core)
+target_link_libraries(app PRIVATE PdfPP::Core)
 ```

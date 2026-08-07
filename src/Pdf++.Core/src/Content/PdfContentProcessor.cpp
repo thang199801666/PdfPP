@@ -606,6 +606,15 @@ void PdfContentProcessor::Process(
         }
         else if (token == "Do") Emit(handler_, PdfContentEventType::InvokeXObject, std::string(token), textState, NameAt(operands, 0));
         else if (token == "sh") Emit(handler_, PdfContentEventType::PaintShading, std::string(token), textState, NameAt(operands, 0));
+        else if (token == "BMC") {
+            PdfContentEvent event;
+            event.type = PdfContentEventType::BeginMarkedContent;
+            event.operation = std::string(token);
+            event.textState = textState;
+            event.text = NameAt(operands, 0);
+            markedContentGroupStack.push_back(false);
+            handler_(event);
+        }
         else if (token == "BDC") {
             bool isGroup = false;
             PdfContentEvent event;

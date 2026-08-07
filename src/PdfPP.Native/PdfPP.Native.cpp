@@ -1,5 +1,8 @@
 #include <CPPPdf/Document/PdfDocument.hpp>
 #include <CPPPdf/Document/PdfPage.hpp>
+#include <CPPPdf/Document/PdfPageImporter.hpp>
+#include <CPPPdf/Document/PdfPageOrganizer.hpp>
+#include <CPPPdf/Security/PdfSecurity.hpp>
 #include <CPPPdf/Rendering/PdfPageRenderer.hpp>
 #include <CPPPdf/Text/PdfTextExtractor.hpp>
 #include "Internal/Document/PdfObjectResolver.hpp"
@@ -30,6 +33,7 @@
 #include <numeric>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <sstream>
 #include <unordered_map>
@@ -185,12 +189,27 @@ bool tryRenderWithWindowsPdf(const std::filesystem::path& path,
     if (pageIndex >= pdf.PageCount()) return false;
     const auto page = pdf.GetPage(static_cast<std::uint32_t>(pageIndex));
     const auto size = page.Size();
-    const auto destinationWidth = static_cast<std::uint32_t>(std::clamp(
-        std::ceil(static_cast<double>(size.Width) * (96.0 / 72.0) * scale), 1.0, 16384.0));
+    // PdfPage::Size is already expressed in device-independent pixels (DIPs),
+    // and DestinationWidth/DestinationHeight also expect DIPs. Multiplying by
+    // 96/72 here rendered every Windows-PDF bitmap 4/3 larger than the page
+    // geometry used by the Win32 reader. The following page was therefore
+    // positioned before the previous bitmap actually ended, producing the
+    // apparent page overlap while scrolling.
+    // Clamp while the value is still double. This keeps all three std::clamp
+    // arguments the same type on MSVC; std::lround returns long, whereas the
+    // former 1LL/16384LL bounds were long long and prevented template deduction.
+    const double scaledWidth = std::clamp(
+        static_cast<double>(size.Width) * scale, 1.0, 16384.0);
+    const double scaledHeight = std::clamp(
+        static_cast<double>(size.Height) * scale, 1.0, 16384.0);
+    const auto destinationWidth = static_cast<std::uint32_t>(std::lround(scaledWidth));
+    const auto destinationHeight = static_cast<std::uint32_t>(std::lround(scaledHeight));
 
     winrt::Windows::Data::Pdf::PdfPageRenderOptions options;
     options.DestinationWidth(destinationWidth);
-    options.BackgroundColor({255U, 255U, 255U, 255U});
+    options.DestinationHeight(destinationHeight);
+    constexpr auto opaque = static_cast<std::uint8_t>(255);
+    options.BackgroundColor({opaque, opaque, opaque, opaque});
     auto encodedStream = winrt::Windows::Storage::Streams::InMemoryRandomAccessStream();
     page.RenderToStreamAsync(encodedStream, options).get();
     const auto encodedStreamSize = encodedStream.Size();
@@ -249,14 +268,10 @@ bool tryRenderWithWindowsPdf(const std::filesystem::path& path,
             ? source + static_cast<std::size_t>(y) * sourceStride
             : source + static_cast<std::size_t>(imageHeight - 1 - y) * sourceStride;
         auto* destinationRow = destination + static_cast<std::size_t>(y) * resultStride;
-        for (int x = 0; x < imageWidth; ++x) {
-            const auto* pixel = sourceRow + static_cast<std::size_t>(x) * 4U;
-            auto* outputPixel = destinationRow + static_cast<std::size_t>(x) * 4U;
-            outputPixel[0] = pixel[2];
-            outputPixel[1] = pixel[1];
-            outputPixel[2] = pixel[0];
-            outputPixel[3] = pixel[3];
-        }
+        // PixelFormat32bppARGB is already laid out as BGRA in memory, exactly
+        // what a Win32 32-bit BI_RGB DIB consumes. Preserve it directly instead
+        // of swapping red/blue here and swapping them back in the reader.
+        std::memcpy(destinationRow, sourceRow, std::min(resultStride, sourceStride));
     }
     image.UnlockBits(&locked);
     *output = result;
@@ -536,8 +551,11 @@ PDFPP_EXPORT void pdfpp_page_size(void* handle, int page, double scale, int* wid
     try {
         const auto info = static_cast<NativeDocument*>(handle)
             ->document.GetPageInfo(static_cast<std::size_t>(page));
-        const double pointsWidth = info.cropBox.empty() ? info.mediaBox.width() : info.cropBox.width();
-        const double pointsHeight = info.cropBox.empty() ? info.mediaBox.height() : info.cropBox.height();
+        const double boxWidth = info.cropBox.empty() ? info.mediaBox.width() : info.cropBox.width();
+        const double boxHeight = info.cropBox.empty() ? info.mediaBox.height() : info.cropBox.height();
+        const int rotation = ((info.rotation % 360) + 360) % 360;
+        const double pointsWidth = rotation == 90 || rotation == 270 ? boxHeight : boxWidth;
+        const double pointsHeight = rotation == 90 || rotation == 270 ? boxWidth : boxHeight;
         const double pixelsPerPoint = 96.0 / 72.0;
         *width = static_cast<int>(std::lround(pointsWidth * pixelsPerPoint * scale));
         *height = static_cast<int>(std::lround(pointsHeight * pixelsPerPoint * scale));
@@ -750,7 +768,17 @@ PDFPP_EXPORT void* pdfpp_render(void* handle, int page, double scale, int* width
         const auto bytes = bitmap.GetPixels();
         void* result = std::malloc(bytes.size());
         if (!result) return nullptr;
-        std::memcpy(result, bytes.data(), bytes.size());
+        // PdfBitmap exposes RGBA, while the native viewer consumes BGRA. Convert
+        // once at the ABI boundary so the UI can adopt the buffer with a single
+        // bulk copy instead of running another per-pixel channel swap.
+        auto* destination = static_cast<std::uint8_t*>(result);
+        const auto* source = reinterpret_cast<const std::uint8_t*>(bytes.data());
+        for (std::size_t i = 0; i + 3U < bytes.size(); i += 4U) {
+            destination[i] = source[i + 2U];
+            destination[i + 1U] = source[i + 1U];
+            destination[i + 2U] = source[i];
+            destination[i + 3U] = source[i + 3U];
+        }
         *width = static_cast<int>(bitmap.GetWidth()); *height = static_cast<int>(bitmap.GetHeight());
         *stride = static_cast<int>(bitmap.GetStride());
         return result;
@@ -762,5 +790,188 @@ PDFPP_EXPORT void* pdfpp_render(void* handle, int page, double scale, int* width
         return nullptr;
     }
 }
+namespace {
+
+template <typename Operation>
+int runDocumentOperation(Operation&& operation) noexcept {
+    lastError.clear();
+    try {
+        operation();
+        return 0;
+    } catch (const std::exception& exception) {
+        lastError = exception.what();
+        return -1;
+    } catch (...) {
+        lastError = "Unknown Pdf++ document operation failure.";
+        return -1;
+    }
+}
+
+std::filesystem::path requiredPath(const wchar_t* value, const char* name) {
+    if (!value || !*value) {
+        throw std::invalid_argument(std::string(name) + " path is empty.");
+    }
+    return std::filesystem::path(value);
+}
+
+std::vector<std::size_t> copyPageIndices(const std::size_t* values,
+                                         const std::size_t count) {
+    if (!values || count == 0U) {
+        throw std::invalid_argument("At least one page must be selected.");
+    }
+    return std::vector<std::size_t>(values, values + count);
+}
+
+std::string optionalString(const char* value) {
+    return value ? std::string(value) : std::string{};
+}
+
+CPPPdf::PdfEncryptionOptions encryptionOptions(const char* userPassword,
+                                                const char* ownerPassword) {
+    CPPPdf::PdfEncryptionOptions options;
+    options.userPassword = optionalString(userPassword);
+    options.ownerPassword = optionalString(ownerPassword);
+    if (options.ownerPassword.empty()) options.ownerPassword = options.userPassword;
+    options.algorithm = CPPPdf::PdfEncryptionAlgorithm::Aes256;
+    return options;
+}
+
+} // namespace
+
+PDFPP_EXPORT int pdfpp_merge_documents_w(const wchar_t* const* inputPaths,
+                                          const std::size_t inputCount,
+                                          const wchar_t* outputPath) {
+    return runDocumentOperation([&] {
+        if (!inputPaths || inputCount < 2U) {
+            throw std::invalid_argument("Select at least two PDF files to merge.");
+        }
+        std::vector<std::filesystem::path> inputs;
+        inputs.reserve(inputCount);
+        for (std::size_t index = 0; index < inputCount; ++index) {
+            inputs.push_back(requiredPath(inputPaths[index], "Input"));
+        }
+        (void)CPPPdf::PdfPageImporter::MergeDocuments(
+            inputs, requiredPath(outputPath, "Output"));
+    });
+}
+
+PDFPP_EXPORT int pdfpp_extract_pages_w(const wchar_t* inputPath,
+                                       const wchar_t* outputPath,
+                                       const std::size_t* pageIndices,
+                                       const std::size_t pageCount) {
+    return runDocumentOperation([&] {
+        (void)CPPPdf::PdfPageOrganizer::ExtractPages(
+            requiredPath(inputPath, "Input"), requiredPath(outputPath, "Output"),
+            copyPageIndices(pageIndices, pageCount));
+    });
+}
+
+PDFPP_EXPORT int pdfpp_remove_pages_w(const wchar_t* inputPath,
+                                      const wchar_t* outputPath,
+                                      const std::size_t* pageIndices,
+                                      const std::size_t pageCount) {
+    return runDocumentOperation([&] {
+        (void)CPPPdf::PdfPageOrganizer::RemovePages(
+            requiredPath(inputPath, "Input"), requiredPath(outputPath, "Output"),
+            copyPageIndices(pageIndices, pageCount));
+    });
+}
+
+PDFPP_EXPORT int pdfpp_duplicate_pages_w(const wchar_t* inputPath,
+                                         const wchar_t* outputPath,
+                                         const std::size_t* pageIndices,
+                                         const std::size_t pageCount) {
+    return runDocumentOperation([&] {
+        (void)CPPPdf::PdfPageOrganizer::DuplicatePages(
+            requiredPath(inputPath, "Input"), requiredPath(outputPath, "Output"),
+            copyPageIndices(pageIndices, pageCount));
+    });
+}
+
+PDFPP_EXPORT int pdfpp_move_page_w(const wchar_t* inputPath,
+                                   const wchar_t* outputPath,
+                                   const std::size_t fromIndex,
+                                   const std::size_t toIndex) {
+    return runDocumentOperation([&] {
+        (void)CPPPdf::PdfPageOrganizer::MovePage(
+            requiredPath(inputPath, "Input"), requiredPath(outputPath, "Output"),
+            fromIndex, toIndex);
+    });
+}
+
+PDFPP_EXPORT int pdfpp_reorder_pages_w(const wchar_t* inputPath,
+                                       const wchar_t* outputPath,
+                                       const std::size_t* pageOrder,
+                                       const std::size_t pageCount) {
+    return runDocumentOperation([&] {
+        (void)CPPPdf::PdfPageOrganizer::ReorderPages(
+            requiredPath(inputPath, "Input"), requiredPath(outputPath, "Output"),
+            copyPageIndices(pageOrder, pageCount));
+    });
+}
+
+PDFPP_EXPORT int pdfpp_split_every_w(const wchar_t* inputPath,
+                                     const wchar_t* outputDirectory,
+                                     const std::size_t pagesPerFile,
+                                     const wchar_t* filePrefix) {
+    return runDocumentOperation([&] {
+        if (pagesPerFile == 0U) {
+            throw std::invalid_argument("Pages per file must be greater than zero.");
+        }
+        std::string prefix = "part";
+        if (filePrefix && *filePrefix) {
+            const std::wstring wide(filePrefix);
+            const int length = WideCharToMultiByte(CP_UTF8, 0, wide.data(),
+                static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
+            if (length > 0) {
+                prefix.resize(static_cast<std::size_t>(length));
+                WideCharToMultiByte(CP_UTF8, 0, wide.data(),
+                    static_cast<int>(wide.size()), prefix.data(), length,
+                    nullptr, nullptr);
+            }
+        }
+        (void)CPPPdf::PdfPageOrganizer::SplitEvery(
+            requiredPath(inputPath, "Input"),
+            requiredPath(outputDirectory, "Output directory"),
+            pagesPerFile, prefix);
+    });
+}
+
+PDFPP_EXPORT int pdfpp_add_password_w(const wchar_t* inputPath,
+                                      const wchar_t* outputPath,
+                                      const char* currentPassword,
+                                      const char* userPassword,
+                                      const char* ownerPassword) {
+    return runDocumentOperation([&] {
+        CPPPdf::PdfPasswordManager::Encrypt(
+            requiredPath(inputPath, "Input"), requiredPath(outputPath, "Output"),
+            encryptionOptions(userPassword, ownerPassword),
+            optionalString(currentPassword));
+    });
+}
+
+PDFPP_EXPORT int pdfpp_remove_password_w(const wchar_t* inputPath,
+                                         const wchar_t* outputPath,
+                                         const char* currentPassword) {
+    return runDocumentOperation([&] {
+        CPPPdf::PdfPasswordManager::RemovePassword(
+            requiredPath(inputPath, "Input"), requiredPath(outputPath, "Output"),
+            optionalString(currentPassword));
+    });
+}
+
+PDFPP_EXPORT int pdfpp_change_password_w(const wchar_t* inputPath,
+                                         const wchar_t* outputPath,
+                                         const char* currentPassword,
+                                         const char* userPassword,
+                                         const char* ownerPassword) {
+    return runDocumentOperation([&] {
+        CPPPdf::PdfPasswordManager::ChangePassword(
+            requiredPath(inputPath, "Input"), requiredPath(outputPath, "Output"),
+            optionalString(currentPassword),
+            encryptionOptions(userPassword, ownerPassword));
+    });
+}
+
 PDFPP_EXPORT void pdfpp_free(void* memory) { std::free(memory); }
 PDFPP_EXPORT const char* pdfpp_last_error() { return lastError.c_str(); }

@@ -28,7 +28,12 @@ void persistSettings() {
     settings.zoom = zoom;
     settings.continuous = pageLayoutMode == PageLayoutMode::ContinuousNavigation;
     settings.sidebarVisible = sidebarVisible;
-    settings.handTool = handTool;
+    settings.sidebarWidth = std::clamp(sidebarWidthDip,
+        kSidebarMinWidthDip, kSidebarMaxWidthDip);
+    // Select is always the startup tool; do not persist Hand mode.
+    settings.handTool = false;
+    settings.toolsVisible = toolsVisible;
+    settings.toolsWidth = std::clamp(toolsWidthDip, kToolsMinWidthDip, kToolsMaxWidthDip);
     SaveSettings(settings);
     rebuildRecentMenu();
 }
@@ -123,6 +128,25 @@ HMENU createMainMenu() {
     AppendMenuW(file, MF_STRING, SC_CLOSE, L"Exit\tAlt+F4");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(file), L"File");
 
+    const HMENU documentMenu = CreatePopupMenu();
+    AppendMenuW(documentMenu, MF_STRING, ID_MERGE_PDFS, L"Merge PDFs...");
+    AppendMenuW(documentMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(documentMenu, MF_STRING, ID_EXTRACT_PAGES, L"Extract Pages...");
+    AppendMenuW(documentMenu, MF_STRING, ID_SPLIT_PDF, L"Split PDF...");
+    AppendMenuW(documentMenu, MF_STRING, ID_DELETE_PAGES, L"Delete Pages...");
+    AppendMenuW(documentMenu, MF_STRING, ID_DUPLICATE_PAGES, L"Duplicate Pages...");
+    AppendMenuW(documentMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(documentMenu, MF_STRING, ID_MOVE_PAGE, L"Move Current Page...");
+    AppendMenuW(documentMenu, MF_STRING, ID_REORDER_PAGES, L"Reorder Pages...");
+    AppendMenuW(documentMenu, MF_STRING, ID_REVERSE_PAGES, L"Reverse Page Order...");
+    AppendMenuW(documentMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(documentMenu, MF_STRING, ID_CRACK_PASSWORD, L"Crack Password...");
+    AppendMenuW(documentMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(documentMenu, MF_STRING, ID_ADD_PASSWORD, L"Add Password...");
+    AppendMenuW(documentMenu, MF_STRING, ID_REMOVE_PASSWORD, L"Remove Password...");
+    AppendMenuW(documentMenu, MF_STRING, ID_CHANGE_PASSWORD, L"Change Password...");
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(documentMenu), L"Document");
+
     const HMENU view = CreatePopupMenu();
     AppendMenuW(view, MF_STRING, ID_BOOKMARKS, L"Table of Contents\tCtrl+B");
     AppendMenuW(view, MF_STRING, ID_FULLSCREEN, L"Fullscreen\tF11");
@@ -135,6 +159,8 @@ HMENU createMainMenu() {
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(view), L"View");
 
     const HMENU goTo = CreatePopupMenu();
+    AppendMenuW(goTo, MF_STRING, ID_FIND, L"Find...\tCtrl+F");
+    AppendMenuW(goTo, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(goTo, MF_STRING, ID_FIRST_PAGE, L"First Page\tCtrl+Home");
     AppendMenuW(goTo, MF_STRING, ID_PREVIOUS, L"Previous Page\tCtrl+Page Up");
     AppendMenuW(goTo, MF_STRING, ID_NEXT, L"Next Page\tCtrl+Page Down");
@@ -152,6 +178,8 @@ HMENU createMainMenu() {
 
     const HMENU settingsMenu = CreatePopupMenu();
     AppendMenuW(settingsMenu, MF_STRING, ID_DOC_PROPERTIES, L"Document Properties");
+    AppendMenuW(settingsMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(settingsMenu, MF_STRING, ID_SHOW_PAGE_SHADOW, L"Show Page Shadow");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(settingsMenu), L"Settings");
 
     const HMENU favoritesMenu = CreatePopupMenu();
@@ -169,27 +197,53 @@ HMENU createMainMenu() {
 void refreshApplicationFonts(const UINT dpi) {
     HFONT newRegular = PdfPP::ModernWin32::UiFontForDpi(dpi, 7, false);
     HFONT newBold = PdfPP::ModernWin32::UiFontForDpi(dpi, 8, true);
-    if (!newRegular || !newBold) {
+    HFONT newPageRegular = PdfPP::ModernWin32::UiFontForDpi(dpi, 9, false);
+    HFONT newPageBold = PdfPP::ModernWin32::UiFontForDpi(dpi, 9, true);
+    if (!newRegular || !newBold || !newPageRegular || !newPageBold) {
         if (newRegular) DeleteObject(newRegular);
         if (newBold) DeleteObject(newBold);
+        if (newPageRegular) DeleteObject(newPageRegular);
+        if (newPageBold) DeleteObject(newPageBold);
         return;
     }
 
-    for (const HWND control : {openButton, previousButton, nextButton, pageEdit, pageCaption,
-        pageLabel, zoomOutButton, zoomLabel, zoomInButton, fitButton,
-        selectButton, handButton, findLabel, searchEdit, findButton, statusLabel,
-        pageList, bookmarkCloseButton, tabBar}) {
+    for (const HWND control : {openButton, zoomOutButton, zoomLabel, zoomInButton, fitButton,
+        selectButton, handButton, toolsToggleButton, findPanel, searchEdit, findButton, findCloseButton, statusLabel,
+        pageList, bookmarkCloseButton, toolsSearchEdit, toolsTree, tabBar}) {
         if (control) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(newRegular), TRUE);
     }
+    for (const HWND control : {previousButton, nextButton, pageEdit, pageCaption, pageLabel}) {
+        if (control) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(newPageRegular), TRUE);
+    }
+    if (pageCaption)
+        SendMessageW(pageCaption, WM_SETFONT, reinterpret_cast<WPARAM>(newPageBold), TRUE);
+    if (pageList) {
+        SendMessageW(pageList, WM_SETFONT, reinterpret_cast<WPARAM>(newPageRegular), TRUE);
+        TreeView_SetIndent(pageList, MulDiv(18, static_cast<int>(dpi), 96));
+        TreeView_SetItemHeight(pageList, MulDiv(26, static_cast<int>(dpi), 96));
+    }
     if (sidebarTitle)
-        SendMessageW(sidebarTitle, WM_SETFONT, reinterpret_cast<WPARAM>(newBold), TRUE);
+        SendMessageW(sidebarTitle, WM_SETFONT, reinterpret_cast<WPARAM>(newPageBold), TRUE);
+    if (toolsTitle)
+        SendMessageW(toolsTitle, WM_SETFONT, reinterpret_cast<WPARAM>(newPageBold), TRUE);
+    if (toolsTree) {
+        SendMessageW(toolsTree, WM_SETFONT, reinterpret_cast<WPARAM>(newRegular), TRUE);
+        TreeView_SetIndent(toolsTree, MulDiv(16, static_cast<int>(dpi), 96));
+        TreeView_SetItemHeight(toolsTree, MulDiv(24, static_cast<int>(dpi), 96));
+    }
 
     const HFONT oldRegular = regularUiFont;
     const HFONT oldBold = boldUiFont;
+    const HFONT oldPageRegular = pageUiFont;
+    const HFONT oldPageBold = pageBoldUiFont;
     regularUiFont = newRegular;
     boldUiFont = newBold;
+    pageUiFont = newPageRegular;
+    pageBoldUiFont = newPageBold;
     if (oldRegular) DeleteObject(oldRegular);
     if (oldBold) DeleteObject(oldBold);
+    if (oldPageRegular) DeleteObject(oldPageRegular);
+    if (oldPageBold) DeleteObject(oldPageBold);
 }
 
 } // namespace PdfPP::Win32

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwctype>
 #include <string>
 
 #pragma comment(lib, "msimg32.lib")
@@ -12,12 +13,35 @@ int scaleDip(const int value) {
     return MulDiv(value, static_cast<int>(currentDpi), USER_DEFAULT_SCREEN_DPI);
 }
 
+HCURSOR handDragCursor() {
+    static HCURSOR cursor = []() -> HCURSOR {
+        wchar_t executable[MAX_PATH]{};
+        constexpr DWORD capacity = static_cast<DWORD>(
+            sizeof(executable) / sizeof(executable[0]));
+        const DWORD length = GetModuleFileNameW(nullptr, executable, capacity);
+        if (length > 0 && length < capacity) {
+            std::wstring cursorPath(executable, executable + length);
+            const std::size_t separator = cursorPath.find_last_of(L"\\/");
+            if (separator != std::wstring::npos) {
+                cursorPath.resize(separator + 1U);
+                cursorPath += L"resources\\Hand.cur";
+                if (HCURSOR loaded = LoadCursorFromFileW(cursorPath.c_str())) {
+                    return loaded;
+                }
+            }
+        }
+        return LoadCursorW(nullptr, IDC_HAND);
+    }();
+    return cursor;
+}
+
 std::wstring utf8ToWide(const char* text) {
     if (!text || !*text) return {};
     const int length = MultiByteToWideChar(CP_UTF8, 0, text, -1, nullptr, 0);
     if (length <= 1) return {};
-    std::wstring result(static_cast<std::size_t>(length - 1), L'\0');
+    std::wstring result(static_cast<std::size_t>(length), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, text, -1, result.data(), length);
+    result.resize(static_cast<std::size_t>(length - 1));
     return result;
 }
 
@@ -76,34 +100,77 @@ void fillOverlay(HDC dc, const RECT& rect, const BYTE alpha, const COLORREF colo
     const int height = rect.bottom - rect.top;
     if (width <= 0 || height <= 0) return;
     HDC memory = CreateCompatibleDC(dc);
-    HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
+    // A 1x1 source is stretched by AlphaBlend. The former implementation
+    // allocated a bitmap as large as every selected word on every mouse move,
+    // which made long selections noticeably laggy.
+    HBITMAP bitmap = CreateCompatibleBitmap(dc, 1, 1);
     if (!memory || !bitmap) {
         if (bitmap) DeleteObject(bitmap);
         if (memory) DeleteDC(memory);
         return;
     }
     const HGDIOBJ previous = SelectObject(memory, bitmap);
-    const HBRUSH brush = CreateSolidBrush(color);
-    RECT local{ 0, 0, width, height };
-    FillRect(memory, &local, brush);
-    DeleteObject(brush);
+    SetPixelV(memory, 0, 0, color);
     BLENDFUNCTION blend{ AC_SRC_OVER, 0, alpha, 0 };
     AlphaBlend(dc, rect.left, rect.top, width, height,
-        memory, 0, 0, width, height, blend);
+        memory, 0, 0, 1, 1, blend);
     SelectObject(memory, previous);
     DeleteObject(bitmap);
     DeleteDC(memory);
 }
 
+namespace {
+
+bool chunksShareLine(const TextChunk& first, const TextChunk& second) {
+    const double firstHeight = std::max(0.1, first.top - first.bottom);
+    const double secondHeight = std::max(0.1, second.top - second.bottom);
+    const double overlap = std::min(first.top, second.top) -
+        std::max(first.bottom, second.bottom);
+    return overlap >= std::min(firstHeight, secondHeight) * 0.35;
+}
+
+bool beginsWithWhitespace(const std::wstring& value) {
+    return !value.empty() && std::iswspace(value.front()) != 0;
+}
+
+bool endsWithWhitespace(const std::wstring& value) {
+    return !value.empty() && std::iswspace(value.back()) != 0;
+}
+
+} // namespace
+
 void copySelectedText() {
-    if (selectedChunks.empty()) return;
-    std::string utf8;
-    for (const std::size_t index : selectedChunks) {
-        if (index >= textChunks.size()) continue;
-        if (!utf8.empty()) utf8.push_back(' ');
-        utf8 += textChunks[index].text;
+    if (selectedTextSpans.empty()) return;
+
+    std::wstring text;
+    const TextChunk* previousChunk = nullptr;
+    std::wstring previousPiece;
+    for (const TextSelectionSpan& span : selectedTextSpans) {
+        if (span.chunk >= textChunks.size()) continue;
+        const TextChunk& chunk = textChunks[span.chunk];
+        const std::wstring chunkText = utf8ToWide(chunk.text.c_str());
+        const std::size_t begin = std::min(span.begin, chunkText.size());
+        const std::size_t end = std::min(std::max(span.end, begin), chunkText.size());
+        if (begin == end) continue;
+        const std::wstring piece = chunkText.substr(begin, end - begin);
+
+        if (previousChunk && !text.empty()) {
+            if (!chunksShareLine(*previousChunk, chunk)) {
+                if (!endsWithWhitespace(text)) text.append(L"\r\n");
+            }
+            else if (!endsWithWhitespace(previousPiece) &&
+                     !beginsWithWhitespace(piece)) {
+                // Text chunks are usually words or short runs. Preserve a
+                // natural separator when adjacent runs on the same line do
+                // not already contain whitespace.
+                text.push_back(L' ');
+            }
+        }
+        text += piece;
+        previousChunk = &chunk;
+        previousPiece = piece;
     }
-    const std::wstring text = utf8ToWide(utf8.c_str());
+
     if (text.empty() || !OpenClipboard(mainWindow)) return;
     EmptyClipboard();
     const SIZE_T bytes = (text.size() + 1U) * sizeof(wchar_t);

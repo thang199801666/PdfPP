@@ -19,6 +19,16 @@ std::size_t EstimateEntryBytes(const PdfTextSearchIndex& index) noexcept {
         index.GetChunkCount() * sizeof(PdfTextChunk);
 }
 
+std::vector<PdfTextChunk> FilterRenderingMode(
+    const std::vector<PdfTextChunk>& chunks, const int mode) {
+    std::vector<PdfTextChunk> filtered;
+    filtered.reserve(chunks.size());
+    for (const auto& chunk : chunks) {
+        if (chunk.renderingMode == mode) filtered.push_back(chunk);
+    }
+    return filtered;
+}
+
 } // namespace
 
 class PdfTextDocumentIndex::Impl final {
@@ -158,7 +168,15 @@ std::vector<PdfDocumentTextSearchMatch> PdfTextDocumentIndex::FindAll(
     const PdfTextSearchOptions& options) const {
     std::vector<PdfDocumentTextSearchMatch> result;
     for (std::size_t page = 0; page < GetPageCount(); ++page) {
-        auto matches = impl_->Get(page)->Find(keyword, options);
+        const auto pageIndex = impl_->Get(page);
+        std::vector<PdfTextSearchMatch> matches;
+        if (!options.renderingMode.has_value()) {
+            matches = pageIndex->Find(keyword, options);
+        } else {
+            auto filteredChunks = FilterRenderingMode(pageIndex->GetChunks(), *options.renderingMode);
+            PdfTextSearchIndex filteredIndex(filteredChunks, impl_->options.search);
+            matches = filteredIndex.Find(keyword, options);
+        }
         for (auto& match : matches) result.push_back({page, std::move(match)});
     }
     return result;
@@ -169,7 +187,15 @@ std::vector<PdfDocumentTextSearchMatch> PdfTextDocumentIndex::FindRegexAll(
     const PdfRegexSearchOptions& options) const {
     std::vector<PdfDocumentTextSearchMatch> result;
     for (std::size_t page = 0; page < GetPageCount(); ++page) {
-        auto matches = impl_->Get(page)->FindRegex(pattern, options);
+        const auto pageIndex = impl_->Get(page);
+        std::vector<PdfTextSearchMatch> matches;
+        if (!options.renderingMode.has_value()) {
+            matches = pageIndex->FindRegex(pattern, options);
+        } else {
+            auto filteredChunks = FilterRenderingMode(pageIndex->GetChunks(), *options.renderingMode);
+            PdfTextSearchIndex filteredIndex(filteredChunks, impl_->options.search);
+            matches = filteredIndex.FindRegex(pattern, options);
+        }
         for (auto& match : matches) result.push_back({page, std::move(match)});
         if (options.maxMatches != 0U && result.size() >= options.maxMatches) {
             result.resize(options.maxMatches);
@@ -186,7 +212,15 @@ std::vector<PdfDocumentTextSearchMatch> PdfTextDocumentIndex::FindRegexAll(
     for (std::size_t page = 0; page < GetPageCount(); ++page) {
         auto pageOptions = options;
         if (options.maxMatches != 0U) pageOptions.maxMatches = options.maxMatches - result.size();
-        auto matches = impl_->Get(page)->FindRegex(expression, pageOptions);
+        const auto pageIndex = impl_->Get(page);
+        std::vector<PdfTextSearchMatch> matches;
+        if (!options.renderingMode.has_value()) {
+            matches = pageIndex->FindRegex(expression, pageOptions);
+        } else {
+            auto filteredChunks = FilterRenderingMode(pageIndex->GetChunks(), *options.renderingMode);
+            PdfTextSearchIndex filteredIndex(filteredChunks, impl_->options.search);
+            matches = filteredIndex.FindRegex(expression, pageOptions);
+        }
         for (auto& match : matches) result.push_back({page, std::move(match)});
         if (options.maxMatches != 0U && result.size() >= options.maxMatches) break;
     }

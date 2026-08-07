@@ -11,7 +11,8 @@ This document maps the current public feature set to its automated unit or integ
 | Filters and predictors | `API.Filters`, `Filters.Decoders` |
 | Font resources, CMap and TrueType subset | `Fonts.CMapsAndResources`, `API.UnicodeTrueTypeWriting`, `Fonts.CffParser` |
 | Text extraction | `Text.Extractor`, `Reader.FontExtraction` |
-| Literal and regex text search | `Text.Search`, `Text.SearchOptions`, `Feature.RegexSearchOptionsAndGeometry` |
+| Text rendering-mode filtering | `Text.Extractor` | Optional exact `Tr` filtering, including clipping/invisible text |
+| Literal and regex text search | `Text.Search`, `Text.SearchOptions`, `Feature.RegexSearchOptionsAndGeometry`, `API.TextSearch` | Search and document indexes support exact rendering-mode filtering for literal and regex queries |
 | Canvas text and graphics operators | `API.ContentCommands`, `Content.Processor`, `Feature.CanvasGraphicsStateAndPaths`, `Feature.CanvasTextValidation` |
 | Images | `API.Images`, `Reader.InlineImageExtraction`, `Reader.SoftMaskImageExtraction`, `Feature.TextImageStampsAndWatermarks` |
 | Document metadata | `API.WriterDocumentInfo` |

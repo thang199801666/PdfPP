@@ -643,7 +643,7 @@ void TestOptionalContentLayers() {
     const std::size_t index = writer.AddOptionalContentGroup(PdfOcgOptions{"Background map"});
     PDFPP_TEST_CHECK(index == 0U);
     PDFPP_TEST_CHECK(writer.GetOptionalContentGroupCount() == 1U);
-    writer.AddOptionalContentGroup(PdfOcgOptions{"Annotations", false});
+    (void)writer.AddOptionalContentGroup(PdfOcgOptions{"Annotations", false});
     PDFPP_TEST_CHECK(writer.GetOptionalContentGroupCount() == 2U);
     // Registering the same name reuses the existing group.
     PDFPP_TEST_CHECK(writer.AddOptionalContentGroup(PdfOcgOptions{"Background map"}) == 0U);
@@ -660,8 +660,8 @@ void TestOptionalContentLayers() {
     PDFPP_TEST_CHECK(writer.GetOptionalContentGroupCount() == 0U);
 
     // Rebuild with a layer so the saved PDF carries the OCG structure.
-    writer.AddOptionalContentGroup(PdfOcgOptions{"Visible layer"});
-    writer.AddOptionalContentGroup(PdfOcgOptions{"Hidden layer", false});
+    (void)writer.AddOptionalContentGroup(PdfOcgOptions{"Visible layer"});
+    (void)writer.AddOptionalContentGroup(PdfOcgOptions{"Hidden layer", false});
     writer.GetCanvas(page).BeginLayer("Visible layer")
         .BeginText().SetFontAndSize("Helvetica", 12).MoveText(30, 360)
         .ShowText("Layer one content").EndText()
@@ -910,11 +910,11 @@ void TestDocumentLayoutPrimitives() {
     const auto page = writer.AddPage({0, 0, 400, 500});
     (void)page;
     PdfDocumentLayout layout(writer);
-    layout.DrawList(0U, {"First", "Second", "Third"}, 40.0, 460.0,
+    (void)layout.DrawList(0U, {"First", "Second", "Third"}, 40.0, 460.0,
         PdfDocumentLayout::ListOptions{PdfDocumentLayout::ListStyle::Decimal});
-    layout.DrawColumns(0U, {"Column A text", "Column B text"},
+    (void)layout.DrawColumns(0U, {"Column A text", "Column B text"},
         PdfRectangle{40, 40, 360, 400}, 16.0);
-    layout.DrawTable(0U, {"Name", "Value"},
+    (void)layout.DrawTable(0U, {"Name", "Value"},
         {{"Alpha", "1"}, {"Beta", "2"}}, PdfRectangle{40, 300, 300, 380});
     // Flow long paragraphs across pages.
     std::vector<PdfDocumentLayout::ParagraphOptions> flow;
@@ -925,11 +925,11 @@ void TestDocumentLayoutPrimitives() {
         p.fontSize = 11.0;
         flow.push_back(p);
     }
-    layout.FlowParagraphs(flow, PdfRectangle{40, 40, 360, 260});
-    layout.DrawHeader(0U, 0U, PdfRectangle{0, 0, 400, 500},
-        PdfDocumentLayout::HeaderFooterOptions{"", "", "Report"});
-    layout.DrawFooter(0U, 0U, PdfRectangle{0, 0, 400, 500},
-        PdfDocumentLayout::HeaderFooterOptions{"", "Page", "", 9.0, true, true, 36.0, 36.0});
+    (void)layout.FlowParagraphs(flow, PdfRectangle{40, 40, 360, 260});
+    (void)layout.DrawHeader(0U, 0U, PdfRectangle{0, 0, 400, 500},
+        PdfDocumentLayout::HeaderFooterOptions{"", "", "Report", 10.0, false, true, 36.0, 36.0, {}});
+    (void)layout.DrawFooter(0U, 0U, PdfRectangle{0, 0, 400, 500},
+        PdfDocumentLayout::HeaderFooterOptions{"", "Page", "", 9.0, true, true, 36.0, 36.0, {}});
     writer.Save(output);
     const auto document = PdfDocument::Open(output);
     PDFPP_TEST_CHECK(document.GetPageCount() >= 1U);
@@ -1067,6 +1067,11 @@ void TestJpxImageWrite() {
     PDFPP_TEST_CHECK(decoded.GetWidth() == 8U);
     PDFPP_TEST_CHECK(decoded.GetHeight() == 8U);
     PDFPP_TEST_CHECK(decoded.GetEncoding() == PdfImageEncoding::Dct);
+
+    const std::array<std::byte, 6> malformedJpeg{
+        std::byte{0xFF}, std::byte{0xD8}, std::byte{0xFF}, std::byte{0xE0},
+        std::byte{0xFF}, std::byte{0xFF}};
+    PDFPP_TEST_EXPECT_THROWS(( [&] { (void)PdfImage::FromJpeg(malformedJpeg); } ));
 
     // Indexed palette optimization: a 2-color RGB image writes /Indexed.
     std::vector<std::byte> twoColor(4 * 4 * 3U, std::byte{0});
@@ -1295,12 +1300,16 @@ void TestImageTypeDetection() {
     const std::array<std::byte, 3> jpegSignature{std::byte{0xFF}, std::byte{0xD8}, std::byte{0xFF}};
     const std::array<std::byte, 2> bmpSignature{std::byte{'B'}, std::byte{'M'}};
     const std::array<std::byte, 4> jpxSignature{std::byte{0xFF}, std::byte{0x4F}, std::byte{0xFF}, std::byte{0x51}};
+    const std::array<std::byte, 8> truncatedPngSignature{
+        std::byte{0x89}, std::byte{'P'}, std::byte{'N'}, std::byte{'G'},
+        std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}};
     const std::array<std::byte, 2> unknownSignature{std::byte{0x01}, std::byte{0x02}};
 
     PDFPP_TEST_CHECK(PdfImage::DetectImageType(pngSignature) == PdfImageType::Png);
     PDFPP_TEST_CHECK(PdfImage::DetectImageType(jpegSignature) == PdfImageType::Jpeg);
     PDFPP_TEST_CHECK(PdfImage::DetectImageType(bmpSignature) == PdfImageType::Bmp);
     PDFPP_TEST_CHECK(PdfImage::DetectImageType(jpxSignature) == PdfImageType::Jpeg2000);
+    PDFPP_TEST_CHECK(PdfImage::DetectImageType(truncatedPngSignature) == PdfImageType::Unknown);
     PDFPP_TEST_CHECK(PdfImage::DetectImageType(unknownSignature) == PdfImageType::Unknown);
 
     const std::array<std::byte, 12> rgb{
@@ -1314,6 +1323,20 @@ void TestImageTypeDetection() {
     PDFPP_TEST_CHECK(PdfImage::DetectImageType(bmp) == PdfImageType::Bmp);
     const auto jpeg = PdfImage::EncodeJpeg(2U, 2U, rgb, 90);
     PDFPP_TEST_CHECK(PdfImage::DetectImageType(jpeg) == PdfImageType::Jpeg);
+}
+
+void TestMalformedPngBoundaries() {
+    const std::array<std::byte, 8> signature{
+        std::byte{0x89}, std::byte{'P'}, std::byte{'N'}, std::byte{'G'},
+        std::byte{0x0D}, std::byte{0x0A}, std::byte{0x1A}, std::byte{0x0A}};
+    std::vector<std::byte> malformed(signature.begin(), signature.end());
+    malformed.insert(malformed.end(), {
+        std::byte{0}, std::byte{0}, std::byte{0}, std::byte{8},
+        std::byte{'I'}, std::byte{'H'}, std::byte{'D'}, std::byte{'R'},
+        std::byte{0}, std::byte{0}, std::byte{0}, std::byte{1},
+        std::byte{0}, std::byte{0}, std::byte{0}, std::byte{1},
+        std::byte{8}, std::byte{2}, std::byte{0}, std::byte{0}});
+    PDFPP_TEST_EXPECT_THROWS(( [&] { (void)PdfImage::FromPng(malformed); } ));
 }
 
 void TestPageContentStream() {
@@ -1433,7 +1456,7 @@ void TestRegionTextExtraction() {
 void TestTaggedPdf() {
     const auto output = TempPath("pdfpp_feature_tagged.pdf");
     PdfWriter writer;
-    writer.AddPage({0, 0, 200, 200});
+    (void)writer.AddPage({0, 0, 200, 200});
     writer.SetTaggedPdf(true);
     PDFPP_TEST_CHECK(writer.IsTaggedPdf());
     writer.SetLanguage("en-US");
@@ -1460,7 +1483,7 @@ void TestTaggedPdf() {
 void TestPortfolio() {
     const auto output = TempPath("pdfpp_feature_portfolio.pdf");
     PdfWriter writer;
-    writer.AddPage({0, 0, 200, 200});
+    (void)writer.AddPage({0, 0, 200, 200});
     const std::array<std::byte, 4> fileBytes{std::byte{'A'}, std::byte{'B'}, std::byte{'C'}, std::byte{'D'}};
     writer.AddEmbeddedFile("report.txt", fileBytes);
     PdfPortfolioOptions portfolio;
@@ -1495,26 +1518,34 @@ void TestDocumentTextIndexMappedInputAndStreamWriter() {
     PDFPP_TEST_CHECK(memory.str().find("%PDF-1.7") == 0U);
     writer.Save(output);
 
-    PdfMappedFileInputSource mappedSource(output);
-    PDFPP_TEST_CHECK(mappedSource.Size() == std::filesystem::file_size(output));
-    auto document = PdfDocument::OpenMapped(output);
-    PDFPP_TEST_CHECK(document.GetPageCount() == 3U);
+    {
+        PdfMappedFileInputSource mappedSource(output);
+        PDFPP_TEST_CHECK(mappedSource.Size() == std::filesystem::file_size(output));
+        auto document = PdfDocument::OpenMapped(output);
+        PDFPP_TEST_CHECK(document.GetPageCount() == 3U);
 
-    PdfDocumentTextIndexOptions indexOptions;
-    indexOptions.memoryBudgetBytes = 1024U * 1024U;
-    indexOptions.maxConcurrency = 2U;
-    PdfTextDocumentIndex textIndex(document, indexOptions);
-    textIndex.Preload(0U, 3U);
-    PDFPP_TEST_CHECK(textIndex.GetPageCount() == 3U);
+        PdfDocumentTextIndexOptions indexOptions;
+        indexOptions.memoryBudgetBytes = 1024U * 1024U;
+        indexOptions.maxConcurrency = 2U;
+        PdfTextDocumentIndex textIndex(document, indexOptions);
+        textIndex.Preload(0U, 3U);
+        PDFPP_TEST_CHECK(textIndex.GetPageCount() == 3U);
     PDFPP_TEST_CHECK(textIndex.FindAll("invoice").size() == 3U);
-    const std::regex expression(R"(INV-\d{4})", std::regex_constants::ECMAScript);
-    PDFPP_TEST_CHECK(textIndex.FindRegexAll(expression).size() == 3U);
-    PDFPP_TEST_CHECK(textIndex.GetPageText(1U).find("page 2") != std::string::npos);
-    const auto statistics = textIndex.GetStatistics();
-    PDFPP_TEST_CHECK(statistics.cachedPages == 3U);
-    PDFPP_TEST_CHECK(statistics.cacheMisses >= 3U);
-    textIndex.Clear();
-    PDFPP_TEST_CHECK(textIndex.GetStatistics().cachedPages == 0U);
+    PdfTextSearchOptions fillOnly;
+    fillOnly.renderingMode = 0;
+    PDFPP_TEST_CHECK(textIndex.FindAll("invoice", fillOnly).size() == 3U);
+    PdfRegexSearchOptions regexFillOnly;
+    regexFillOnly.renderingMode = 0;
+    PDFPP_TEST_CHECK(textIndex.FindRegexAll(R"(INV-\d{4})", regexFillOnly).size() == 3U);
+        const std::regex expression(R"(INV-\d{4})", std::regex_constants::ECMAScript);
+        PDFPP_TEST_CHECK(textIndex.FindRegexAll(expression).size() == 3U);
+        PDFPP_TEST_CHECK(textIndex.GetPageText(1U).find("page 2") != std::string::npos);
+        const auto statistics = textIndex.GetStatistics();
+        PDFPP_TEST_CHECK(statistics.cachedPages == 3U);
+        PDFPP_TEST_CHECK(statistics.cacheMisses >= 3U);
+        textIndex.Clear();
+        PDFPP_TEST_CHECK(textIndex.GetStatistics().cachedPages == 0U);
+    }
     std::filesystem::remove(output);
 }
 
@@ -1971,6 +2002,7 @@ int RunFeatureUnitTests() {
     runner.Run("Feature.PageContentStream", TestPageContentStream);
     runner.Run("Feature.PngOutput", TestPngOutput);
     runner.Run("Feature.ImageTypeDetection", TestImageTypeDetection);
+    runner.Run("Feature.MalformedPngBoundaries", TestMalformedPngBoundaries);
     runner.Run("Feature.PolygonAndBezierPaths", TestPolygonAndBezierPaths);
     runner.Run("Feature.CffFontEmbedding", TestCffFontEmbedding);
     runner.Run("Feature.SaveValidationAndRoundTrip", TestSaveValidationAndRoundTrip);

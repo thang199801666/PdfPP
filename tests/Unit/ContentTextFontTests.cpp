@@ -179,6 +179,33 @@ void TestTextExtractor() {
         regionRequest);
     PDFPP_TEST_CHECK(regionText == "Hello");
 
+    PdfTextExtractionRequest fillOnly;
+    fillOnly.options.renderingMode = 0;
+    const auto fillText = PdfTextExtractor::ExtractText(
+        "BT /F1 10 Tf 3 Tr (clip) Tj 0 Tr (fill) Tj ET", fillOnly);
+    PDFPP_TEST_CHECK(fillText == "fill");
+
+    PdfTextExtractionRequest invalidMode;
+    invalidMode.options.renderingMode = 8;
+    bool rejectedMode = false;
+    try {
+        (void)PdfTextExtractor::ExtractChunks("BT /F1 10 Tf (text) Tj ET", invalidMode);
+    } catch (const std::invalid_argument&) {
+        rejectedMode = true;
+    }
+    PDFPP_TEST_CHECK(rejectedMode);
+
+    PdfRegexSearchOptions invalidRegexMode;
+    invalidRegexMode.renderingMode = -1;
+    rejectedMode = false;
+    try {
+        (void)PdfTextSearch::FindRegex(
+            chunks, R"(World)", invalidRegexMode);
+    } catch (const std::invalid_argument&) {
+        rejectedMode = true;
+    }
+    PDFPP_TEST_CHECK(rejectedMode);
+
     const auto transformedChunks = PdfTextExtractor::ExtractChunks(
         "2 0 0 3 100 200 cm BT /F1 10 Tf 1 0 0 1 5 7 Tm (A) Tj ET");
     PDFPP_TEST_CHECK(transformedChunks.size() == 1);

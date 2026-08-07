@@ -3,6 +3,7 @@
 #include <CPPPdf/Graphics/PdfImage.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -15,6 +16,108 @@ namespace CPPPdf {
 namespace {
 std::uint8_t ToByte(const std::byte value) noexcept {
     return std::to_integer<std::uint8_t>(value);
+}
+
+double Unit(const std::uint8_t value) noexcept {
+    return static_cast<double>(value) / 255.0;
+}
+
+std::uint8_t ByteFromUnit(const double value) noexcept {
+    return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
+}
+
+using RgbUnit = std::array<double, 3>;
+
+double Luminosity(const RgbUnit& color) noexcept {
+    return 0.30 * color[0] + 0.59 * color[1] + 0.11 * color[2];
+}
+
+double Saturation(const RgbUnit& color) noexcept {
+    const auto [minimum, maximum] = std::minmax_element(color.begin(), color.end());
+    return *maximum - *minimum;
+}
+
+RgbUnit ClipColor(RgbUnit color) noexcept {
+    const double luminance = Luminosity(color);
+    const double minimum = *std::min_element(color.begin(), color.end());
+    const double maximum = *std::max_element(color.begin(), color.end());
+    if (minimum < 0.0 && luminance != minimum) {
+        for (auto& component : color) component = luminance + (component - luminance) * luminance / (luminance - minimum);
+    }
+    if (maximum > 1.0 && maximum != luminance) {
+        for (auto& component : color) component = luminance + (component - luminance) * (1.0 - luminance) / (maximum - luminance);
+    }
+    for (auto& component : color) component = std::clamp(component, 0.0, 1.0);
+    return color;
+}
+
+RgbUnit SetLuminosity(RgbUnit color, const double luminance) noexcept {
+    const double difference = luminance - Luminosity(color);
+    for (auto& component : color) component += difference;
+    return ClipColor(color);
+}
+
+RgbUnit SetSaturation(RgbUnit color, const double saturation) noexcept {
+    std::array<std::size_t, 3> order{0U, 1U, 2U};
+    std::sort(order.begin(), order.end(), [&](const auto left, const auto right) {
+        return color[left] < color[right];
+    });
+    const auto minimum = order[0];
+    const auto middle = order[1];
+    const auto maximum = order[2];
+    if (color[maximum] > color[minimum]) {
+        color[middle] = (color[middle] - color[minimum]) * saturation /
+            (color[maximum] - color[minimum]);
+        color[maximum] = saturation;
+    } else {
+        color[middle] = 0.0;
+        color[maximum] = 0.0;
+    }
+    color[minimum] = 0.0;
+    return color;
+}
+
+double BlendChannel(const double source, const double backdrop, const PdfBlendMode mode) noexcept {
+    switch (mode) {
+    case PdfBlendMode::Multiply: return source * backdrop;
+    case PdfBlendMode::Screen: return source + backdrop - source * backdrop;
+    case PdfBlendMode::Overlay:
+        return backdrop <= 0.5 ? 2.0 * source * backdrop
+                               : 1.0 - 2.0 * (1.0 - source) * (1.0 - backdrop);
+    case PdfBlendMode::Darken: return std::min(source, backdrop);
+    case PdfBlendMode::Lighten: return std::max(source, backdrop);
+    case PdfBlendMode::ColorDodge:
+        return source >= 1.0 ? 1.0 : std::min(1.0, backdrop / (1.0 - source));
+    case PdfBlendMode::ColorBurn:
+        return source <= 0.0 ? 0.0 : 1.0 - std::min(1.0, (1.0 - backdrop) / source);
+    case PdfBlendMode::HardLight:
+        return source <= 0.5 ? 2.0 * source * backdrop
+                             : 1.0 - 2.0 * (1.0 - source) * (1.0 - backdrop);
+    case PdfBlendMode::SoftLight: {
+        if (source <= 0.5) return backdrop - (1.0 - 2.0 * source) * backdrop * (1.0 - backdrop);
+        const double d = backdrop <= 0.25
+            ? ((16.0 * backdrop - 12.0) * backdrop + 4.0) * backdrop
+            : std::sqrt(backdrop);
+        return backdrop + (2.0 * source - 1.0) * (d - backdrop);
+    }
+    case PdfBlendMode::Difference: return std::abs(backdrop - source);
+    case PdfBlendMode::Exclusion: return backdrop + source - 2.0 * backdrop * source;
+    default: return source;
+    }
+}
+
+RgbUnit BlendRgb(const RgbUnit& source, const RgbUnit& backdrop, const PdfBlendMode mode) noexcept {
+    if (mode == PdfBlendMode::Hue) {
+        return SetLuminosity(SetSaturation(source, Saturation(backdrop)), Luminosity(backdrop));
+    }
+    if (mode == PdfBlendMode::Saturation) {
+        return SetLuminosity(SetSaturation(backdrop, Saturation(source)), Luminosity(backdrop));
+    }
+    if (mode == PdfBlendMode::Color) return SetLuminosity(source, Luminosity(backdrop));
+    if (mode == PdfBlendMode::Luminosity) return SetLuminosity(backdrop, Luminosity(source));
+    return {BlendChannel(source[0], backdrop[0], mode),
+            BlendChannel(source[1], backdrop[1], mode),
+            BlendChannel(source[2], backdrop[2], mode)};
 }
 }
 
@@ -103,24 +206,13 @@ void PdfBitmap::BlendPixel(const std::int32_t x, const std::int32_t y,
     }
     if (x < 0 || y < 0 || x >= static_cast<std::int32_t>(width_) ||
         y >= static_cast<std::int32_t>(height_)) return;
-    const auto offset = static_cast<std::size_t>(y) * GetStride() + static_cast<std::size_t>(x) * 4U;
     const auto destination = GetPixel(static_cast<std::size_t>(x), static_cast<std::size_t>(y));
-    const auto channel = [&](const std::uint8_t source, const std::uint8_t target) {
-        switch (mode) {
-        case PdfBlendMode::Multiply: return static_cast<std::uint8_t>(source * target / 255U);
-        case PdfBlendMode::Screen: return static_cast<std::uint8_t>(255U - (255U - source) * (255U - target) / 255U);
-        case PdfBlendMode::Darken: return std::min(source, target);
-        case PdfBlendMode::Lighten: return std::max(source, target);
-        case PdfBlendMode::Difference: return static_cast<std::uint8_t>(std::abs(static_cast<int>(source) - static_cast<int>(target)));
-        case PdfBlendMode::Exclusion: return static_cast<std::uint8_t>(source + target - 2U * source * target / 255U);
-        case PdfBlendMode::Overlay: return target < 128U ? static_cast<std::uint8_t>(2U * source * target / 255U) : static_cast<std::uint8_t>(255U - 2U * (255U - source) * (255U - target) / 255U);
-        default: return source;
-        }
-    };
-    PdfRgbaColor blended{channel(color.red, destination.red), channel(color.green, destination.green),
-                         channel(color.blue, destination.blue), color.alpha};
+    const RgbUnit source{Unit(color.red), Unit(color.green), Unit(color.blue)};
+    const RgbUnit backdrop{Unit(destination.red), Unit(destination.green), Unit(destination.blue)};
+    const auto result = BlendRgb(source, backdrop, mode);
+    const PdfRgbaColor blended{ByteFromUnit(result[0]), ByteFromUnit(result[1]),
+                               ByteFromUnit(result[2]), color.alpha};
     BlendPixel(x, y, blended);
-    (void)offset;
 }
 
 void PdfBitmap::BlendPixelInBounds(const std::size_t x, const std::size_t y,
@@ -219,11 +311,6 @@ void PdfBitmap::SavePng(const std::filesystem::path& path) const {
         }
         return table;
     }();
-    const auto crc = [&](const std::uint8_t* data, const std::size_t size) {
-        std::uint32_t c = 0xFFFFFFFFU;
-        for (std::size_t i = 0; i < size; ++i) c = crcTable[(c ^ data[i]) & 0xFFU] ^ (c >> 8U);
-        return c ^ 0xFFFFFFFFU;
-    };
     const auto bigEndian = [](std::uint32_t value) {
         return std::array<std::uint8_t, 4>{static_cast<std::uint8_t>((value >> 24U) & 0xFFU),
                                            static_cast<std::uint8_t>((value >> 16U) & 0xFFU),
@@ -231,14 +318,30 @@ void PdfBitmap::SavePng(const std::filesystem::path& path) const {
                                            static_cast<std::uint8_t>(value & 0xFFU)};
     };
     const auto writeChunk = [&](const char tag[4], const std::uint8_t* data, const std::size_t size) {
+        if (size > std::numeric_limits<std::uint32_t>::max() ||
+            size > static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max())) {
+            throw PdfException(PdfErrorCode::InvalidArgument, "PNG chunk exceeds the format limit.");
+        }
         const auto length = bigEndian(static_cast<std::uint32_t>(size));
         output.write(reinterpret_cast<const char*>(length.data()), 4);
         output.write(tag, 4);
-        if (size > 0U) output.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
-        std::vector<std::uint8_t> crcData(size + 4U);
-        for (int i = 0; i < 4; ++i) crcData[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(tag[i]);
-        if (size > 0U) std::copy(data, data + size, crcData.begin() + 4);
-        const auto checksum = bigEndian(crc(crcData.data(), size + 4U));
+        if (size > 0U) {
+            if (data == nullptr) {
+                throw PdfException(PdfErrorCode::InvalidArgument, "PNG chunk data is null.");
+            }
+            output.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
+        }
+        std::uint32_t checksumValue = 0xFFFFFFFFU;
+        for (std::size_t i = 0; i < 4U; ++i) {
+            checksumValue = crcTable[(checksumValue ^ static_cast<std::uint8_t>(tag[i])) & 0xFFU] ^
+                            (checksumValue >> 8U);
+        }
+        for (std::size_t i = 0; i < size; ++i) {
+            checksumValue = crcTable[(checksumValue ^ data[i]) & 0xFFU] ^
+                            (checksumValue >> 8U);
+        }
+        checksumValue ^= 0xFFFFFFFFU;
+        const auto checksum = bigEndian(checksumValue);
         output.write(reinterpret_cast<const char*>(checksum.data()), 4);
     };
     // PNG signature.

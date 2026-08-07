@@ -66,10 +66,12 @@
     <ClInclude Include="include\CPPPdf\Fonts\PdfFont.hpp" />
     <ClInclude Include="include\CPPPdf\Fonts\PdfFontResource.hpp" />
     <ClInclude Include="include\CPPPdf\Fonts\PdfTrueTypeFont.hpp" />
+    <ClInclude Include="include\CPPPdf\Fonts\PdfType3Font.hpp" />
     <ClInclude Include="include\CPPPdf\Fonts\PdfType1Font.hpp" />
     <ClInclude Include="include\CPPPdf\Fonts\PdfCff.hpp" />
     <ClInclude Include="include\CPPPdf\Content\PdfContentProcessor.hpp" />
     <ClInclude Include="include\CPPPdf\Writer\PdfWriter.hpp" />
+    <ClInclude Include="include\CPPPdf\Writer\PdfIncrementalUpdate.hpp" />
     <ClInclude Include="include\CPPPdf\Security\PdfSecurity.hpp" />
     <ClInclude Include="include\CPPPdf\Security\PdfSignature.hpp" />
     <ClInclude Include="include\CPPPdf\Security\PdfCms.hpp" />
@@ -110,6 +112,11 @@
     <ClInclude Include="include\CPPPdf\Writer.hpp" />
     <ClInclude Include="include\CPPPdf\Annotations.hpp" />
     <ClInclude Include="include\CPPPdf\Forms.hpp" />
+    <ClInclude Include="include\CPPPdf\CPPPdf.hpp" />
+    <ClInclude Include="include\CPPPdf\Rendering\PdfDisplayList.hpp" />
+    <ClInclude Include="include\CPPPdf\Rendering\PdfTransparencyGroup.h" />
+    <ClInclude Include="src\Internal\Graphics\PdfJpegEncoder.hpp" />
+    <ClInclude Include="src\Internal\Security\PdfCrypto.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Document\PdfDocument.cpp" />
@@ -122,11 +129,13 @@
     <ClCompile Include="src\Fonts\PdfFont.cpp" />
     <ClCompile Include="src\Fonts\PdfFontResource.cpp" />
     <ClCompile Include="src\Fonts\PdfTrueTypeFont.cpp" />
+    <ClCompile Include="src\Fonts\PdfType3Font.cpp" />
     <ClCompile Include="src\Fonts\PdfType1Font.cpp" />
     <ClCompile Include="src\Internal\Graphics\PdfJpegEncoder.cpp" />
     <ClCompile Include="src\Fonts\PdfCff.cpp" />
     <ClCompile Include="src\Content\PdfContentProcessor.cpp" />
     <ClCompile Include="src\Writer\PdfWriter.cpp" />
+    <ClCompile Include="src\Writer\PdfIncrementalUpdate.cpp" />
     <ClCompile Include="src\Security\PdfStandardSecurity.cpp" />
     <ClCompile Include="src\Security\PdfCrypto.cpp" />
     <ClCompile Include="src\Security\PdfPasswordManager.cpp" />

@@ -76,6 +76,7 @@ struct PdfAnnotationInfo final {
     PdfRectangle rect{};
     std::string contents;
     std::string title;
+    std::string subject;
     std::uint32_t objectNumber{};
 };
 class PdfDocument final {public:

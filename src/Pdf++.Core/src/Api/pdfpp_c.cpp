@@ -96,6 +96,10 @@ const char* pdfpp_version(void) {
     return CPPPdf::VersionString.data();
 }
 
+const char* pdfpp_c_version(void) {
+    return CPPPdf::VersionString.data();
+}
+
 void pdfpp_close(PdfDocumentHandle doc) {
     delete static_cast<CPPPdf::PdfDocument*>(doc);
 }

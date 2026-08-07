@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <string>
 #include <string_view>
@@ -18,6 +19,7 @@ struct PdfTextSearchOptions final {
     std::size_t maxMatches{}; // Zero means unlimited.
     double lineTolerance{2.0};
     double maxHorizontalGap{6.0};
+    std::optional<int> renderingMode;
 };
 
 struct PdfRegexSearchOptions final {
@@ -27,6 +29,7 @@ struct PdfRegexSearchOptions final {
     std::size_t maxMatches{}; // Zero means unlimited.
     double lineTolerance{2.0};
     double maxHorizontalGap{6.0};
+    std::optional<int> renderingMode;
 };
 
 struct PdfTextSearchIndexOptions final {

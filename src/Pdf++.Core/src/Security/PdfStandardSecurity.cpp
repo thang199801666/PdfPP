@@ -1,4 +1,5 @@
 #include "Internal/Security/PdfStandardSecurity.hpp"
+#include "Internal/Security/PdfCrypto.hpp"
 
 #include <CPPPdf/PdfError.hpp>
 
@@ -8,7 +9,29 @@
 #include <charconv>
 #include <cctype>
 #include <cstring>
+#include <limits>
 #include <random>
+
+#if defined(_WIN32)
+// bcrypt.h is not self-contained: it expects Win32 scalar and pointer types
+// (ULONG, PUCHAR, NTSTATUS, and related declarations) from windows.h.
+// Including it directly produces a cascade of misleading MSVC errors such as
+// "unknown override specifier" for cbSize/cbData/etc.
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#  include <bcrypt.h>
+#  pragma comment(lib, "bcrypt.lib")
+#elif defined(__linux__)
+#  include <cerrno>
+#  include <sys/random.h>
+#elif defined(__APPLE__)
+#  include <cstdlib>
+#endif
 #include <regex>
 #include <optional>
 #include <stdexcept>
@@ -43,8 +66,8 @@ std::array<std::uint8_t, 16> md5(const std::span<const std::uint8_t> input) {
         4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21};
     std::vector<std::uint8_t> data(input.begin(), input.end());
     const std::uint64_t bitLength = static_cast<std::uint64_t>(data.size()) * 8U;
-    data.push_back(0x80U);
-    while ((data.size() % 64U) != 56U) data.push_back(0U);
+    data.push_back(std::uint8_t{0x80});
+    while ((data.size() % 64U) != 56U) data.push_back(std::uint8_t{0});
     for (unsigned i = 0; i < 8; ++i) data.push_back(static_cast<std::uint8_t>(bitLength >> (8U * i)));
 
     std::uint32_t a0=0x67452301U,b0=0xefcdab89U,c0=0x98badcfeU,d0=0x10325476U;
@@ -165,32 +188,658 @@ std::optional<std::size_t> directStreamLength(const std::string_view dictionary)
     return parsed.ec == std::errc{} ? std::optional<std::size_t>(value) : std::nullopt;
 }
 
-} // namespace
 
-std::array<std::uint8_t,16> GeneratePdfFileId(){std::array<std::uint8_t,16>id{};thread_local std::random_device random;for(auto&v:id)v=static_cast<std::uint8_t>(random());return id;}
-std::string PdfHex(std::span<const std::uint8_t>bytes){static constexpr char hex[]="0123456789ABCDEF";std::string out;out.reserve(bytes.size()*2U);for(auto b:bytes){out.push_back(hex[b>>4U]);out.push_back(hex[b&15U]);}return out;}
-std::vector<std::uint8_t> ParsePdfHex(std::string_view hex){std::vector<std::uint8_t>out;int high=-1;for(char c:hex){int v=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1;if(v<0)continue;if(high<0)high=v;else{out.push_back(static_cast<std::uint8_t>((high<<4)|v));high=-1;}}if(high>=0)out.push_back(static_cast<std::uint8_t>(high<<4));return out;}
-std::int32_t BuildPdfPermissionBits(const PdfPermissions&p){std::uint32_t value=0xfffff0c0U;if(p.print)value|=4U;if(p.modify)value|=8U;if(p.copy)value|=16U;if(p.annotate)value|=32U;if(p.fillForms)value|=256U;if(p.accessibility)value|=512U;if(p.assemble)value|=1024U;if(p.highQualityPrint)value|=2048U;return static_cast<std::int32_t>(value);}
-
-PdfStandardSecurity PdfStandardSecurity::Create(const PdfEncryptionOptions&o,std::span<const std::uint8_t,16>id){PdfStandardSecurity s;s.algorithm_=o.algorithm;s.permissions_=BuildPdfPermissionBits(o.permissions);s.encryptMetadata_=o.encryptMetadata;std::copy(id.begin(),id.end(),s.fileId_.begin());const std::size_t keyLength=o.algorithm==PdfEncryptionAlgorithm::Rc4_40?5U:16U;const auto ownerPassword=o.ownerPassword.empty()?o.userPassword:o.ownerPassword;const auto key=ownerKey(ownerPassword,keyLength);auto owner=rc4(padPassword(o.userPassword),std::span<const std::uint8_t>(key).first(keyLength));if(keyLength==16U){std::array<std::uint8_t,16>pass{};for(std::uint8_t i=1;i<=19;++i){for(std::size_t j=0;j<16;++j)pass[j]=key[j]^i;owner=rc4(owner,pass);}}std::copy(owner.begin(),owner.end(),s.ownerEntry_.begin());const auto padded=padPassword(o.userPassword);s.fileKey_=fileKeyFromPadded(padded,s.ownerEntry_,s.permissions_,s.fileId_,s.encryptMetadata_,keyLength);s.userEntry_=computeUser(s.fileKey_,s.fileId_,keyLength);s.authenticated_=true;s.ownerAuthenticated_=true;return s;}
-
-PdfStandardSecurity PdfStandardSecurity::Parse(std::string_view d,std::span<const std::uint8_t>id){PdfStandardSecurity s;const auto filter=regexValue(d,R"(/Filter\s*/([^\s/<>()\[\]]+))");if(filter!="Standard")throw PdfException(PdfErrorCode::UnsupportedFeature,"Only the PDF Standard Security Handler is supported.");const int r=std::stoi(regexValue(d,R"(/R\s+(-?\d+))"));const int v=std::stoi(regexValue(d,R"(/V\s+(-?\d+))"));if(r==4&&v==4){if(d.find("/CFM /AESV2")==std::string_view::npos)throw PdfException(PdfErrorCode::UnsupportedEncryption,"Only AESV2 crypt filters are supported for revision 4 encryption.");s.algorithm_=PdfEncryptionAlgorithm::Aes128;}else if(r==3&&(v==2||v==3))s.algorithm_=PdfEncryptionAlgorithm::Rc4_128;else if(r==2&&v==1)s.algorithm_=PdfEncryptionAlgorithm::Rc4_40;else throw PdfException(PdfErrorCode::UnsupportedEncryption,"Unsupported PDF encryption revision. Supported: AES-128 (R4), RC4-128 (R3), and RC4-40 (R2).");s.permissions_=static_cast<std::int32_t>(std::stoll(regexValue(d,R"(/P\s+(-?\d+))")));s.encryptMetadata_=d.find("/EncryptMetadata false")==std::string_view::npos;auto o=ParsePdfHex(regexValue(d,R"(/O\s*<([0-9A-Fa-f\s]+)>)"));auto u=ParsePdfHex(regexValue(d,R"(/U\s*<([0-9A-Fa-f\s]+)>)"));if(o.size()!=32||u.size()!=32||id.size()<16)throw PdfException(PdfErrorCode::UnsupportedEncryption,"Malformed encryption owner/user key or file ID.");std::copy_n(o.begin(),32,s.ownerEntry_.begin());std::copy_n(u.begin(),32,s.userEntry_.begin());std::copy_n(id.begin(),16,s.fileId_.begin());return s;}
-
-bool PdfStandardSecurity::Authenticate(std::string_view password){const std::size_t keyLength=algorithm_==PdfEncryptionAlgorithm::Rc4_40?5U:16U;const auto padded=padPassword(password);auto candidate=fileKeyFromPadded(padded,ownerEntry_,permissions_,fileId_,encryptMetadata_,keyLength);if(matchesUser(candidate,userEntry_,fileId_,keyLength)){fileKey_=candidate;authenticated_=true;ownerAuthenticated_=false;return true;}const auto key=ownerKey(password,keyLength);std::vector<std::uint8_t>recovered(ownerEntry_.begin(),ownerEntry_.end());if(keyLength==16U){std::array<std::uint8_t,16>pass{};for(int i=19;i>=0;--i){for(std::size_t j=0;j<16;++j)pass[j]=key[j]^static_cast<std::uint8_t>(i);recovered=rc4(recovered,pass);}}else recovered=rc4(recovered,std::span<const std::uint8_t>(key).first(keyLength));std::array<std::uint8_t,32>ownerRecovered{};std::copy_n(recovered.begin(),32,ownerRecovered.begin());candidate=fileKeyFromPadded(ownerRecovered,ownerEntry_,permissions_,fileId_,encryptMetadata_,keyLength);if(matchesUser(candidate,userEntry_,fileId_,keyLength)){fileKey_=candidate;authenticated_=true;ownerAuthenticated_=true;return true;}return false;}
-
-std::string PdfStandardSecurity::EncryptionDictionary()const{std::string d="<< /Filter /Standard ";if(algorithm_==PdfEncryptionAlgorithm::Aes128)d+="/V 4 /R 4 /Length 128 /CF << /StdCF << /CFM /AESV2 /AuthEvent /DocOpen /Length 16 >> >> /StmF /StdCF /StrF /StdCF ";else if(algorithm_==PdfEncryptionAlgorithm::Rc4_128)d+="/V 2 /R 3 /Length 128 ";else d+="/V 1 /R 2 /Length 40 ";d+="/O <"+PdfHex(ownerEntry_)+"> /U <"+PdfHex(userEntry_)+"> /P "+std::to_string(permissions_);if(!encryptMetadata_&&algorithm_!=PdfEncryptionAlgorithm::Rc4_40)d+=" /EncryptMetadata false";d+=" >>";return d;}
-
-std::vector<std::uint8_t> PdfStandardSecurity::Crypt(std::span<const std::uint8_t>input,std::uint32_t objectNumber,std::uint16_t generation,bool encrypt)const{if(!authenticated_)throw PdfException(PdfErrorCode::PasswordRequired,"A valid password is required to access encrypted PDF objects.");const std::size_t keyLength=algorithm_==PdfEncryptionAlgorithm::Rc4_40?5U:16U;std::vector<std::uint8_t>material(fileKey_.begin(),fileKey_.begin()+static_cast<std::ptrdiff_t>(keyLength));material.push_back(static_cast<std::uint8_t>(objectNumber));material.push_back(static_cast<std::uint8_t>(objectNumber>>8U));material.push_back(static_cast<std::uint8_t>(objectNumber>>16U));material.push_back(static_cast<std::uint8_t>(generation));material.push_back(static_cast<std::uint8_t>(generation>>8U));if(algorithm_==PdfEncryptionAlgorithm::Aes128){material.insert(material.end(),{'s','A','l','T'});}const auto digest=md5(material);if(algorithm_!=PdfEncryptionAlgorithm::Aes128)return rc4(input,std::span<const std::uint8_t>(digest).first(std::min<std::size_t>(16U,keyLength+5U)));return aesCbc(input,digest,encrypt);}
-
-std::string PdfStandardSecurity::TransformObject(std::string_view object,std::uint32_t number,std::uint16_t generation,bool encrypt)const{
-    auto transformText=[&](std::string_view text){std::string out;out.reserve(text.size()+32);std::size_t p=0;while(p<text.size()){if(text[p]=='%'){do{out.push_back(text[p++]);}while(p<text.size()&&text[p]!='\r'&&text[p]!='\n');continue;}if(text[p]=='('){auto bytes=decodeLiteral(text,p);auto crypt=Crypt(bytes,number,generation,encrypt);out+='<'+PdfHex(crypt)+'>';continue;}if(text[p]=='<'&&p+1<text.size()&&text[p+1]!='<'&&(p==0||text[p-1]!='<')){auto bytes=decodeHexAt(text,p);auto crypt=Crypt(bytes,number,generation,encrypt);out+='<'+PdfHex(crypt)+'>';continue;}out.push_back(text[p++]);}return out;};
-    std::size_t keyword=std::string_view::npos,dataStart{};for(std::size_t p=0;(p=object.find("stream",p))!=std::string_view::npos;++p){const auto after=p+6U;const bool left=p==0||object[p-1]=='\n'||object[p-1]=='\r'||object[p-1]==' '||object[p-1]=='>';if(left&&after<object.size()&&(object[after]=='\r'||object[after]=='\n')){keyword=p;dataStart=after;if(object[dataStart]=='\r')++dataStart;if(dataStart<object.size()&&object[dataStart]=='\n')++dataStart;break;}}
-    if(keyword==std::string_view::npos)return transformText(object);
-    const auto end=object.rfind("endstream");if(end==std::string_view::npos||end<dataStart)throw PdfException(PdfErrorCode::MalformedObject,"Encrypted stream has no endstream marker.");std::size_t dataEnd=end;if(const auto length=directStreamLength(object.substr(0,keyword));length&&*length<=end-dataStart)dataEnd=dataStart+*length;else while(dataEnd>dataStart&&(object[dataEnd-1]=='\n'||object[dataEnd-1]=='\r'))--dataEnd;
-    std::string prefix=transformText(object.substr(0,dataStart));std::vector<std::uint8_t>stream(object.begin()+static_cast<std::ptrdiff_t>(dataStart),object.begin()+static_cast<std::ptrdiff_t>(dataEnd));if(!( !encryptMetadata_ && object.substr(0,keyword).find("/Type /Metadata")!=std::string_view::npos))stream=Crypt(stream,number,generation,encrypt);
-    replaceStreamLength(prefix,stream.size());std::string out;out.reserve(prefix.size()+stream.size()+object.size()-dataEnd);out=std::move(prefix);out.append(reinterpret_cast<const char*>(stream.data()),stream.size());out.append(object.substr(dataEnd));return out;
+template <std::size_t N>
+std::array<std::uint8_t, N> randomBytes() {
+    static_assert(N <= static_cast<std::size_t>(std::numeric_limits<unsigned long>::max()));
+    std::array<std::uint8_t, N> output{};
+#if defined(_WIN32)
+    const NTSTATUS status = BCryptGenRandom(
+        nullptr, reinterpret_cast<PUCHAR>(output.data()), static_cast<ULONG>(N),
+        BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (!BCRYPT_SUCCESS(status)) {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Windows CSPRNG failed while generating PDF security material.");
+    }
+#elif defined(__linux__)
+    std::size_t offset = 0U;
+    while (offset < output.size()) {
+        const ssize_t count = ::getrandom(output.data() + offset, output.size() - offset, 0);
+        if (count > 0) {
+            offset += static_cast<std::size_t>(count);
+            continue;
+        }
+        if (count < 0 && errno == EINTR) continue;
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Linux CSPRNG failed while generating PDF security material.");
+    }
+#elif defined(__APPLE__)
+    arc4random_buf(output.data(), output.size());
+#else
+    // std::random_device is the portable fallback. Supported release targets
+    // use their operating-system CSPRNG branches above.
+    std::random_device source;
+    for (auto& value : output) value = static_cast<std::uint8_t>(source());
+#endif
+    return output;
 }
 
-std::string PdfStandardSecurity::EncryptObject(std::string_view o,std::uint32_t n,std::uint16_t g)const{return TransformObject(o,n,g,true);}std::string PdfStandardSecurity::DecryptObject(std::string_view o,std::uint32_t n,std::uint16_t g)const{return TransformObject(o,n,g,false);}
+std::vector<std::uint8_t> normalizedRevision6Password(const std::string_view password) {
+    // ISO 32000-2 consumes the UTF-8 password byte sequence and limits it to
+    // 127 bytes. The public API treats std::string passwords as UTF-8.
+    const std::size_t count = std::min<std::size_t>(127U, password.size());
+    return {reinterpret_cast<const std::uint8_t*>(password.data()),
+            reinterpret_cast<const std::uint8_t*>(password.data()) + count};
+}
+
+bool constantTimeEqual(const std::span<const std::uint8_t> left,
+                       const std::span<const std::uint8_t> right) {
+    if (left.size() != right.size()) return false;
+    std::uint8_t difference = 0U;
+    for (std::size_t i = 0; i < left.size(); ++i) difference |= left[i] ^ right[i];
+    return difference == 0U;
+}
+
+std::vector<std::uint8_t> aes128CbcNoPadding(
+    const std::span<const std::uint8_t> input,
+    const std::span<const std::uint8_t, 16> key,
+    const std::span<const std::uint8_t, 16> iv,
+    const bool encrypt) {
+    if (input.size() % 16U != 0U) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "AES-128-CBC input is not block aligned.");
+    }
+    const auto schedule = expandKey(key);
+    std::array<std::uint8_t, 16> previous{};
+    std::copy(iv.begin(), iv.end(), previous.begin());
+    std::vector<std::uint8_t> output;
+    output.reserve(input.size());
+    for (std::size_t offset = 0; offset < input.size(); offset += 16U) {
+        std::array<std::uint8_t, 16> block{};
+        std::copy_n(input.begin() + static_cast<std::ptrdiff_t>(offset), 16U, block.begin());
+        if (encrypt) {
+            for (std::size_t i = 0; i < 16U; ++i) block[i] ^= previous[i];
+            aesEncryptBlock(block, schedule);
+            previous = block;
+            output.insert(output.end(), block.begin(), block.end());
+        } else {
+            const auto ciphertext = block;
+            aesDecryptBlock(block, schedule);
+            for (std::size_t i = 0; i < 16U; ++i) block[i] ^= previous[i];
+            previous = ciphertext;
+            output.insert(output.end(), block.begin(), block.end());
+        }
+    }
+    return output;
+}
+
+std::vector<std::uint8_t> aes256CbcNoPadding(
+    const std::span<const std::uint8_t> input,
+    const std::span<const std::uint8_t, 32> key,
+    const std::span<const std::uint8_t, 16> iv,
+    const bool encrypt) {
+    return encrypt ? Aes256CbcEncrypt(key, iv, input)
+                   : Aes256CbcDecrypt(key, iv, input);
+}
+
+std::vector<std::uint8_t> aes256ObjectCrypt(
+    const std::span<const std::uint8_t> input,
+    const std::span<const std::uint8_t, 32> key,
+    const bool encrypt) {
+    if (encrypt) {
+        const auto iv = randomBytes<16>();
+        std::vector<std::uint8_t> padded(input.begin(), input.end());
+        const auto padding = static_cast<std::uint8_t>(16U - (padded.size() % 16U));
+        padded.insert(padded.end(), padding, padding);
+        auto encrypted = Aes256CbcEncrypt(key, iv, padded);
+        std::vector<std::uint8_t> output(iv.begin(), iv.end());
+        output.insert(output.end(), encrypted.begin(), encrypted.end());
+        return output;
+    }
+    if (input.size() < 32U || input.size() % 16U != 0U) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Invalid AES-256 encrypted object length.");
+    }
+    std::array<std::uint8_t, 16> iv{};
+    std::copy_n(input.begin(), 16U, iv.begin());
+    const auto ciphertext = input.subspan(16U);
+    auto output = Aes256CbcDecrypt(key, iv, ciphertext);
+    if (output.empty()) {
+        throw PdfException(PdfErrorCode::MalformedObject, "Missing AES-256 padding.");
+    }
+    const auto padding = output.back();
+    if (padding == 0U || padding > 16U || padding > output.size() ||
+        !std::all_of(output.end() - padding, output.end(),
+                     [padding](const auto value) { return value == padding; })) {
+        throw PdfException(PdfErrorCode::MalformedObject, "Invalid AES-256 padding.");
+    }
+    output.resize(output.size() - padding);
+    return output;
+}
+
+int firstSixteenBytesMod3(const std::span<const std::uint8_t> bytes) {
+    std::uint32_t remainder = 0U;
+    for (std::size_t i = 0; i < 16U; ++i) {
+        remainder = (remainder * 256U + bytes[i]) % 3U;
+    }
+    return static_cast<int>(remainder);
+}
+
+std::array<std::uint8_t, 32> revision6Hash(
+    const std::span<const std::uint8_t> password,
+    const std::span<const std::uint8_t, 8> salt,
+    const std::span<const std::uint8_t> userEntry) {
+    std::vector<std::uint8_t> initial;
+    initial.reserve(password.size() + salt.size() + userEntry.size());
+    initial.insert(initial.end(), password.begin(), password.end());
+    initial.insert(initial.end(), salt.begin(), salt.end());
+    initial.insert(initial.end(), userEntry.begin(), userEntry.end());
+
+    const auto initialDigest = Sha256(initial);
+    std::vector<std::uint8_t> digest(initialDigest.begin(), initialDigest.end());
+    std::vector<std::uint8_t> encrypted;
+    std::size_t round = 0U;
+    do {
+        std::vector<std::uint8_t> block;
+        const std::size_t unitSize = password.size() + digest.size() + userEntry.size();
+        block.reserve(unitSize * 64U);
+        for (std::size_t repeat = 0; repeat < 64U; ++repeat) {
+            block.insert(block.end(), password.begin(), password.end());
+            block.insert(block.end(), digest.begin(), digest.end());
+            block.insert(block.end(), userEntry.begin(), userEntry.end());
+        }
+        std::array<std::uint8_t, 16> key{};
+        std::array<std::uint8_t, 16> iv{};
+        std::copy_n(digest.begin(), 16U, key.begin());
+        std::copy_n(digest.begin() + 16, 16U, iv.begin());
+        encrypted = aes128CbcNoPadding(block, key, iv, true);
+        switch (firstSixteenBytesMod3(encrypted)) {
+        case 0: {
+            const auto value = Sha256(encrypted);
+            digest.assign(value.begin(), value.end());
+            break;
+        }
+        case 1: {
+            const auto value = Sha384(encrypted);
+            digest.assign(value.begin(), value.end());
+            break;
+        }
+        default: {
+            const auto value = Sha512(encrypted);
+            digest.assign(value.begin(), value.end());
+            break;
+        }
+        }
+        ++round;
+    } while (round < 64U || round - 32U < encrypted.back());
+
+    std::array<std::uint8_t, 32> output{};
+    std::copy_n(digest.begin(), output.size(), output.begin());
+    return output;
+}
+
+std::uint32_t readLittleEndian32(const std::span<const std::uint8_t, 4> bytes) {
+    return static_cast<std::uint32_t>(bytes[0]) |
+           (static_cast<std::uint32_t>(bytes[1]) << 8U) |
+           (static_cast<std::uint32_t>(bytes[2]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[3]) << 24U);
+}
+
+
+} // namespace
+
+std::array<std::uint8_t, 16> GeneratePdfFileId() {
+    return randomBytes<16>();
+}
+
+std::string PdfHex(const std::span<const std::uint8_t> bytes) {
+    static constexpr char hex[] = "0123456789ABCDEF";
+    std::string output;
+    output.reserve(bytes.size() * 2U);
+    for (const auto value : bytes) {
+        output.push_back(hex[value >> 4U]);
+        output.push_back(hex[value & 15U]);
+    }
+    return output;
+}
+
+std::vector<std::uint8_t> ParsePdfHex(const std::string_view hex) {
+    std::vector<std::uint8_t> output;
+    int high = -1;
+    for (const char character : hex) {
+        const int value = character >= '0' && character <= '9' ? character - '0'
+            : character >= 'a' && character <= 'f' ? character - 'a' + 10
+            : character >= 'A' && character <= 'F' ? character - 'A' + 10 : -1;
+        if (value < 0) continue;
+        if (high < 0) high = value;
+        else {
+            output.push_back(static_cast<std::uint8_t>((high << 4) | value));
+            high = -1;
+        }
+    }
+    if (high >= 0) output.push_back(static_cast<std::uint8_t>(high << 4));
+    return output;
+}
+
+std::int32_t BuildPdfPermissionBits(const PdfPermissions& permissions) {
+    std::uint32_t value = 0xfffff0c0U;
+    if (permissions.print) value |= 4U;
+    if (permissions.modify) value |= 8U;
+    if (permissions.copy) value |= 16U;
+    if (permissions.annotate) value |= 32U;
+    if (permissions.fillForms) value |= 256U;
+    if (permissions.accessibility) value |= 512U;
+    if (permissions.assemble) value |= 1024U;
+    if (permissions.highQualityPrint) value |= 2048U;
+    return static_cast<std::int32_t>(value);
+}
+
+PdfStandardSecurity PdfStandardSecurity::Create(
+    const PdfEncryptionOptions& options,
+    const std::span<const std::uint8_t, 16> fileId) {
+    PdfStandardSecurity security;
+    security.algorithm_ = options.algorithm;
+    security.permissions_ = BuildPdfPermissionBits(options.permissions);
+    security.encryptMetadata_ = options.encryptMetadata;
+    std::copy(fileId.begin(), fileId.end(), security.fileId_.begin());
+
+    if (options.algorithm == PdfEncryptionAlgorithm::Aes256) {
+        security.fileKey_ = randomBytes<32>();
+        const auto userPassword = normalizedRevision6Password(options.userPassword);
+        const auto ownerPassword = normalizedRevision6Password(
+            options.ownerPassword.empty() ? options.userPassword : options.ownerPassword);
+        const auto userSalts = randomBytes<16>();
+        const auto ownerSalts = randomBytes<16>();
+
+        std::array<std::uint8_t, 8> userValidationSalt{};
+        std::array<std::uint8_t, 8> userKeySalt{};
+        std::array<std::uint8_t, 8> ownerValidationSalt{};
+        std::array<std::uint8_t, 8> ownerKeySalt{};
+        std::copy_n(userSalts.begin(), 8U, userValidationSalt.begin());
+        std::copy_n(userSalts.begin() + 8, 8U, userKeySalt.begin());
+        std::copy_n(ownerSalts.begin(), 8U, ownerValidationSalt.begin());
+        std::copy_n(ownerSalts.begin() + 8, 8U, ownerKeySalt.begin());
+
+        const auto userValidationHash = revision6Hash(userPassword, userValidationSalt, {});
+        std::copy(userValidationHash.begin(), userValidationHash.end(), security.userEntry_.begin());
+        std::copy(userValidationSalt.begin(), userValidationSalt.end(), security.userEntry_.begin() + 32);
+        std::copy(userKeySalt.begin(), userKeySalt.end(), security.userEntry_.begin() + 40);
+
+        const auto userKeyHash = revision6Hash(userPassword, userKeySalt, {});
+        const std::array<std::uint8_t, 16> zeroIv{};
+        const auto encryptedUserKey = aes256CbcNoPadding(
+            security.fileKey_, userKeyHash, zeroIv, true);
+        std::copy_n(encryptedUserKey.begin(), 32U, security.userEncryptedKey_.begin());
+
+        const auto ownerValidationHash = revision6Hash(
+            ownerPassword, ownerValidationSalt, security.userEntry_);
+        std::copy(ownerValidationHash.begin(), ownerValidationHash.end(), security.ownerEntry_.begin());
+        std::copy(ownerValidationSalt.begin(), ownerValidationSalt.end(), security.ownerEntry_.begin() + 32);
+        std::copy(ownerKeySalt.begin(), ownerKeySalt.end(), security.ownerEntry_.begin() + 40);
+
+        const auto ownerKeyHash = revision6Hash(ownerPassword, ownerKeySalt, security.userEntry_);
+        const auto encryptedOwnerKey = aes256CbcNoPadding(
+            security.fileKey_, ownerKeyHash, zeroIv, true);
+        std::copy_n(encryptedOwnerKey.begin(), 32U, security.ownerEncryptedKey_.begin());
+
+        std::array<std::uint8_t, 16> permissionsBlock{};
+        const auto permissionBits = static_cast<std::uint32_t>(security.permissions_);
+        permissionsBlock[0] = static_cast<std::uint8_t>(permissionBits);
+        permissionsBlock[1] = static_cast<std::uint8_t>(permissionBits >> 8U);
+        permissionsBlock[2] = static_cast<std::uint8_t>(permissionBits >> 16U);
+        permissionsBlock[3] = static_cast<std::uint8_t>(permissionBits >> 24U);
+        std::fill(permissionsBlock.begin() + 4, permissionsBlock.begin() + 8, 0xffU);
+        permissionsBlock[8] = security.encryptMetadata_ ? 'T' : 'F';
+        permissionsBlock[9] = 'a';
+        permissionsBlock[10] = 'd';
+        permissionsBlock[11] = 'b';
+        const auto randomTail = randomBytes<4>();
+        std::copy(randomTail.begin(), randomTail.end(), permissionsBlock.begin() + 12);
+        security.encryptedPermissions_ = Aes256EncryptBlock(security.fileKey_, permissionsBlock);
+        security.authenticated_ = true;
+        security.ownerAuthenticated_ = true;
+        return security;
+    }
+
+    const std::size_t keyLength = options.algorithm == PdfEncryptionAlgorithm::Rc4_40 ? 5U : 16U;
+    const auto ownerPassword = options.ownerPassword.empty() ? options.userPassword : options.ownerPassword;
+    const auto key = ownerKey(ownerPassword, keyLength);
+    auto owner = rc4(padPassword(options.userPassword),
+                     std::span<const std::uint8_t>(key).first(keyLength));
+    if (keyLength == 16U) {
+        std::array<std::uint8_t, 16> pass{};
+        for (std::uint8_t i = 1U; i <= 19U; ++i) {
+            for (std::size_t j = 0; j < 16U; ++j) pass[j] = key[j] ^ i;
+            owner = rc4(owner, pass);
+        }
+    }
+    std::copy_n(owner.begin(), 32U, security.ownerEntry_.begin());
+    const auto padded = padPassword(options.userPassword);
+    const auto legacyFileKey = fileKeyFromPadded(
+        padded, std::span<const std::uint8_t, 32>(security.ownerEntry_.data(), 32U),
+        security.permissions_, security.fileId_, security.encryptMetadata_, keyLength);
+    std::copy(legacyFileKey.begin(), legacyFileKey.end(), security.fileKey_.begin());
+    const auto user = computeUser(legacyFileKey, security.fileId_, keyLength);
+    std::copy(user.begin(), user.end(), security.userEntry_.begin());
+    security.authenticated_ = true;
+    security.ownerAuthenticated_ = true;
+    return security;
+}
+
+PdfStandardSecurity PdfStandardSecurity::Parse(
+    const std::string_view dictionary,
+    const std::span<const std::uint8_t> fileId) {
+    PdfStandardSecurity security;
+    const auto filter = regexValue(dictionary, R"(/Filter\s*/([^\s/<>()\[\]]+))");
+    if (filter != "Standard") {
+        throw PdfException(PdfErrorCode::UnsupportedFeature,
+                           "Only the PDF Standard Security Handler is supported.");
+    }
+    const int revision = std::stoi(regexValue(dictionary, R"(/R\s+(-?\d+))"));
+    const int version = std::stoi(regexValue(dictionary, R"(/V\s+(-?\d+))"));
+    if (revision == 6 && version == 5) {
+        if (dictionary.find("/CFM /AESV3") == std::string_view::npos) {
+            throw PdfException(PdfErrorCode::UnsupportedEncryption,
+                               "Revision 6 requires an AESV3 crypt filter.");
+        }
+        security.algorithm_ = PdfEncryptionAlgorithm::Aes256;
+    } else if (revision == 4 && version == 4) {
+        if (dictionary.find("/CFM /AESV2") == std::string_view::npos) {
+            throw PdfException(PdfErrorCode::UnsupportedEncryption,
+                               "Only AESV2 crypt filters are supported for revision 4 encryption.");
+        }
+        security.algorithm_ = PdfEncryptionAlgorithm::Aes128;
+    } else if (revision == 3 && (version == 2 || version == 3)) {
+        security.algorithm_ = PdfEncryptionAlgorithm::Rc4_128;
+    } else if (revision == 2 && version == 1) {
+        security.algorithm_ = PdfEncryptionAlgorithm::Rc4_40;
+    } else {
+        throw PdfException(PdfErrorCode::UnsupportedEncryption,
+            "Unsupported PDF encryption revision. Supported: AES-256 (R6), AES-128 (R4), "
+            "RC4-128 (R3), and RC4-40 (R2).");
+    }
+
+    security.permissions_ = static_cast<std::int32_t>(
+        std::stoll(regexValue(dictionary, R"(/P\s+(-?\d+))")));
+    security.encryptMetadata_ = dictionary.find("/EncryptMetadata false") == std::string_view::npos;
+    const auto owner = ParsePdfHex(regexValue(dictionary, R"(/O\s*<([0-9A-Fa-f\s]+)>)"));
+    const auto user = ParsePdfHex(regexValue(dictionary, R"(/U\s*<([0-9A-Fa-f\s]+)>)"));
+    const std::size_t expectedEntrySize = security.algorithm_ == PdfEncryptionAlgorithm::Aes256 ? 48U : 32U;
+    if (owner.size() != expectedEntrySize || user.size() != expectedEntrySize) {
+        throw PdfException(PdfErrorCode::UnsupportedEncryption,
+                           "Malformed encryption owner or user entry.");
+    }
+    std::copy(owner.begin(), owner.end(), security.ownerEntry_.begin());
+    std::copy(user.begin(), user.end(), security.userEntry_.begin());
+
+    if (security.algorithm_ == PdfEncryptionAlgorithm::Aes256) {
+        const auto ownerKey = ParsePdfHex(regexValue(dictionary, R"(/OE\s*<([0-9A-Fa-f\s]+)>)"));
+        const auto userKey = ParsePdfHex(regexValue(dictionary, R"(/UE\s*<([0-9A-Fa-f\s]+)>)"));
+        const auto permissions = ParsePdfHex(regexValue(dictionary, R"(/Perms\s*<([0-9A-Fa-f\s]+)>)"));
+        if (ownerKey.size() != 32U || userKey.size() != 32U || permissions.size() != 16U) {
+            throw PdfException(PdfErrorCode::UnsupportedEncryption,
+                               "Malformed AES-256 /OE, /UE, or /Perms entry.");
+        }
+        std::copy(ownerKey.begin(), ownerKey.end(), security.ownerEncryptedKey_.begin());
+        std::copy(userKey.begin(), userKey.end(), security.userEncryptedKey_.begin());
+        std::copy(permissions.begin(), permissions.end(), security.encryptedPermissions_.begin());
+    }
+    if (fileId.size() >= 16U) std::copy_n(fileId.begin(), 16U, security.fileId_.begin());
+    else if (security.algorithm_ != PdfEncryptionAlgorithm::Aes256) {
+        throw PdfException(PdfErrorCode::UnsupportedEncryption,
+                           "Encrypted PDF trailer does not contain a valid file ID.");
+    }
+    return security;
+}
+
+bool PdfStandardSecurity::AuthenticateAes256(const std::string_view password, const bool owner) {
+    const auto normalized = normalizedRevision6Password(password);
+    const auto& entry = owner ? ownerEntry_ : userEntry_;
+    std::array<std::uint8_t, 8> validationSalt{};
+    std::array<std::uint8_t, 8> keySalt{};
+    std::copy_n(entry.begin() + 32, 8U, validationSalt.begin());
+    std::copy_n(entry.begin() + 40, 8U, keySalt.begin());
+    const auto userVector = owner
+        ? std::span<const std::uint8_t>(userEntry_.data(), userEntry_.size())
+        : std::span<const std::uint8_t>{};
+    const auto validation = revision6Hash(normalized, validationSalt, userVector);
+    if (!constantTimeEqual(validation,
+            std::span<const std::uint8_t>(entry.data(), 32U))) {
+        return false;
+    }
+    const auto keyHash = revision6Hash(normalized, keySalt, userVector);
+    const std::array<std::uint8_t, 16> zeroIv{};
+    const auto encryptedKey = owner
+        ? std::span<const std::uint8_t>(ownerEncryptedKey_)
+        : std::span<const std::uint8_t>(userEncryptedKey_);
+    const auto fileKey = aes256CbcNoPadding(encryptedKey, keyHash, zeroIv, false);
+    std::copy_n(fileKey.begin(), 32U, fileKey_.begin());
+    if (!ValidateAes256Permissions()) {
+        std::fill(fileKey_.begin(), fileKey_.end(), 0U);
+        return false;
+    }
+    authenticated_ = true;
+    ownerAuthenticated_ = owner;
+    return true;
+}
+
+bool PdfStandardSecurity::ValidateAes256Permissions() const {
+    const auto plain = Aes256DecryptBlock(fileKey_, encryptedPermissions_);
+    if (plain[9] != 'a' || plain[10] != 'd' || plain[11] != 'b') return false;
+    if (!std::all_of(plain.begin() + 4, plain.begin() + 8,
+                     [](const auto value) { return value == 0xffU; })) return false;
+    const auto permissionValue = readLittleEndian32(
+        std::span<const std::uint8_t, 4>(plain.data(), 4U));
+    if (permissionValue != static_cast<std::uint32_t>(permissions_)) return false;
+    const bool permissionsEncryptMetadata = plain[8] == 'T';
+    if (plain[8] != 'T' && plain[8] != 'F') return false;
+    return permissionsEncryptMetadata == encryptMetadata_;
+}
+
+bool PdfStandardSecurity::Authenticate(const std::string_view password) {
+    if (algorithm_ == PdfEncryptionAlgorithm::Aes256) {
+        // Owner authentication is attempted first, matching common readers and
+        // preserving full permissions when owner/user passwords are identical.
+        if (!password.empty() && AuthenticateAes256(password, true)) return true;
+        return AuthenticateAes256(password, false);
+    }
+
+    const std::size_t keyLength = algorithm_ == PdfEncryptionAlgorithm::Rc4_40 ? 5U : 16U;
+    const auto padded = padPassword(password);
+    const auto ownerSpan = std::span<const std::uint8_t, 32>(ownerEntry_.data(), 32U);
+    const auto userSpan = std::span<const std::uint8_t, 32>(userEntry_.data(), 32U);
+    auto candidate = fileKeyFromPadded(
+        padded, ownerSpan, permissions_, fileId_, encryptMetadata_, keyLength);
+    if (matchesUser(candidate, userSpan, fileId_, keyLength)) {
+        std::copy(candidate.begin(), candidate.end(), fileKey_.begin());
+        authenticated_ = true;
+        ownerAuthenticated_ = false;
+        return true;
+    }
+    const auto key = ownerKey(password, keyLength);
+    std::vector<std::uint8_t> recovered(ownerSpan.begin(), ownerSpan.end());
+    if (keyLength == 16U) {
+        std::array<std::uint8_t, 16> pass{};
+        for (int i = 19; i >= 0; --i) {
+            for (std::size_t j = 0; j < 16U; ++j) {
+                pass[j] = key[j] ^ static_cast<std::uint8_t>(i);
+            }
+            recovered = rc4(recovered, pass);
+        }
+    } else {
+        recovered = rc4(recovered, std::span<const std::uint8_t>(key).first(keyLength));
+    }
+    std::array<std::uint8_t, 32> ownerRecovered{};
+    std::copy_n(recovered.begin(), 32U, ownerRecovered.begin());
+    candidate = fileKeyFromPadded(
+        ownerRecovered, ownerSpan, permissions_, fileId_, encryptMetadata_, keyLength);
+    if (matchesUser(candidate, userSpan, fileId_, keyLength)) {
+        std::copy(candidate.begin(), candidate.end(), fileKey_.begin());
+        authenticated_ = true;
+        ownerAuthenticated_ = true;
+        return true;
+    }
+    return false;
+}
+
+std::string PdfStandardSecurity::EncryptionDictionary() const {
+    std::string dictionary = "<< /Filter /Standard ";
+    if (algorithm_ == PdfEncryptionAlgorithm::Aes256) {
+        dictionary += "/V 5 /R 6 /Length 256 "
+            "/CF << /StdCF << /CFM /AESV3 /AuthEvent /DocOpen /Length 32 >> >> "
+            "/StmF /StdCF /StrF /StdCF /EFF /StdCF ";
+    } else if (algorithm_ == PdfEncryptionAlgorithm::Aes128) {
+        dictionary += "/V 4 /R 4 /Length 128 "
+            "/CF << /StdCF << /CFM /AESV2 /AuthEvent /DocOpen /Length 16 >> >> "
+            "/StmF /StdCF /StrF /StdCF ";
+    } else if (algorithm_ == PdfEncryptionAlgorithm::Rc4_128) {
+        dictionary += "/V 2 /R 3 /Length 128 ";
+    } else {
+        dictionary += "/V 1 /R 2 /Length 40 ";
+    }
+    const std::size_t entrySize = algorithm_ == PdfEncryptionAlgorithm::Aes256 ? 48U : 32U;
+    dictionary += "/O <" + PdfHex(std::span<const std::uint8_t>(ownerEntry_.data(), entrySize)) +
+                  "> /U <" + PdfHex(std::span<const std::uint8_t>(userEntry_.data(), entrySize)) + "> ";
+    if (algorithm_ == PdfEncryptionAlgorithm::Aes256) {
+        dictionary += "/OE <" + PdfHex(ownerEncryptedKey_) + "> /UE <" +
+                      PdfHex(userEncryptedKey_) + "> /Perms <" +
+                      PdfHex(encryptedPermissions_) + "> ";
+    }
+    dictionary += "/P " + std::to_string(permissions_);
+    if (!encryptMetadata_ && algorithm_ != PdfEncryptionAlgorithm::Rc4_40) {
+        dictionary += " /EncryptMetadata false";
+    }
+    dictionary += " >>";
+    return dictionary;
+}
+
+std::vector<std::uint8_t> PdfStandardSecurity::Crypt(
+    const std::span<const std::uint8_t> input,
+    const std::uint32_t objectNumber,
+    const std::uint16_t generation,
+    const bool encrypt) const {
+    if (!authenticated_) {
+        throw PdfException(PdfErrorCode::PasswordRequired,
+                           "A valid password is required to access encrypted PDF objects.");
+    }
+    if (algorithm_ == PdfEncryptionAlgorithm::Aes256) {
+        return aes256ObjectCrypt(input, fileKey_, encrypt);
+    }
+
+    const std::size_t keyLength = algorithm_ == PdfEncryptionAlgorithm::Rc4_40 ? 5U : 16U;
+    std::vector<std::uint8_t> material(fileKey_.begin(),
+        fileKey_.begin() + static_cast<std::ptrdiff_t>(keyLength));
+    material.push_back(static_cast<std::uint8_t>(objectNumber));
+    material.push_back(static_cast<std::uint8_t>(objectNumber >> 8U));
+    material.push_back(static_cast<std::uint8_t>(objectNumber >> 16U));
+    material.push_back(static_cast<std::uint8_t>(generation));
+    material.push_back(static_cast<std::uint8_t>(generation >> 8U));
+    if (algorithm_ == PdfEncryptionAlgorithm::Aes128) {
+        material.insert(material.end(), {'s', 'A', 'l', 'T'});
+    }
+    const auto digest = md5(material);
+    if (algorithm_ != PdfEncryptionAlgorithm::Aes128) {
+        return rc4(input, std::span<const std::uint8_t>(digest).first(
+            std::min<std::size_t>(16U, keyLength + 5U)));
+    }
+    return aesCbc(input, digest, encrypt);
+}
+
+std::string PdfStandardSecurity::TransformObject(
+    const std::string_view object,
+    const std::uint32_t number,
+    const std::uint16_t generation,
+    const bool encrypt) const {
+    const auto transformText = [&](const std::string_view text) {
+        std::string output;
+        output.reserve(text.size() + 32U);
+        std::size_t position = 0U;
+        while (position < text.size()) {
+            if (text[position] == '%') {
+                do output.push_back(text[position++]);
+                while (position < text.size() && text[position] != '\r' && text[position] != '\n');
+                continue;
+            }
+            if (text[position] == '(') {
+                auto bytes = decodeLiteral(text, position);
+                const auto crypt = Crypt(bytes, number, generation, encrypt);
+                output += '<' + PdfHex(crypt) + '>';
+                continue;
+            }
+            if (text[position] == '<' && position + 1U < text.size() &&
+                text[position + 1U] != '<' && (position == 0U || text[position - 1U] != '<')) {
+                auto bytes = decodeHexAt(text, position);
+                const auto crypt = Crypt(bytes, number, generation, encrypt);
+                output += '<' + PdfHex(crypt) + '>';
+                continue;
+            }
+            output.push_back(text[position++]);
+        }
+        return output;
+    };
+
+    std::size_t keyword = std::string_view::npos;
+    std::size_t dataStart = 0U;
+    for (std::size_t position = 0U;
+         (position = object.find("stream", position)) != std::string_view::npos;
+         ++position) {
+        const auto after = position + 6U;
+        const bool left = position == 0U || object[position - 1U] == '\n' ||
+            object[position - 1U] == '\r' || object[position - 1U] == ' ' ||
+            object[position - 1U] == '>';
+        if (left && after < object.size() &&
+            (object[after] == '\r' || object[after] == '\n')) {
+            keyword = position;
+            dataStart = after;
+            if (object[dataStart] == '\r') ++dataStart;
+            if (dataStart < object.size() && object[dataStart] == '\n') ++dataStart;
+            break;
+        }
+    }
+    if (keyword == std::string_view::npos) return transformText(object);
+
+    const auto end = object.rfind("endstream");
+    if (end == std::string_view::npos || end < dataStart) {
+        throw PdfException(PdfErrorCode::MalformedObject,
+                           "Encrypted stream has no endstream marker.");
+    }
+    std::size_t dataEnd = end;
+    if (const auto length = directStreamLength(object.substr(0U, keyword));
+        length && *length <= end - dataStart) {
+        dataEnd = dataStart + *length;
+    } else {
+        while (dataEnd > dataStart &&
+               (object[dataEnd - 1U] == '\n' || object[dataEnd - 1U] == '\r')) --dataEnd;
+    }
+    std::string prefix = transformText(object.substr(0U, dataStart));
+    std::vector<std::uint8_t> stream(
+        object.begin() + static_cast<std::ptrdiff_t>(dataStart),
+        object.begin() + static_cast<std::ptrdiff_t>(dataEnd));
+    if (!(!encryptMetadata_ &&
+          object.substr(0U, keyword).find("/Type /Metadata") != std::string_view::npos)) {
+        stream = Crypt(stream, number, generation, encrypt);
+    }
+    replaceStreamLength(prefix, stream.size());
+    std::string output;
+    output.reserve(prefix.size() + stream.size() + object.size() - dataEnd);
+    output = std::move(prefix);
+    output.append(reinterpret_cast<const char*>(stream.data()), stream.size());
+    output.append(object.substr(dataEnd));
+    return output;
+}
+
+std::string PdfStandardSecurity::EncryptObject(
+    const std::string_view object,
+    const std::uint32_t number,
+    const std::uint16_t generation) const {
+    return TransformObject(object, number, generation, true);
+}
+
+std::string PdfStandardSecurity::DecryptObject(
+    const std::string_view object,
+    const std::uint32_t number,
+    const std::uint16_t generation) const {
+    return TransformObject(object, number, generation, false);
+}
 
 } // namespace CPPPdf::Internal

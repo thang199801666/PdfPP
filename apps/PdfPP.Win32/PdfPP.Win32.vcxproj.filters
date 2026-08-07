@@ -9,6 +9,10 @@
       <UniqueIdentifier>{4EE083D1-D3E8-489A-B497-5754530655AE}</UniqueIdentifier>
       <Extensions>h;hpp;hxx</Extensions>
     </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{6B5F7A8C-356F-46F2-9D2E-8A05528D7426}</UniqueIdentifier>
+      <Extensions>cur;ico;rc;manifest</Extensions>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\AppSettings.cpp">
@@ -17,7 +21,7 @@
     <ClCompile Include="src\Main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\NativePdf.cpp">
+    <ClCompile Include="src\ReaderPdfDocument.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\PageCache.cpp">
@@ -38,6 +42,9 @@
     <ClCompile Include="src\ReaderTabs.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\ReaderTools.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\ReaderUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -52,7 +59,7 @@
     <ClInclude Include="include\PdfPP\Win32\AppSettings.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="include\PdfPP\Win32\NativePdf.hpp">
+    <ClInclude Include="include\PdfPP\Win32\ReaderPdfDocument.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="include\PdfPP\Win32\PageCache.hpp">
@@ -64,5 +71,11 @@
     <ClInclude Include="include\PdfPP\Win32\ReaderState.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(SolutionDir)icons\PDF++.png" />
+    <None Include="resources\Hand.cur">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

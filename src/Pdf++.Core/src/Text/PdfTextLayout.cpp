@@ -74,7 +74,6 @@ std::vector<std::string> PdfTextLayout::GraphemeClusters(std::string_view utf8) 
     decodeUtf8View(utf8, cps);
     std::vector<std::string> clusters;
     std::string current;
-    std::uint32_t base = 0;
     bool haveBase = false;
     for (const auto cp : cps) {
         const bool combining = (cp >= 0x0300U && cp <= 0x036FU) ||
@@ -84,7 +83,6 @@ std::vector<std::string> PdfTextLayout::GraphemeClusters(std::string_view utf8) 
         if (!haveBase) {
             current.clear();
             appendUtf8(current, cp);
-            base = cp;
             haveBase = true;
             continue;
         }
@@ -95,7 +93,6 @@ std::vector<std::string> PdfTextLayout::GraphemeClusters(std::string_view utf8) 
         clusters.push_back(current);
         current.clear();
         appendUtf8(current, cp);
-        base = cp;
     }
     if (haveBase) clusters.push_back(current);
     return clusters;
@@ -275,99 +272,150 @@ std::uint32_t composeLatin(const std::uint32_t base, const std::uint32_t mark) {
                             kOgonek = 0x0328U;
     switch (base) {
     case 'a':
-        if (mark == kGrave) return 0x00E0; if (mark == kAcute) return 0x00E1;
-        if (mark == kCircumflex) return 0x00E2; if (mark == kTilde) return 0x00E3;
-        if (mark == kDiaeresis) return 0x00E4; if (mark == kRing) return 0x00E5;
-        if (mark == kBreve) return 0x0103; if (mark == kOgonek) return 0x0105;
+        if (mark == kGrave) return 0x00E0;
+        if (mark == kAcute) return 0x00E1;
+        if (mark == kCircumflex) return 0x00E2;
+        if (mark == kTilde) return 0x00E3;
+        if (mark == kDiaeresis) return 0x00E4;
+        if (mark == kRing) return 0x00E5;
+        if (mark == kBreve) return 0x0103;
+        if (mark == kOgonek) return 0x0105;
         break;
     case 'A':
-        if (mark == kGrave) return 0x00C0; if (mark == kAcute) return 0x00C1;
-        if (mark == kCircumflex) return 0x00C2; if (mark == kTilde) return 0x00C3;
-        if (mark == kDiaeresis) return 0x00C4; if (mark == kRing) return 0x00C5;
-        if (mark == kBreve) return 0x0102; if (mark == kOgonek) return 0x0104;
+        if (mark == kGrave) return 0x00C0;
+        if (mark == kAcute) return 0x00C1;
+        if (mark == kCircumflex) return 0x00C2;
+        if (mark == kTilde) return 0x00C3;
+        if (mark == kDiaeresis) return 0x00C4;
+        if (mark == kRing) return 0x00C5;
+        if (mark == kBreve) return 0x0102;
+        if (mark == kOgonek) return 0x0104;
         break;
     case 'e':
-        if (mark == kGrave) return 0x00E8; if (mark == kAcute) return 0x00E9;
-        if (mark == kCircumflex) return 0x00EA; if (mark == kDiaeresis) return 0x00EB;
-        if (mark == kMacron) return 0x0113; if (mark == kBreve) return 0x0115;
-        if (mark == kOgonek) return 0x0119; if (mark == kCedilla) return 0x0229;
+        if (mark == kGrave) return 0x00E8;
+        if (mark == kAcute) return 0x00E9;
+        if (mark == kCircumflex) return 0x00EA;
+        if (mark == kDiaeresis) return 0x00EB;
+        if (mark == kMacron) return 0x0113;
+        if (mark == kBreve) return 0x0115;
+        if (mark == kOgonek) return 0x0119;
+        if (mark == kCedilla) return 0x0229;
         break;
     case 'E':
-        if (mark == kGrave) return 0x00C8; if (mark == kAcute) return 0x00C9;
-        if (mark == kCircumflex) return 0x00CA; if (mark == kDiaeresis) return 0x00CB;
-        if (mark == kMacron) return 0x0112; if (mark == kBreve) return 0x0114;
-        if (mark == kOgonek) return 0x0118; if (mark == kCedilla) return 0x0228;
+        if (mark == kGrave) return 0x00C8;
+        if (mark == kAcute) return 0x00C9;
+        if (mark == kCircumflex) return 0x00CA;
+        if (mark == kDiaeresis) return 0x00CB;
+        if (mark == kMacron) return 0x0112;
+        if (mark == kBreve) return 0x0114;
+        if (mark == kOgonek) return 0x0118;
+        if (mark == kCedilla) return 0x0228;
         break;
     case 'i':
-        if (mark == kGrave) return 0x00EC; if (mark == kAcute) return 0x00ED;
-        if (mark == kCircumflex) return 0x00EE; if (mark == kDiaeresis) return 0x00EF;
-        if (mark == kMacron) return 0x012B; if (mark == kBreve) return 0x012D;
+        if (mark == kGrave) return 0x00EC;
+        if (mark == kAcute) return 0x00ED;
+        if (mark == kCircumflex) return 0x00EE;
+        if (mark == kDiaeresis) return 0x00EF;
+        if (mark == kMacron) return 0x012B;
+        if (mark == kBreve) return 0x012D;
         if (mark == kOgonek) return 0x012F;
         break;
     case 'I':
-        if (mark == kGrave) return 0x00CC; if (mark == kAcute) return 0x00CD;
-        if (mark == kCircumflex) return 0x00CE; if (mark == kDiaeresis) return 0x00CF;
-        if (mark == kMacron) return 0x012A; if (mark == kBreve) return 0x012C;
+        if (mark == kGrave) return 0x00CC;
+        if (mark == kAcute) return 0x00CD;
+        if (mark == kCircumflex) return 0x00CE;
+        if (mark == kDiaeresis) return 0x00CF;
+        if (mark == kMacron) return 0x012A;
+        if (mark == kBreve) return 0x012C;
         if (mark == kOgonek) return 0x012E;
         break;
     case 'o':
-        if (mark == kGrave) return 0x00F2; if (mark == kAcute) return 0x00F3;
-        if (mark == kCircumflex) return 0x00F4; if (mark == kTilde) return 0x00F5;
-        if (mark == kDiaeresis) return 0x00F6; if (mark == kMacron) return 0x014D;
-        if (mark == kBreve) return 0x014F; if (mark == kOgonek) return 0x01EB;
+        if (mark == kGrave) return 0x00F2;
+        if (mark == kAcute) return 0x00F3;
+        if (mark == kCircumflex) return 0x00F4;
+        if (mark == kTilde) return 0x00F5;
+        if (mark == kDiaeresis) return 0x00F6;
+        if (mark == kMacron) return 0x014D;
+        if (mark == kBreve) return 0x014F;
+        if (mark == kOgonek) return 0x01EB;
         break;
     case 'O':
-        if (mark == kGrave) return 0x00D2; if (mark == kAcute) return 0x00D3;
-        if (mark == kCircumflex) return 0x00D4; if (mark == kTilde) return 0x00D5;
-        if (mark == kDiaeresis) return 0x00D6; if (mark == kMacron) return 0x014C;
-        if (mark == kBreve) return 0x014E; if (mark == kOgonek) return 0x01EA;
+        if (mark == kGrave) return 0x00D2;
+        if (mark == kAcute) return 0x00D3;
+        if (mark == kCircumflex) return 0x00D4;
+        if (mark == kTilde) return 0x00D5;
+        if (mark == kDiaeresis) return 0x00D6;
+        if (mark == kMacron) return 0x014C;
+        if (mark == kBreve) return 0x014E;
+        if (mark == kOgonek) return 0x01EA;
         break;
     case 'u':
-        if (mark == kGrave) return 0x00F9; if (mark == kAcute) return 0x00FA;
-        if (mark == kCircumflex) return 0x00FB; if (mark == kDiaeresis) return 0x00FC;
-        if (mark == kMacron) return 0x016B; if (mark == kBreve) return 0x016D;
-        if (mark == kRing) return 0x016F; if (mark == kOgonek) return 0x0173;
+        if (mark == kGrave) return 0x00F9;
+        if (mark == kAcute) return 0x00FA;
+        if (mark == kCircumflex) return 0x00FB;
+        if (mark == kDiaeresis) return 0x00FC;
+        if (mark == kMacron) return 0x016B;
+        if (mark == kBreve) return 0x016D;
+        if (mark == kRing) return 0x016F;
+        if (mark == kOgonek) return 0x0173;
         break;
     case 'U':
-        if (mark == kGrave) return 0x00D9; if (mark == kAcute) return 0x00DA;
-        if (mark == kCircumflex) return 0x00DB; if (mark == kDiaeresis) return 0x00DC;
-        if (mark == kMacron) return 0x016A; if (mark == kBreve) return 0x016C;
-        if (mark == kRing) return 0x016E; if (mark == kOgonek) return 0x0172;
+        if (mark == kGrave) return 0x00D9;
+        if (mark == kAcute) return 0x00DA;
+        if (mark == kCircumflex) return 0x00DB;
+        if (mark == kDiaeresis) return 0x00DC;
+        if (mark == kMacron) return 0x016A;
+        if (mark == kBreve) return 0x016C;
+        if (mark == kRing) return 0x016E;
+        if (mark == kOgonek) return 0x0172;
         break;
     case 'n':
-        if (mark == kTilde) return 0x00F1; if (mark == kAcute) return 0x0144;
+        if (mark == kTilde) return 0x00F1;
+        if (mark == kAcute) return 0x0144;
         if (mark == kGrave) return 0x01F9;
         break;
     case 'N':
-        if (mark == kTilde) return 0x00D1; if (mark == kAcute) return 0x0143;
+        if (mark == kTilde) return 0x00D1;
+        if (mark == kAcute) return 0x0143;
         if (mark == kGrave) return 0x01F8;
         break;
     case 'c':
-        if (mark == kCedilla) return 0x00E7; if (mark == kAcute) return 0x0107;
-        if (mark == kCircumflex) return 0x0109; if (mark == kBreve) return 0x010D;
+        if (mark == kCedilla) return 0x00E7;
+        if (mark == kAcute) return 0x0107;
+        if (mark == kCircumflex) return 0x0109;
+        if (mark == kBreve) return 0x010D;
         break;
     case 'C':
-        if (mark == kCedilla) return 0x00C7; if (mark == kAcute) return 0x0106;
-        if (mark == kCircumflex) return 0x0108; if (mark == kBreve) return 0x010C;
+        if (mark == kCedilla) return 0x00C7;
+        if (mark == kAcute) return 0x0106;
+        if (mark == kCircumflex) return 0x0108;
+        if (mark == kBreve) return 0x010C;
         break;
     case 'y':
-        if (mark == kAcute) return 0x00FD; if (mark == kDiaeresis) return 0x00FF;
-        if (mark == kGrave) return 0x1EF3; if (mark == kCircumflex) return 0x0177;
+        if (mark == kAcute) return 0x00FD;
+        if (mark == kDiaeresis) return 0x00FF;
+        if (mark == kGrave) return 0x1EF3;
+        if (mark == kCircumflex) return 0x0177;
         break;
     case 'Y':
-        if (mark == kAcute) return 0x00DD; if (mark == kGrave) return 0x1EF2;
-        if (mark == kCircumflex) return 0x0176; if (mark == kDiaeresis) return 0x0178;
+        if (mark == kAcute) return 0x00DD;
+        if (mark == kGrave) return 0x1EF2;
+        if (mark == kCircumflex) return 0x0176;
+        if (mark == kDiaeresis) return 0x0178;
         break;
     case 's':
-        if (mark == kAcute) return 0x015B; if (mark == kCedilla) return 0x015F;
+        if (mark == kAcute) return 0x015B;
+        if (mark == kCedilla) return 0x015F;
         if (mark == kCircumflex) return 0x015D;
         break;
     case 'S':
-        if (mark == kAcute) return 0x015A; if (mark == kCedilla) return 0x015E;
+        if (mark == kAcute) return 0x015A;
+        if (mark == kCedilla) return 0x015E;
         if (mark == kCircumflex) return 0x015C;
         break;
     case 'z':
-        if (mark == kAcute) return 0x017A; if (mark == kCircumflex) return 0x017C;
+        if (mark == kAcute) return 0x017A;
+        if (mark == kCircumflex) return 0x017C;
         if (mark == kDotAbove) return 0x017C;
         break;
     default:

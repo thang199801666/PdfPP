@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.24)
+project(PdfPPConsumer LANGUAGES CXX)
+find_package(PdfPP 1.0 REQUIRED CONFIG)
+add_executable(pdfpp_consumer main.cpp)
+target_link_libraries(pdfpp_consumer PRIVATE PdfPP::Core)
+target_compile_features(pdfpp_consumer PRIVATE cxx_std_20)

@@ -69,21 +69,6 @@ void writeStringAttribute(std::ostream& output, std::string_view name, const std
     output << ' ' << name << "=\"" << xmlEscape(value) << '"';
 }
 
-void writeColorAttributes(std::ostream& output, const PdfAnnotationColor& color) {
-    output << " color=\"#" << std::hex
-           << static_cast<int>(std::clamp(color.red, 0.0, 1.0) * 255.0)
-           << std::setw(2) << std::setfill('0')
-           << static_cast<int>(std::clamp(color.green, 0.0, 1.0) * 255.0)
-           << std::setw(2) << std::setfill('0')
-           << static_cast<int>(std::clamp(color.blue, 0.0, 1.0) * 255.0)
-           << std::dec << '"';
-}
-
-void writeRectAttributes(std::ostream& output, const PdfRectangle& rectangle) {
-    output << " rect=\"" << rectangle.left << ',' << rectangle.bottom << ','
-           << rectangle.right << ',' << rectangle.top << '"';
-}
-
 // Minimal XML scanner: extracts `name="value"` attribute pairs from a token.
 std::vector<std::pair<std::string, std::string>> parseAttributes(std::string_view source) {
     std::vector<std::pair<std::string, std::string>> attributes;
@@ -154,26 +139,6 @@ PdfAnnotationColor parseHexColor(std::string_view text) {
         color.blue = static_cast<double>(hex(text[4]) * 16 + hex(text[5])) / 255.0;
     }
     return color;
-}
-
-std::string annotationSubtypeToElement(PdfAnnotationType type) {
-    switch (type) {
-    case PdfAnnotationType::Highlight: return "highlight";
-    case PdfAnnotationType::Underline: return "underline";
-    case PdfAnnotationType::StrikeOut: return "strikeout";
-    case PdfAnnotationType::TextNote: return "text";
-    case PdfAnnotationType::Link: return "link";
-    case PdfAnnotationType::Line: return "line";
-    case PdfAnnotationType::FileAttachment: return "fileattachment";
-    case PdfAnnotationType::FreeText: return "freetext";
-    case PdfAnnotationType::Polygon: return "polygon";
-    case PdfAnnotationType::Polyline: return "polyline";
-    case PdfAnnotationType::Square: return "square";
-    case PdfAnnotationType::Circle: return "circle";
-    case PdfAnnotationType::Stamp: return "stamp";
-    case PdfAnnotationType::Ink: return "ink";
-    }
-    return "text";
 }
 
 PdfAnnotationType elementToAnnotationType(std::string_view element) {
@@ -342,13 +307,6 @@ PdfXfdf::XfdfImportResult PdfXfdf::ImportAnnotations(
     const std::string xml = readFile(xfdfPath);
     std::vector<PdfAnnotation> annotations;
 
-    const auto openTag = [&](std::size_t position, std::string_view name) -> std::size_t {
-        const std::string open = "<" + std::string(name);
-        const auto found = xml.find(open, position);
-        if (found == std::string::npos) return std::string::npos;
-        if (found + open.size() < xml.size() && xml[found + open.size()] == ' ') return found;
-        return std::string::npos;
-    };
 
     std::size_t position = 0U;
     while (position < xml.size()) {

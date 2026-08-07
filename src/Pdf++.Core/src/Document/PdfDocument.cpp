@@ -207,44 +207,6 @@ constexpr std::size_t kTailSearchSize = 64U * 1024U;
     return result;
 }
 
-[[nodiscard]] std::string inflateZlib(std::string_view input, std::size_t maxSize) {
-    if (input.empty()) return {};
-
-    if (input.size() > static_cast<std::size_t>(std::numeric_limits<uInt>::max())) {
-        throw PdfException(PdfErrorCode::MalformedObject,
-                           "FlateDecode input exceeds the zlib input limit.");
-    }
-
-    z_stream stream{};
-    stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(input.data()));
-    stream.avail_in = static_cast<uInt>(input.size());
-    if (inflateInit(&stream) != Z_OK) {
-        throw PdfException(PdfErrorCode::MalformedObject, "Cannot initialize FlateDecode decompressor.");
-    }
-
-    std::string output;
-    std::vector<char> buffer(32U * 1024U);
-    int status = Z_OK;
-    while (status == Z_OK) {
-        stream.next_out = reinterpret_cast<Bytef*>(buffer.data());
-        stream.avail_out = static_cast<uInt>(buffer.size());
-        status = inflate(&stream, Z_NO_FLUSH);
-        const std::size_t produced = buffer.size() - stream.avail_out;
-        if (output.size() > maxSize || produced > maxSize - output.size()) {
-            inflateEnd(&stream);
-            throw PdfException(PdfErrorCode::UnsupportedFeature,
-                               "Decoded stream exceeds configured limit.");
-        }
-        output.append(buffer.data(), produced);
-    }
-    inflateEnd(&stream);
-    if (status != Z_STREAM_END) {
-        throw PdfException(PdfErrorCode::MalformedObject, "Invalid or unsupported FlateDecode stream.");
-    }
-    return output;
-}
-
-
 [[nodiscard]] std::size_t skipContentWhitespace(std::string_view content, std::size_t pos) {
     while (pos < content.size()) {
         const unsigned char ch = static_cast<unsigned char>(content[pos]);
@@ -1561,7 +1523,8 @@ void PdfDocument::parseXrefStream(std::uint64_t offset64) {
     const auto filters = filterSpecsFromDictionary(*dictionary);
     if (!filters.empty()) {
         const auto* begin = reinterpret_cast<const std::byte*>(decoded.data());
-        const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize)
+        const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize,
+                                        readerOptions_.limits.maxDecodedStreamExpansionRatio)
             .Decode(std::span<const std::byte>(begin, decoded.size()), filters);
         decoded.assign(reinterpret_cast<const char*>(result.data()), result.size());
     }
@@ -1953,7 +1916,8 @@ std::string PdfDocument::recoverFromObjectStreams(std::uint32_t objectNumber) co
             const auto filters = filterSpecsFromDictionary(*streamDictionary);
             if (!filters.empty()) {
                 const auto* begin = reinterpret_cast<const std::byte*>(decoded.data());
-                const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize)
+                const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize,
+                                        readerOptions_.limits.maxDecodedStreamExpansionRatio)
                     .Decode(std::span<const std::byte>(begin, decoded.size()), filters);
                 decoded.assign(reinterpret_cast<const char*>(result.data()), result.size());
             }
@@ -2059,7 +2023,8 @@ std::shared_ptr<const PdfDocument::DecodedObjectStream> PdfDocument::loadObjectS
     const auto filters = filterSpecsFromDictionary(*streamDictionary);
     if (!filters.empty()) {
         const auto* begin = reinterpret_cast<const std::byte*>(decoded.data());
-        const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize)
+        const auto result = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize,
+                                        readerOptions_.limits.maxDecodedStreamExpansionRatio)
             .Decode(std::span<const std::byte>(begin, decoded.size()), filters);
         decoded.assign(reinterpret_cast<const char*>(result.data()), result.size());
     }
@@ -2450,7 +2415,8 @@ std::string PdfDocument::decodeContentStream(const std::string& streamObject) co
         return std::string(encoded);
     }
     const auto* begin = reinterpret_cast<const std::byte*>(encoded.data());
-    const auto decoded = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize)
+    const auto decoded = PdfFilterPipeline(readerOptions_.limits.maxDecodedStreamSize,
+                                        readerOptions_.limits.maxDecodedStreamExpansionRatio)
         .Decode(std::span<const std::byte>(begin, encoded.size()), filters);
     return std::string(reinterpret_cast<const char*>(decoded.data()), decoded.size());
 }
@@ -3053,11 +3019,19 @@ std::pair<std::array<double, 2>, PdfBlendMode> PdfDocument::ResolveExtGState(
     if (!blend) return {alpha, PdfBlendMode::SourceOver};
     if (blend->value() == "Multiply") return {alpha, PdfBlendMode::Multiply};
     if (blend->value() == "Screen") return {alpha, PdfBlendMode::Screen};
+    if (blend->value() == "Overlay") return {alpha, PdfBlendMode::Overlay};
     if (blend->value() == "Darken") return {alpha, PdfBlendMode::Darken};
     if (blend->value() == "Lighten") return {alpha, PdfBlendMode::Lighten};
-    if (blend->value() == "Overlay") return {alpha, PdfBlendMode::Overlay};
+    if (blend->value() == "ColorDodge") return {alpha, PdfBlendMode::ColorDodge};
+    if (blend->value() == "ColorBurn") return {alpha, PdfBlendMode::ColorBurn};
+    if (blend->value() == "HardLight") return {alpha, PdfBlendMode::HardLight};
+    if (blend->value() == "SoftLight") return {alpha, PdfBlendMode::SoftLight};
     if (blend->value() == "Difference") return {alpha, PdfBlendMode::Difference};
     if (blend->value() == "Exclusion") return {alpha, PdfBlendMode::Exclusion};
+    if (blend->value() == "Hue") return {alpha, PdfBlendMode::Hue};
+    if (blend->value() == "Saturation") return {alpha, PdfBlendMode::Saturation};
+    if (blend->value() == "Color") return {alpha, PdfBlendMode::Color};
+    if (blend->value() == "Luminosity") return {alpha, PdfBlendMode::Luminosity};
     return {alpha, PdfBlendMode::SourceOver};
 }
 
@@ -3416,59 +3390,103 @@ std::vector<PdfOutlineEntry> PdfDocument::GetOutlines() const {
     std::vector<PdfOutlineEntry> result;
     const auto catalogRef = GetTrailerReference(PdfName("Root"));
     if (!catalogRef) return result;
-    const auto& catalog = GetObject(*catalogRef);
+
+    // Keep local PdfObject copies while walking the outline tree. GetObject()
+    // returns references owned by an LRU resolver; retaining a raw dictionary
+    // pointer across further resolutions can become unsafe if the cache evicts
+    // an older entry. PdfObject copies are cheap (dictionary/array storage uses
+    // shared ownership) and make the traversal independent of resolver churn.
+    const PdfObject catalog = GetObject(*catalogRef);
     const auto* catalogDict = catalog.AsDictionary();
     if (!catalogDict) return result;
-    const auto outlinesValue = catalogDict->Find(PdfName("Outlines"));
+    const auto* outlinesValue = catalogDict->Find(PdfName("Outlines"));
     const auto outlinesRef = outlinesValue ? outlinesValue->AsReference() : std::nullopt;
     if (!outlinesRef) return result;
-    const auto& outlines = GetObject(PdfReference{outlinesRef->first, outlinesRef->second});
+
+    const PdfObject outlines = GetObject(PdfReference{outlinesRef->first, outlinesRef->second});
     const auto* outlinesDict = outlines.AsDictionary();
     if (!outlinesDict) return result;
     const auto* firstValue = outlinesDict->Find(PdfName("First"));
     const auto firstRef = firstValue ? firstValue->AsReference() : std::nullopt;
     if (!firstRef) return result;
-    // DFS through First/Next with a visited set and depth map to support nesting
-    // while guarding against cyclic trees.
-    std::unordered_map<std::uint32_t, std::size_t> depthOf;
-    std::unordered_set<std::uint32_t> visited;
+
+    const auto readOutlineString = [this](const PdfObject* value) -> std::string {
+        if (!value) return {};
+        if (const auto* text = value->AsString()) return *text;
+        if (const auto reference = value->AsReference()) {
+            const PdfObject resolved = GetObject(
+                PdfReference{reference->first, reference->second});
+            if (const auto* text = resolved.AsString()) return *text;
+        }
+        return {};
+    };
+
+    const auto resolveDictionary = [this](const PdfObject* value) -> PdfObject {
+        if (!value) return {};
+        if (value->AsDictionary()) return *value;
+        if (const auto reference = value->AsReference()) {
+            return GetObject(PdfReference{reference->first, reference->second});
+        }
+        return {};
+    };
+
+    // DFS through First/Next with a visited set while guarding against cyclic
+    // trees. Include generation in the key so a recovered/incremental PDF does
+    // not accidentally conflate two generations of the same object number.
+    std::unordered_set<std::uint64_t> visited;
     std::function<void(const PdfReference&, std::size_t)> walk =
         [&](const PdfReference& item, const std::size_t depth) {
-        if (!visited.insert(item.objectNumber).second) return;
-        depthOf[item.objectNumber] = depth;
-        const auto& obj = GetObject(item);
-        const auto* dict = obj.AsDictionary();
+        const std::uint64_t itemKey =
+            (static_cast<std::uint64_t>(item.objectNumber) << 16U) |
+            static_cast<std::uint64_t>(item.generation);
+        if (!visited.insert(itemKey).second) return;
+
+        const PdfObject object = GetObject(item);
+        const auto* dict = object.AsDictionary();
         if (!dict) return;
+
+        // Copy all values/references needed after destination resolution before
+        // making any nested GetObject() calls. This keeps the walk deterministic
+        // even for PDFs large enough to exercise the resolver's LRU cache.
+        const std::string title = readOutlineString(dict->Find(PdfName("Title")));
+        const PdfObject* destValue = dict->Find(PdfName("Dest"));
+        const PdfObject destination = destValue ? *destValue : PdfObject{};
+        const PdfObject action = resolveDictionary(dict->Find(PdfName("A")));
+        const auto* firstChildValue = dict->Find(PdfName("First"));
+        const auto firstChildRef = firstChildValue ? firstChildValue->AsReference() : std::nullopt;
+        const auto* nextValue = dict->Find(PdfName("Next"));
+        const auto nextRef = nextValue ? nextValue->AsReference() : std::nullopt;
+
         PdfOutlineEntry entry;
-        if (const auto* title = dict->Find(PdfName("Title"))->AsString()) entry.title = *title;
+        entry.title = title;
         entry.objectNumber = item.objectNumber;
         entry.depth = depth;
         entry.isOpen = true;
-        if (const auto* dest = dict->Find(PdfName("Dest"))) {
-            if (const auto target = ResolveDestination(*dest)) entry.destinationPageIndex = target;
+
+        if (!destination.IsNull()) {
+            if (const auto target = ResolveDestination(destination)) {
+                entry.destinationPageIndex = target;
+            }
         }
-        if (const auto* action = dict->Find(PdfName("A"))) {
-            if (const auto* actionDict = action->AsDictionary()) {
-                if (const auto* dest = actionDict->Find(PdfName("D"))) {
-                    if (const auto target = ResolveDestination(*dest)) entry.destinationPageIndex = target;
+        if (!entry.destinationPageIndex) {
+            if (const auto* actionDict = action.AsDictionary()) {
+                if (const auto* actionDest = actionDict->Find(PdfName("D"))) {
+                    if (const auto target = ResolveDestination(*actionDest)) {
+                        entry.destinationPageIndex = target;
+                    }
                 }
             }
         }
+
         result.push_back(std::move(entry));
-        const auto* firstChildValue = dict->Find(PdfName("First"));
-        const auto firstChildRef = firstChildValue ? firstChildValue->AsReference() : std::nullopt;
         if (firstChildRef) {
             walk(PdfReference{firstChildRef->first, firstChildRef->second}, depth + 1U);
         }
-        const auto* nextValue = dict->Find(PdfName("Next"));
-        const auto nextRef = nextValue ? nextValue->AsReference() : std::nullopt;
         if (nextRef) {
-            const auto found = depthOf.find(nextRef->first);
-            if (found == depthOf.end() || found->second == depth) {
-                walk(PdfReference{nextRef->first, nextRef->second}, depth);
-            }
+            walk(PdfReference{nextRef->first, nextRef->second}, depth);
         }
     };
+
     walk(PdfReference{firstRef->first, firstRef->second}, 0U);
     return result;
 }
@@ -3530,52 +3548,67 @@ std::vector<PdfAnnotationInfo> PdfDocument::GetAnnotations(const std::size_t pag
     std::vector<PdfAnnotationInfo> result;
     const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) return result;
+
     const std::string pageObject = readIndirectObject(pages[pageIndex].objectNumber);
-    const auto parsed = Internal::PdfObjectParser::Parse(pageObject, readerOptions_.limits.maxRecursionDepth);
+    const auto parsed = Internal::PdfObjectParser::Parse(
+        pageObject, readerOptions_.limits.maxRecursionDepth);
     const auto* dictionary = parsed.AsDictionary();
     if (!dictionary) return result;
-    const auto* annotsValue = dictionary->Find(PdfName("Annots"));
-    const PdfArray* annotsArray = nullptr;
-    if (annotsValue) {
-        if (const auto* directArray = annotsValue->AsArray()) {
-            annotsArray = directArray;
-        } else if (const auto ref = annotsValue->AsReference()) {
-            const auto& annots = GetObject(PdfReference{ref->first, ref->second});
-            annotsArray = annots.AsArray();
+
+    auto resolveObject = [this](const PdfObject& value) -> PdfObject {
+        if (const auto ref = value.AsReference()) {
+            return GetObject(PdfReference{ref->first, ref->second});
         }
-    }
-    if (annotsArray) {
-        for (const auto& item : annotsArray->values()) {
-                const auto ref = item.AsReference();
-                if (!ref) continue;
-                const auto& annot = GetObject(PdfReference{ref->first, ref->second});
-                const auto* annotDict = annot.AsDictionary();
-                if (!annotDict) continue;
-                PdfAnnotationInfo info;
-                info.objectNumber = ref->first;
-                if (const auto subtype = annotDict->GetAsName(PdfName("Subtype"))) info.subtype = subtype->value();
-                if (const auto* rectValue = annotDict->Find(PdfName("Rect"))) {
-                    if (const auto* rectArray = rectValue->AsArray()) {
-                        if (rectArray->size() >= 4U) {
-                            info.rect = PdfRectangle{
-                                rectArray->at(0U).AsReal().value_or(0.0),
-                                rectArray->at(1U).AsReal().value_or(0.0),
-                                rectArray->at(2U).AsReal().value_or(0.0),
-                                rectArray->at(3U).AsReal().value_or(0.0)};
-                        }
-                    }
-                }
-                if (const auto* contentsValue = annotDict->Find(PdfName("Contents"))) {
-                    if (const auto* text = contentsValue->AsString()) info.contents = *text;
-                }
-                if (const auto* titleValue = annotDict->Find(PdfName("T"))) {
-                    if (const auto* text = titleValue->AsString()) info.title = *text;
-                }
-                result.push_back(std::move(info));
+        return value;
+    };
+
+    const auto* annotsValue = dictionary->Find(PdfName("Annots"));
+    if (!annotsValue) return result;
+    const PdfObject annotsObject = resolveObject(*annotsValue);
+    const auto* annotsArrayPtr = annotsObject.AsArray();
+    if (!annotsArrayPtr) return result;
+    const PdfArray annotsArray = *annotsArrayPtr;
+
+    auto resolvedString = [&](const PdfDictionary& dict, const char* key) -> std::string {
+        const auto* value = dict.Find(PdfName(key));
+        if (!value) return {};
+        const PdfObject resolved = resolveObject(*value);
+        if (const auto* text = resolved.AsString()) return *text;
+        return {};
+    };
+
+    for (const auto& item : annotsArray.values()) {
+        PdfObject annotObject = resolveObject(item);
+        const auto* annotDictPtr = annotObject.AsDictionary();
+        if (!annotDictPtr) continue;
+        const PdfDictionary annotDict = *annotDictPtr;
+
+        PdfAnnotationInfo info;
+        if (const auto ref = item.AsReference()) info.objectNumber = ref->first;
+        if (const auto* subtypeValue = annotDict.Find(PdfName("Subtype"))) {
+            const PdfObject subtypeObject = resolveObject(*subtypeValue);
+            if (const auto* subtype = subtypeObject.AsName()) {
+                info.subtype = subtype->value();
             }
         }
+        if (const auto* rectValue = annotDict.Find(PdfName("Rect"))) {
+            const PdfObject rectObject = resolveObject(*rectValue);
+            if (const auto* rectArray = rectObject.AsArray(); rectArray && rectArray->size() >= 4U) {
+                info.rect = PdfRectangle{
+                    rectArray->at(0U).AsReal().value_or(0.0),
+                    rectArray->at(1U).AsReal().value_or(0.0),
+                    rectArray->at(2U).AsReal().value_or(0.0),
+                    rectArray->at(3U).AsReal().value_or(0.0)};
+            }
+        }
+        info.contents = resolvedString(annotDict, "Contents");
+        info.title = resolvedString(annotDict, "T");
+        info.subject = resolvedString(annotDict, "Subj");
+        result.push_back(std::move(info));
+    }
     return result;
 }
+
 std::string PdfDocument::GetPageContentStream(const std::size_t pageIndex) const {
     const auto& pages = pageReferences();
     if (pageIndex >= pages.size()) {
@@ -3633,7 +3666,9 @@ std::vector<PdfTextSearchMatch> PdfDocument::SearchText(
         throw PdfException(PdfErrorCode::InvalidPageTree,
                            "Page index " + std::to_string(pageIndex) + " is outside the document.");
     }
-    auto chunks = ExtractTextChunks(pageIndex, PdfTextExtractionRequest{});
+    PdfTextExtractionRequest request;
+    request.options.renderingMode = options.renderingMode;
+    auto chunks = ExtractTextChunks(pageIndex, request);
     return PdfTextSearch::Find(chunks, keyword, options);
 }
 

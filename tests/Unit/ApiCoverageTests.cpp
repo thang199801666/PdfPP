@@ -250,6 +250,12 @@ void TestTextSearch() {
     PdfRegexSearchOptions limitedRegex;
     limitedRegex.maxMatches = 1;
     PDFPP_TEST_CHECK(PdfTextSearch::FindRegex(chunks, R"([A-Za-z]+)", limitedRegex).size() == 1);
+    chunks[0].renderingMode = 1;
+    PdfRegexSearchOptions fillRegex;
+    fillRegex.renderingMode = 0;
+    PDFPP_TEST_CHECK(PdfTextSearch::FindRegex(chunks, R"([A-Za-z]+)", fillRegex).size() == 2);
+    const std::regex compiledWords(R"([A-Za-z]+)");
+    PDFPP_TEST_CHECK(PdfTextSearch::FindRegex(chunks, compiledWords, fillRegex).size() == 2);
 
     ExpectThrows([&] { (void)PdfTextSearch::Find(chunks, ""); });
     ExpectThrows([&] { (void)PdfTextSearch::FindRegex(chunks, "["); });
@@ -267,18 +273,27 @@ void TestTextSearch() {
     PdfWriter writer;
     const auto searchPage = writer.AddPage({0, 0, 200, 200});
     writer.GetCanvas(searchPage).BeginText().SetFontAndSize("Helvetica", 12)
-        .MoveText(20, 150).ShowText("Gamma rays shine").EndText();
+        .MoveText(20, 150).ShowText("Gamma rays shine").EndText()
+        .BeginText().SetTextRenderMode(1).MoveText(20, 120).ShowText("Stroke gamma").EndText();
     writer.Save(searchPath);
     const auto searchDocument = PdfDocument::Open(searchPath);
     const auto pageMatches = searchDocument.SearchText(0U, "gamma");
-    PDFPP_TEST_CHECK(pageMatches.size() == 1);
+    PDFPP_TEST_CHECK(pageMatches.size() == 2);
     PDFPP_TEST_CHECK(pageMatches[0].matchedText == "Gamma");
+    PdfTextSearchOptions fillOnly;
+    fillOnly.renderingMode = 0;
+    PDFPP_TEST_CHECK(searchDocument.SearchText(0U, "gamma", fillOnly).size() == 1U);
+    PdfTextSearchOptions strokeOnly;
+    strokeOnly.renderingMode = 1;
+    PDFPP_TEST_CHECK(searchDocument.SearchText(0U, "gamma", strokeOnly).size() == 1U);
     ExpectThrows([&] { (void)searchDocument.SearchText(9U, "x"); });
     // Region search filters by bounding box.
     const auto regionMatches = searchDocument.SearchTextInRegion(0U, "gamma", PdfRectangle{0, 0, 300, 300});
-    PDFPP_TEST_CHECK(regionMatches.size() == 1);
+    PDFPP_TEST_CHECK(regionMatches.size() == 2);
     const auto emptyRegion = searchDocument.SearchTextInRegion(0U, "gamma", PdfRectangle{0, 0, 5, 5});
     PDFPP_TEST_CHECK(emptyRegion.empty());
+    PDFPP_TEST_CHECK(searchDocument.SearchTextInRegion(
+        0U, "gamma", PdfRectangle{0, 100, 200, 140}, strokeOnly).size() == 1U);
     std::filesystem::remove(searchPath);
 }
 
@@ -502,7 +517,7 @@ void TestAdvancedAnnotationsAndXfdf(const std::filesystem::path& base) {
     const auto attachmentEdited = TempPath("pdfpp_api_attachment_edited.pdf");
     {
         PdfWriter attachmentWriter;
-        attachmentWriter.AddPage({0, 0, 300, 400});
+        (void)attachmentWriter.AddPage({0, 0, 300, 400});
         const std::array<std::byte, 4> attachmentBytes{
             std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
         attachmentWriter.AddEmbeddedFile("note.bin", attachmentBytes);
@@ -848,7 +863,7 @@ void TestAcroFormCalculations() {
     }
     // Set A=10 and B=5.
     const auto updated = TempPath("pdfpp_api_calc_updated.pdf");
-    const auto updateResult = PdfAcroForm::SetFieldValues(input, updated, {{"A", "10"}, {"B", "5"}});
+    const auto updateResult = PdfAcroForm::SetFieldValues(input, updated, {PdfFormFieldUpdate{"A", "10", {}}, PdfFormFieldUpdate{"B", "5", {}}});
     PDFPP_TEST_CHECK(updateResult.updatedFieldCount == 2U);
     const auto calcOutput = TempPath("pdfpp_api_calc_output.pdf");
     const auto calcResult = PdfAcroForm::CalculateFields(updated, calcOutput);
@@ -897,7 +912,7 @@ void TestRadioGroupStates() {
     PDFPP_TEST_CHECK(fields.size() == 1U);
     PDFPP_TEST_CHECK(fields.front().radio);
     PDFPP_TEST_CHECK(fields.front().widgetReferences.size() == 2U);
-    const auto update = PdfAcroForm::SetFieldValues(input, output, {{"choice", "B"}});
+    const auto update = PdfAcroForm::SetFieldValues(input, output, {PdfFormFieldUpdate{"choice", "B", {}}});
     PDFPP_TEST_CHECK(update.updatedFieldCount == 1U && update.updatedWidgetCount == 2U);
     const auto updated = PdfDocument::Open(output);
     const auto updatedFields = PdfAcroForm::GetFields(updated);
@@ -909,20 +924,23 @@ void TestRadioGroupStates() {
     PDFPP_TEST_CHECK(second->GetAsName(PdfName("AS"))->value() == "B");
     const auto appearancePath = TempPath("pdfpp_api_radio_appearances.pdf");
     const auto appearance = PdfAcroForm::GenerateAppearances(output, appearancePath);
-    PDFPP_TEST_CHECK(appearance.generatedAppearanceCount == 2U);
+    PDFPP_TEST_CHECK(appearance.generatedAppearanceCount == 4U);
     const auto appeared = PdfDocument::Open(appearancePath);
     const auto appearedFields = PdfAcroForm::GetFields(appeared);
     const auto readAppearance = [&](const PdfReference reference) {
         const auto* widget = appeared.GetObject(reference).AsDictionary();
         const auto* ap = widget ? widget->GetAsDictionary(PdfName("AP")) : nullptr;
-        const auto n = ap ? ap->Find(PdfName("N")) : nullptr;
-        const auto nReference = n ? n->AsReference() : std::nullopt;
-        const auto* stream = nReference
-            ? appeared.GetObject(PdfReference{nReference->first, nReference->second}).AsStream() : nullptr;
+        const auto* normal = ap ? ap->GetAsDictionary(PdfName("N")) : nullptr;
+        const auto state = widget ? widget->GetAsName(PdfName("AS")) : std::nullopt;
+        const auto* selected = normal && state ? normal->Find(*state) : nullptr;
+        const auto selectedReference = selected ? selected->AsReference() : std::nullopt;
+        const auto* stream = selectedReference
+            ? appeared.GetObject(PdfReference{selectedReference->first, selectedReference->second}).AsStream()
+            : nullptr;
         return stream ? std::string(reinterpret_cast<const char*>(stream->bytes().data()), stream->bytes().size()) : std::string{};
     };
-    PDFPP_TEST_CHECK(readAppearance(appearedFields.front().widgetReferences[0]).find("1 w ") == std::string::npos);
-    PDFPP_TEST_CHECK(readAppearance(appearedFields.front().widgetReferences[1]).find("1 w ") != std::string::npos);
+    PDFPP_TEST_CHECK(readAppearance(appearedFields.front().widgetReferences[0]).find("33.6 10 m") == std::string::npos);
+    PDFPP_TEST_CHECK(readAppearance(appearedFields.front().widgetReferences[1]).find("33.6 10 m") != std::string::npos);
     std::filesystem::remove(input);
     std::filesystem::remove(output);
     std::filesystem::remove(appearancePath);
@@ -1031,7 +1049,7 @@ void TestWriterDocumentInfo() {
 
     // XMP metadata packet embedded in the catalog.
     const auto xmpOutput = TempPath("pdfpp_document_info_xmp.pdf");    PdfWriter xmpWriter;
-    xmpWriter.AddPage();
+    (void)xmpWriter.AddPage();
     xmpWriter.SetTitle("XMP test");
     xmpWriter.SetAuthor("Author Name");
     xmpWriter.SetXmpMetadata(true);
@@ -1259,16 +1277,18 @@ void TestUnicodeTrueTypeWriting() {
         .EndText();
     writer.Save(output);
 
-    const auto document = PdfDocument::Open(output);
-    const auto text = document.GetPageText(0);
-    PDFPP_TEST_CHECK(text.find("Tiếng Việt") != std::string::npos);
-    PDFPP_TEST_CHECK(text.find("Ελληνικά") != std::string::npos);
+    {
+        const auto document = PdfDocument::Open(output);
+        const auto text = document.GetPageText(0);
+        PDFPP_TEST_CHECK(text.find("Tiếng Việt") != std::string::npos);
+        PDFPP_TEST_CHECK(text.find("Ελληνικά") != std::string::npos);
+    }
     std::filesystem::remove(output);
 }
 
 void TestPublicApiArchitecture() {
-    static_assert(CPPPdf::VersionMajor == 0U);
-    static_assert(CPPPdf::VersionMinor == 155U);
+    static_assert(CPPPdf::VersionMajor == 1U);
+    static_assert(CPPPdf::VersionMinor == 0U);
     static_assert(CPPPdf::VersionPatch == 0U);
     static_assert(std::is_same_v<CPPPdf::PdfStampPoint, CPPPdf::PdfPoint>);
 
@@ -1278,7 +1298,7 @@ void TestPublicApiArchitecture() {
     PDFPP_TEST_CHECK(rectangle.width() == 10.0);
     PDFPP_TEST_CHECK(rectangle.height() == 20.0);
     PDFPP_TEST_CHECK(!rectangle.empty());
-    PDFPP_TEST_CHECK(CPPPdf::VersionString == "0.155.0");
+    PDFPP_TEST_CHECK(CPPPdf::VersionString == "1.0.0");
 }
 
 int RunApiCoverageTests() {

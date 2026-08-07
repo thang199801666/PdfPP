@@ -15,7 +15,7 @@
 #include <PdfPP/ModernWin32.hpp>
 #include <PdfPP/Win32/AppCommands.hpp>
 #include <PdfPP/Win32/AppSettings.hpp>
-#include <PdfPP/Win32/NativePdf.hpp>
+#include <PdfPP/Win32/ReaderPdfDocument.hpp>
 #include <PdfPP/Win32/PageCache.hpp>
 
 #include <atomic>
@@ -25,6 +25,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -38,18 +39,42 @@ namespace PdfPP::Win32 {
 // across the reader modules; expose them unqualified inside this namespace.
 using namespace PdfPP::Win32::Command;
 
+struct TextPosition final {
+    bool valid{};
+    std::size_t chunk{};
+    std::size_t offset{};
+};
+
+struct TextSelectionSpan final {
+    std::size_t chunk{};
+    std::size_t begin{};
+    std::size_t end{};
+};
+
+
+enum class FindScope { WholePage, CurrentPage };
+enum class FindCaseMode { CaseInsensitive, CaseSensitive };
+enum class FindPatternMode { Normal, RegularExpression };
+enum class RightPanelMode { Tools, Comments };
+
 // --- Window handles -------------------------------------------------------
 inline HWND mainWindow{};
 inline HWND pageEdit{};
 inline HWND pageLabel{};
 inline HWND searchEdit{};
+inline HWND findPanel{};
+inline HWND findCloseButton{};
 inline HWND statusLabel{};
 inline HWND canvas{};
 inline HWND pageList{};
+inline HWND sidebarPanel{};
 inline HWND sidebarTitle{};
 inline HWND bookmarkCloseButton{};
+inline HWND toolsPanel{};
+inline HWND toolsTitle{};
+inline HWND toolsSearchEdit{};
+inline HWND toolsTree{};
 inline HWND pageCaption{};
-inline HWND findLabel{};
 inline HWND openButton{};
 inline HWND printButton{};
 inline HWND previousButton{};
@@ -60,13 +85,22 @@ inline HWND fitButton{};
 inline HWND selectButton{};
 inline HWND handButton{};
 inline HWND findButton{};
+inline bool findPanelVisible{};
+inline FindScope findScope{ FindScope::WholePage };
+inline FindCaseMode findCaseMode{ FindCaseMode::CaseInsensitive };
+inline FindPatternMode findPatternMode{ FindPatternMode::Normal };
+inline bool findIncludeComments{};
+inline bool findIncludeBookmarks{};
+inline std::uint64_t findOptionsRevision{};
+inline std::uint64_t lastSearchOptionsRevision{};
 inline HWND sidebarToggleButton{};
+inline HWND toolsToggleButton{};
 inline HWND zoomLabel{};
 inline HMENU mainMenu{};
 inline HICON appIcon{};
 
 // --- Document / view state ------------------------------------------------
-inline std::shared_ptr<NativePdfDocument> document;
+inline std::shared_ptr<ReaderPdfDocument> document;
 inline int pageCount{};
 inline int pageIndex{};
 inline double zoom{ 1.0 };
@@ -77,6 +111,11 @@ inline int scrollY{};
 // document and to translate a thumb drag into an absolute page position.
 inline std::vector<int> pagePixelHeights;
 inline std::vector<int> pagePixelOffsets;
+// Page heights sampled once at a high fixed scale. Zoom changes can then
+// rebuild document offsets with inexpensive arithmetic instead of issuing a
+// native page-size query for every page on every Ctrl+wheel gesture.
+inline std::vector<int> pageGeometryBaseHeights;
+inline constexpr double kPageGeometryBaseScale = 16.0;
 inline int documentPixelHeight{};
 inline int gapBetweenPages{};
 inline int pendingScrollY{ -1 };
@@ -85,20 +124,55 @@ inline int pendingScrollY{ -1 };
 // when the document or its scale actually changed.
 inline double geometryZoom{ -1.0 };
 inline unsigned int geometryDpi{ 0 };
-inline std::shared_ptr<NativePdfDocument> geometryDocument;
+inline std::shared_ptr<ReaderPdfDocument> geometryDocument;
 inline std::vector<std::uint8_t> pixels;
 inline std::vector<TextChunk> textChunks;
 inline std::vector<std::size_t> searchHighlights;
-inline std::vector<std::size_t> selectedChunks;
+inline std::vector<TextSelectionSpan> selectedTextSpans;
+inline TextPosition selectionAnchor;
+inline TextPosition selectionFocus;
+inline int textGeometryPage{ -1 };
+inline int textGeometryRequestPage{ -1 };
+inline constexpr UINT kTextGeometryDebounceMs = 75;
 inline std::vector<HTREEITEM> tocItems;
+// TOC data belongs to the active document/tab.  Keep it separate from the
+// TreeView handles so switching tabs never reparses or accidentally reuses
+// another document's outline resolver state.
+inline std::vector<TocItem> currentToc;
 inline HTREEITEM bookmarkRoot{};
 inline bool sidebarVisible{ true };
+inline bool toolsVisible{ true };
+// Resizable divider between the Table of Contents and the document canvas.
+// Keep the desired width in DIPs so it remains stable across DPI changes.
+inline int sidebarWidthDip{ PdfPP::ModernWin32::Layout::sidebarWidth };
+inline bool sidebarSplitterDragging{};
+inline bool readerWindowSizing{};
+inline constexpr int kSidebarSplitterWidthDip = 5;
+inline constexpr int kSidebarMinWidthDip = 170;
+inline constexpr int kSidebarMaxWidthDip = 520;
+inline constexpr int kCanvasMinWidthDip = 260;
+inline int toolsWidthDip{ 292 };
+inline constexpr int kToolsMinWidthDip = 240;
+inline constexpr int kToolsMaxWidthDip = 420;
 inline bool updatingBookmarkSelection{};
 inline std::wstring lastSearchQuery;
+inline std::wstring toolsSearchQuery;
+inline RightPanelMode rightPanelMode{ RightPanelMode::Tools };
+inline std::vector<CommentItem> currentPageComments;
+inline std::vector<HTREEITEM> commentItems;
+inline int commentPage{ -1 };
+inline std::uint32_t activeCommentObjectNumber{};
 inline int lastSearchPage{ -1 };
 inline int pixelWidth{};
 inline int pixelHeight{};
 inline int pixelStride{};
+inline int pixelPage{ -1 };
+// Scale identity of the bitmap currently held in `pixels`. During a Ctrl+
+// wheel gesture `zoom` changes immediately, while this bitmap intentionally
+// remains at the last completed render and is stretched as a lightweight
+// preview until the debounced high-quality render finishes.
+inline double pixelZoom{ 1.0 };
+inline unsigned int pixelDpi{ USER_DEFAULT_SCREEN_DPI };
 
 // --- Async render / open ---------------------------------------------------
 inline std::thread renderThread;
@@ -112,6 +186,8 @@ inline std::atomic_bool openReady{ false };
 inline UINT currentDpi{ USER_DEFAULT_SCREEN_DPI };
 inline HFONT regularUiFont{};
 inline HFONT boldUiFont{};
+inline HFONT pageUiFont{};
+inline HFONT pageBoldUiFont{};
 // Ribbon group separator x positions, recomputed by updateLayout so they
 // track the search field width as the window resizes.
 inline int ribbonSep1{};
@@ -120,7 +196,7 @@ inline int ribbonSep3{};
 
 // --- Async results -----------------------------------------------------------
 struct RenderResult final {
-    std::shared_ptr<NativePdfDocument> document;
+    std::shared_ptr<ReaderPdfDocument> document;
     PageBitmap bitmap;
     bool prefetch{};
     std::string error;
@@ -128,7 +204,8 @@ struct RenderResult final {
 inline RenderResult renderResult;
 
 struct OpenResult final {
-    std::shared_ptr<NativePdfDocument> document;
+    std::shared_ptr<ReaderPdfDocument> document;
+    std::vector<TocItem> toc;
     int pageCount{};
     std::wstring title;
     std::wstring path;
@@ -140,7 +217,6 @@ inline OpenResult openResult;
 // Keep enough neighboring pages for a normal viewport; continuous painting
 // reads these entries without moving ownership out of the cache.
 inline PageCache pageCache{ 12 };
-inline std::optional<PageBitmap> continuousNextPage;
 inline AppSettings settings;
 inline HMENU recentMenu{};
 inline HMENU favoritesMenuHandle{};
@@ -152,7 +228,8 @@ enum class PageLayoutMode { SinglePage, ContinuousNavigation };
 struct TabState final {
     std::wstring path;
     std::wstring title;
-    std::shared_ptr<NativePdfDocument> document;
+    std::shared_ptr<ReaderPdfDocument> document;
+    std::vector<TocItem> toc;
     int pageCount{};
     int pageIndex{};
     double zoom{ 1.0 };
@@ -162,9 +239,15 @@ struct TabState final {
     int pixelWidth{};
     int pixelHeight{};
     int pixelStride{};
+    int pixelPage{ -1 };
+    double pixelZoom{ 1.0 };
+    unsigned int pixelDpi{ USER_DEFAULT_SCREEN_DPI };
     std::vector<TextChunk> textChunks;
     std::vector<std::size_t> searchHighlights;
-    std::vector<std::size_t> selectedChunks;
+    std::vector<TextSelectionSpan> selectedTextSpans;
+    TextPosition selectionAnchor;
+    TextPosition selectionFocus;
+    int textGeometryPage{ -1 };
     std::wstring lastSearchQuery;
     int lastSearchPage{ -1 };
     PageLayoutMode layout{ PageLayoutMode::ContinuousNavigation };
@@ -176,8 +259,11 @@ inline HWND tabBar{};
 inline bool pendingOpenCreatesTab{};
 inline bool switchingTab{};
 inline std::wstring startupOpenPath;
+inline int hoverTab{ -1 };
 inline int hoverCloseTab{ -1 };
+inline int pressedCloseTab{ -1 };
 inline int pendingCloseTabIndex{ -1 };
+inline constexpr int kTabBarHeightDip = 32;
 
 // --- Input / view interaction ------------------------------------------------
 struct ZoomAnchor final {
@@ -190,7 +276,7 @@ struct ZoomAnchor final {
 inline ZoomAnchor zoomAnchor;
 inline bool zoomRenderPending{};
 inline ULONGLONG zoomRequestTick{};
-inline constexpr UINT kZoomDebounceMs = 80;
+inline constexpr UINT kZoomDebounceMs = 120;
 
 enum class VerticalPageArrival { Top, Bottom };
 
@@ -227,6 +313,10 @@ void updateCanvasScrollbars();
 void updatePageGeometry();
 void syncRenderedPageHeight(int page);
 void updateLayout(int width, int height);
+void showFindPanel(bool show);
+void showFindOptionsMenu();
+void resetFindSearchState();
+[[nodiscard]] bool findPatternMatches(std::wstring_view text);
 void renderPage();
 void updateCommandState();
 void prefetchNextPage();
@@ -249,6 +339,7 @@ void openPath(const std::wstring& path);
 void openDocument();
 void toggleFullscreen(HWND window);
 int scaleDip(const int value);
+HCURSOR handDragCursor();
 void addWheelDelta(double& remainder, const int rawDelta, const int viewport);
 std::wstring utf8ToWide(const char* text);
 void setStatus(const std::wstring& value);
@@ -257,19 +348,29 @@ void persistSettings();
 void rememberRecentFile(const std::wstring& path);
 void rebuildFavoritesMenu();
 void toggleCurrentFavorite();
+void populateToolsTree();
+void populateCommentsTree();
+void showCommentsPanelForPage(int page, std::optional<std::uint32_t> focusObjectNumber = std::nullopt);
+void showToolsPanelCatalog();
+void executeToolCommand(int command);
 void updateZoomLabel();
 double textPixelScale();
 RECT chunkClientRect(const TextChunk& chunk, const RECT& client, const int pageTop);
 void updateSearchHighlights();
 void refreshTextGeometry();
-void selectTextChunks(const RECT& selection, const RECT& client, const int pageTop);
+void requestTextGeometryRefresh();
+TextPosition hitTestTextPosition(POINT point, const RECT& client, int pageTop, bool nearest);
+RECT selectionSpanClientRect(const TextSelectionSpan& span, const RECT& client, int pageTop);
+void clearTextSelection();
+void beginTextSelection(POINT point, bool extendExisting);
+void selectWordAt(POINT point);
+void selectAllText();
 void updateLiveSelection();
 void fillOverlay(HDC dc, const RECT& rect, BYTE alpha, COLORREF color);
 void copySelectedText();
 void selectBookmarkPage();
 void populateBookmarkTree(const std::wstring&);
 void updatePageControls();
-void rememberCurrentPage();
 void cacheCurrentPageAndRelease();
 bool hasCachedPage(const int requestedPage, const double requestedZoom);
 void rememberNativePage(RenderResult& result);
@@ -289,6 +390,18 @@ void fitToWidth();
 void fitToPage();
 void showAboutDialog();
 void showDocumentProperties();
+void mergePdfDocuments();
+void extractPdfPages();
+void splitPdfDocument();
+void deletePdfPages();
+void duplicatePdfPages();
+void moveCurrentPdfPage();
+void reorderPdfPages();
+void reversePdfPages();
+void addPdfPassword();
+void removePdfPassword();
+void changePdfPassword();
+void crackPasswordAndOpenPdf();
 HICON loadApplicationIcon();
 HMENU createMainMenu();
 void refreshApplicationFonts(UINT dpi);
@@ -300,6 +413,7 @@ RECT tabCloseRectFor(const RECT& item);
 void paintTabItem(HWND, HDC dc, const int index, const RECT& item);
 int tabHitTest(const int x, const int clientWidth);
 
+LRESULT CALLBACK findPanelProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK tabBarProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK canvasProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);

@@ -9,11 +9,18 @@
 #include <string_view>
 
 #if defined(_WIN32)
+// bcrypt.h depends on the fundamental Win32 types declared by windows.h.
+// Keep the include order explicit; including bcrypt.h directly causes MSVC to
+// parse members such as ULONG/PUCHAR/NTSTATUS as invalid declarations.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
 #include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
 #endif
 
 namespace CPPPdf {
@@ -77,7 +84,8 @@ public:
     [[nodiscard]] std::vector<std::uint8_t> ToBytes(const std::size_t fixedSize = 0U) const {
         // little-endian limbs -> big-endian bytes.
         std::vector<std::uint8_t> bytes;
-        for (const Limb limb : v) {
+        for (auto iterator = v.rbegin(); iterator != v.rend(); ++iterator) {
+            const Limb limb = *iterator;
             bytes.push_back(static_cast<std::uint8_t>((limb >> 24U) & 0xFFU));
             bytes.push_back(static_cast<std::uint8_t>((limb >> 16U) & 0xFFU));
             bytes.push_back(static_cast<std::uint8_t>((limb >> 8U) & 0xFFU));
@@ -89,7 +97,7 @@ public:
         if (first != bytes.begin()) bytes.erase(bytes.begin(), first);
         if (bytes.empty()) bytes.push_back(0);
         if (fixedSize > bytes.size()) {
-            std::vector<std::uint8_t> padded(fixedSize - bytes.size(), 0U);
+            std::vector<std::uint8_t> padded(fixedSize - bytes.size(), std::uint8_t{0});
             padded.insert(padded.end(), bytes.begin(), bytes.end());
             return padded;
         }
@@ -109,25 +117,7 @@ public:
         }
         return false;
     }
-    friend bool operator==(const BigNum& a, const BigNum& b) { return a.v == b.v; }
-    friend bool operator!=(const BigNum& a, const BigNum& b) { return a.v != b.v; }
 };
-
-BigNum BigAdd(const BigNum& a, const BigNum& b) {
-    BigNum result;
-    DblLimb carry = 0;
-    const std::size_t n = std::max(a.v.size(), b.v.size());
-    result.v.resize(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        const DblLimb x = i < a.v.size() ? a.v[i] : 0U;
-        const DblLimb y = i < b.v.size() ? b.v[i] : 0U;
-        const DblLimb sum = x + y + carry;
-        result.v[i] = static_cast<Limb>(sum & 0xFFFFFFFFU);
-        carry = sum >> 32U;
-    }
-    if (carry != 0U) result.v.push_back(static_cast<Limb>(carry));
-    return result;
-}
 
 BigNum BigSub(const BigNum& a, const BigNum& b) { // assumes a >= b
     BigNum result;
@@ -449,6 +439,140 @@ void AppendDerLength(std::vector<std::uint8_t>& out, const std::size_t length) {
     out.insert(out.end(), bytes.begin(), bytes.end());
 }
 
+namespace {
+using DerBytes = std::vector<std::uint8_t>;
+
+DerBytes DerElement(const std::uint8_t tag, const std::span<const std::uint8_t> value) {
+    DerBytes result{tag};
+    AppendDerLength(result, value.size());
+    result.insert(result.end(), value.begin(), value.end());
+    return result;
+}
+
+void AppendBytes(DerBytes& destination, const std::span<const std::uint8_t> source) {
+    destination.insert(destination.end(), source.begin(), source.end());
+}
+
+DerBytes DerOid(const std::span<const std::uint8_t> value) {
+    return DerElement(0x06U, value);
+}
+
+DerBytes DerSequence(const std::span<const std::uint8_t> value) {
+    return DerElement(0x30U, value);
+}
+
+DerBytes DerSet(const std::span<const std::uint8_t> value) {
+    return DerElement(0x31U, value);
+}
+
+DerBytes DerAlgorithmIdentifier(const std::span<const std::uint8_t> oid, const bool includeNull = true) {
+    DerBytes body = DerOid(oid);
+    if (includeNull) {
+        body.push_back(std::uint8_t{0x05});
+        body.push_back(std::uint8_t{0x00});
+    }
+    return DerSequence(body);
+}
+
+DerBytes DerAttribute(const std::span<const std::uint8_t> oid,
+                      const std::span<const std::uint8_t> encodedValue) {
+    DerBytes body = DerOid(oid);
+    const DerBytes values = DerSet(encodedValue);
+    AppendBytes(body, values);
+    return DerSequence(body);
+}
+
+bool OidEquals(const std::span<const std::uint8_t> value,
+               const std::span<const std::uint8_t> expected) {
+    return value.size() == expected.size() && std::equal(value.begin(), value.end(), expected.begin());
+}
+
+bool ExtractIssuerAndSerial(const std::span<const std::uint8_t> certificateDer,
+                            DerBytes& issuerDer,
+                            DerBytes& serialDer) {
+    DerReader certificateReader(certificateDer);
+    std::uint8_t tag = 0U;
+    std::span<const std::uint8_t> certificateValue;
+    if (!certificateReader.ReadElement(tag, certificateValue) || tag != 0x30U) return false;
+
+    DerReader certificate(certificateValue);
+    std::span<const std::uint8_t> tbsValue;
+    if (!certificate.ReadElement(tag, tbsValue) || tag != 0x30U) return false;
+
+    DerReader tbs(tbsValue);
+    std::span<const std::uint8_t> value;
+    if (!tbs.ReadElement(tag, value)) return false;
+    if (tag == 0xA0U && !tbs.ReadElement(tag, value)) return false;
+    if (tag != 0x02U) return false;
+    serialDer = DerElement(0x02U, value);
+
+    // signature AlgorithmIdentifier
+    if (!tbs.ReadElement(tag, value) || tag != 0x30U) return false;
+    // issuer Name
+    if (!tbs.ReadElement(tag, value) || tag != 0x30U) return false;
+    issuerDer = DerElement(0x30U, value);
+    return true;
+}
+
+DerBytes EncodeSigningTime(const std::uint64_t unixSeconds) {
+    const std::time_t raw = static_cast<std::time_t>(unixSeconds != 0U
+        ? unixSeconds
+        : static_cast<std::uint64_t>(std::time(nullptr)));
+    std::tm utc{};
+#if defined(_MSC_VER)
+    if (gmtime_s(&utc, &raw) != 0) return {};
+#else
+    if (gmtime_r(&raw, &utc) == nullptr) return {};
+#endif
+    char buffer[20]{};
+    const int year = utc.tm_year + 1900;
+    const char* format = year >= 1950 && year <= 2049 ? "%y%m%d%H%M%SZ" : "%Y%m%d%H%M%SZ";
+    if (std::strftime(buffer, sizeof(buffer), format, &utc) == 0U) return {};
+    const auto length = std::char_traits<char>::length(buffer);
+    const auto bytes = std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(buffer), length);
+    return DerElement(year >= 1950 && year <= 2049 ? 0x17U : 0x18U, bytes);
+}
+
+std::uint64_t ParseCmsTime(const std::span<const std::uint8_t> value, const bool generalized) {
+    const std::size_t minimum = generalized ? 15U : 13U;
+    if (value.size() < minimum || value.back() != static_cast<std::uint8_t>('Z')) return 0U;
+    const auto digits = [&](const std::size_t offset, const std::size_t count) -> std::uint64_t {
+        if (offset + count > value.size()) return 0U;
+        std::uint64_t result = 0U;
+        for (std::size_t i = 0U; i < count; ++i) {
+            const auto digit = value[offset + i];
+            if (digit < static_cast<std::uint8_t>('0') || digit > static_cast<std::uint8_t>('9')) return 0U;
+            result = result * 10U + static_cast<std::uint64_t>(digit - static_cast<std::uint8_t>('0'));
+        }
+        return result;
+    };
+    const std::uint64_t year = generalized
+        ? digits(0U, 4U)
+        : ((digits(0U, 2U) >= 50U ? 1900U : 2000U) + digits(0U, 2U));
+    const std::size_t offset = generalized ? 4U : 2U;
+    return CivilToUnix(year, digits(offset, 2U), digits(offset + 2U, 2U),
+                       digits(offset + 4U, 2U), digits(offset + 6U, 2U),
+                       digits(offset + 8U, 2U));
+}
+
+constexpr std::array<std::uint8_t, 9> kCmsSignedDataOid{
+    0x2aU, 0x86U, 0x48U, 0x86U, 0xf7U, 0x0dU, 0x01U, 0x07U, 0x02U};
+constexpr std::array<std::uint8_t, 9> kCmsDataOid{
+    0x2aU, 0x86U, 0x48U, 0x86U, 0xf7U, 0x0dU, 0x01U, 0x07U, 0x01U};
+constexpr std::array<std::uint8_t, 9> kSha256Oid{
+    0x60U, 0x86U, 0x48U, 0x01U, 0x65U, 0x03U, 0x04U, 0x02U, 0x01U};
+constexpr std::array<std::uint8_t, 9> kRsaEncryptionOid{
+    0x2aU, 0x86U, 0x48U, 0x86U, 0xf7U, 0x0dU, 0x01U, 0x01U, 0x01U};
+constexpr std::array<std::uint8_t, 9> kContentTypeAttributeOid{
+    0x2aU, 0x86U, 0x48U, 0x86U, 0xf7U, 0x0dU, 0x01U, 0x09U, 0x03U};
+constexpr std::array<std::uint8_t, 9> kMessageDigestAttributeOid{
+    0x2aU, 0x86U, 0x48U, 0x86U, 0xf7U, 0x0dU, 0x01U, 0x09U, 0x04U};
+constexpr std::array<std::uint8_t, 9> kSigningTimeAttributeOid{
+    0x2aU, 0x86U, 0x48U, 0x86U, 0xf7U, 0x0dU, 0x01U, 0x09U, 0x05U};
+
+} // namespace
+
 PdfCms::RsaPublicKey PdfCms::ParsePublicKeyPem(const std::string_view pem) {
     const auto der = PemBody(pem);
     // SubjectPublicKeyInfo ::= SEQUENCE { algorithm SEQUENCE, subjectPublicKey BIT STRING }
@@ -590,157 +714,200 @@ std::vector<std::uint8_t> PdfCms::BuildSignedData(
     const RsaPublicKey& publicKey,
     const RsaPrivateKey& privateKey,
     const std::span<const std::uint8_t> certificateDer,
+    const SignedDataOptions& options) {
+    if (certificateDer.empty() || privateKey.modulus.empty() || privateKey.privateExponent.empty()) return {};
+
+    std::vector<DerBytes> attributes;
+    const DerBytes contentTypeValue = DerOid(kCmsDataOid);
+    attributes.push_back(DerAttribute(kContentTypeAttributeOid, contentTypeValue));
+    const DerBytes messageDigestValue = DerElement(0x04U, digest);
+    attributes.push_back(DerAttribute(kMessageDigestAttributeOid, messageDigestValue));
+    if (options.includeSigningTime) {
+        const DerBytes signingTime = EncodeSigningTime(options.signingTimeSeconds);
+        if (!signingTime.empty()) attributes.push_back(DerAttribute(kSigningTimeAttributeOid, signingTime));
+    }
+    std::sort(attributes.begin(), attributes.end());
+
+    DerBytes signedAttributesContent;
+    for (const auto& attribute : attributes) AppendBytes(signedAttributesContent, attribute);
+    const DerBytes signedAttributesDer = DerSet(signedAttributesContent);
+    const auto signedAttributesDigest = Internal::Sha256(signedAttributesDer);
+    const DerBytes signature = RsaSha256Sign(privateKey, signedAttributesDigest);
+    if (signature.empty()) return {};
+
+    DerBytes issuerDer;
+    DerBytes serialDer;
+    const bool hasIssuerAndSerial = ExtractIssuerAndSerial(certificateDer, issuerDer, serialDer);
+
+    DerBytes signerInfoBody;
+    if (hasIssuerAndSerial) {
+        AppendBytes(signerInfoBody, DerElement(0x02U, std::array<std::uint8_t, 1>{0x01U}));
+        DerBytes sidBody = issuerDer;
+        AppendBytes(sidBody, serialDer);
+        AppendBytes(signerInfoBody, DerSequence(sidBody));
+    } else {
+        AppendBytes(signerInfoBody, DerElement(0x02U, std::array<std::uint8_t, 1>{0x03U}));
+        const auto keyHash = Internal::Sha256(publicKey.modulus);
+        AppendBytes(signerInfoBody, DerElement(0x80U,
+            std::span<const std::uint8_t>(keyHash.data(), 20U)));
+    }
+    AppendBytes(signerInfoBody, DerAlgorithmIdentifier(kSha256Oid));
+    // signedAttrs is [0] IMPLICIT SignedAttributes: retain only the SET content.
+    AppendBytes(signerInfoBody, DerElement(0xA0U, signedAttributesContent));
+    AppendBytes(signerInfoBody, DerAlgorithmIdentifier(kRsaEncryptionOid));
+    AppendBytes(signerInfoBody, DerElement(0x04U, signature));
+    const DerBytes signerInfo = DerSequence(signerInfoBody);
+
+    const DerBytes digestAlgorithms = DerSet(DerAlgorithmIdentifier(kSha256Oid));
+    const DerBytes encapContentInfo = DerSequence(DerOid(kCmsDataOid));
+
+    DerBytes certificateSetContent(certificateDer.begin(), certificateDer.end());
+    for (const auto& certificate : options.certificateChain) {
+        if (certificate.empty() ||
+            (certificate.size() == certificateDer.size() &&
+             std::equal(certificate.begin(), certificate.end(), certificateDer.begin()))) {
+            continue;
+        }
+        AppendBytes(certificateSetContent, certificate);
+    }
+
+    DerBytes signedDataBody;
+    const std::array<std::uint8_t, 1> signedDataVersion{
+        static_cast<std::uint8_t>(hasIssuerAndSerial ? 0x01U : 0x03U)};
+    AppendBytes(signedDataBody, DerElement(0x02U, signedDataVersion));
+    AppendBytes(signedDataBody, digestAlgorithms);
+    AppendBytes(signedDataBody, encapContentInfo);
+    AppendBytes(signedDataBody, DerElement(0xA0U, certificateSetContent));
+    AppendBytes(signedDataBody, DerSet(signerInfo));
+    const DerBytes signedDataSequence = DerSequence(signedDataBody);
+
+    DerBytes contentInfoBody = DerOid(kCmsSignedDataOid);
+    AppendBytes(contentInfoBody, DerElement(0xA0U, signedDataSequence));
+    (void)options.signerName;
+    return DerSequence(contentInfoBody);
+}
+
+std::vector<std::uint8_t> PdfCms::BuildSignedData(
+    const std::span<const std::uint8_t, 32> digest,
+    const RsaPublicKey& publicKey,
+    const RsaPrivateKey& privateKey,
+    const std::span<const std::uint8_t> certificateDer,
     const std::string_view signerName) {
-    (void)signerName;
-    // Minimal CMS SignedData (RFC 5652) with one signer, detached content.
-    // Structure:
-    //  ContentInfo ::= SEQUENCE { contentType OID signedData, content [0] SignedData }
-    //  SignedData ::= SEQUENCE { version, digestAlgorithms, encapContentInfo,
-    //                            certificates [0], signerInfos }
-    //  SignerInfo ::= SEQUENCE { version, sid, digestAlgorithm, signatureAlgorithm, signature }
-    const std::vector<std::uint8_t> signature = RsaSha256Sign(privateKey, digest);
+    SignedDataOptions options;
+    options.signerName = std::string(signerName);
+    return BuildSignedData(digest, publicKey, privateKey, certificateDer, options);
+}
 
-    // SignerInfo SID: issuerAndSerialNumber. We approximate with a SubjectKeyIdentifier
-    // (keyIdentifier) alternative (tag 0x80) using the last 20 bytes of the modulus hash.
-    const auto sha = Internal::Sha256(publicKey.modulus);
-    std::vector<std::uint8_t> keyId(sha.begin(), sha.begin() + 20U);
+bool PdfCms::ParseSignedData(
+    const std::span<const std::uint8_t> signedData,
+    SignedDataInfo& outInfo) {
+    outInfo = {};
+    DerReader outer(signedData);
+    std::uint8_t tag = 0U;
+    std::span<const std::uint8_t> contentInfoValue;
+    if (!outer.ReadElement(tag, contentInfoValue) || tag != 0x30U) return false;
 
-    std::vector<std::uint8_t> signerInfo;
-    // version = 3 (because of keyIdentifier sid)
-    signerInfo.push_back(0x02); signerInfo.push_back(0x01); signerInfo.push_back(0x03);
-    // sid: [0] IMPLICIT keyIdentifier
-    signerInfo.push_back(0x80); signerInfo.push_back(static_cast<std::uint8_t>(keyId.size()));
-    signerInfo.insert(signerInfo.end(), keyId.begin(), keyId.end());
-    // digestAlgorithm: sha256 OID
-    const std::vector<std::uint8_t> sha256Oid = {0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01};
-    signerInfo.push_back(0x30); signerInfo.push_back(0x0d);
-    signerInfo.insert(signerInfo.end(), sha256Oid.begin(), sha256Oid.end());
-    // signatureAlgorithm: rsaEncryption OID 1.2.840.113549.1.1.1 (NULL params)
-    const std::vector<std::uint8_t> rsaOid = {0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01};
-    signerInfo.push_back(0x30); signerInfo.push_back(0x0d);
-    signerInfo.insert(signerInfo.end(), rsaOid.begin(), rsaOid.end());
-    signerInfo.push_back(0x05); signerInfo.push_back(0x00);
-    // signature OCTET STRING
-    signerInfo.push_back(0x04);
-    AppendDerLength(signerInfo, signature.size());
-    signerInfo.insert(signerInfo.end(), signature.begin(), signature.end());
+    DerReader contentInfo(contentInfoValue);
+    std::span<const std::uint8_t> oid;
+    if (!contentInfo.ReadElement(tag, oid) || tag != 0x06U || !OidEquals(oid, kCmsSignedDataOid)) return false;
+    std::span<const std::uint8_t> explicitSignedData;
+    if (!contentInfo.ReadElement(tag, explicitSignedData) || tag != 0xA0U) return false;
 
-    // digestAlgorithms set: sha256
-    std::vector<std::uint8_t> digestAlgorithms = {0x30, 0x0d};
-    digestAlgorithms.insert(digestAlgorithms.end(), sha256Oid.begin(), sha256Oid.end());
-    digestAlgorithms.push_back(0x05); digestAlgorithms.push_back(0x00);
+    std::span<const std::uint8_t> signedDataBody = explicitSignedData;
+    DerReader explicitReader(explicitSignedData);
+    std::span<const std::uint8_t> sequenceValue;
+    const std::size_t explicitStart = explicitReader.Position();
+    if (explicitReader.ReadElement(tag, sequenceValue) && tag == 0x30U) {
+        signedDataBody = sequenceValue;
+    } else {
+        explicitReader.Seek(explicitStart);
+    }
 
-    // encapContentInfo: contentType data OID, no content (detached)
-    const std::vector<std::uint8_t> dataOid = {0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x01};
-    std::vector<std::uint8_t> encap = dataOid;
+    DerReader body(signedDataBody);
+    std::span<const std::uint8_t> value;
+    if (!body.ReadElement(tag, value) || tag != 0x02U) return false; // version
+    if (!body.ReadElement(tag, value) || tag != 0x31U) return false; // digestAlgorithms
+    if (!body.ReadElement(tag, value) || tag != 0x30U) return false; // encapContentInfo
 
-    // certificates [0] IMPLICIT: SEQUENCE OF certificate (single)
-    std::vector<std::uint8_t> certSeq;
-    certSeq.push_back(0x30);
-    AppendDerLength(certSeq, certificateDer.size());
-    certSeq.insert(certSeq.end(), certificateDer.begin(), certificateDer.end());
+    if (!body.ReadElement(tag, value)) return false;
+    if (tag == 0xA0U) {
+        DerReader certificates(value);
+        while (!certificates.AtEnd()) {
+            std::span<const std::uint8_t> certificateValue;
+            if (!certificates.ReadElement(tag, certificateValue)) return false;
+            if (tag == 0x30U) outInfo.certificates.push_back(DerElement(tag, certificateValue));
+        }
+        if (!body.ReadElement(tag, value)) return false;
+    }
+    if (tag == 0xA1U) { // optional CRLs
+        if (!body.ReadElement(tag, value)) return false;
+    }
+    if (tag != 0x31U) return false;
 
-    std::vector<std::uint8_t> signedDataBody;
-    signedDataBody.push_back(0x02); signedDataBody.push_back(0x01); signedDataBody.push_back(0x03); // version
-    // digestAlgorithms SET
-    signedDataBody.push_back(0x31);
-    AppendDerLength(signedDataBody, digestAlgorithms.size());
-    signedDataBody.insert(signedDataBody.end(), digestAlgorithms.begin(), digestAlgorithms.end());
-    // encapContentInfo SEQUENCE
-    signedDataBody.push_back(0x30);
-    AppendDerLength(signedDataBody, encap.size());
-    signedDataBody.insert(signedDataBody.end(), encap.begin(), encap.end());
-    // certificates [0]
-    signedDataBody.push_back(0xa0);
-    AppendDerLength(signedDataBody, certSeq.size());
-    signedDataBody.insert(signedDataBody.end(), certSeq.begin(), certSeq.end());
-    // signerInfos SET
-    signedDataBody.push_back(0x31);
-    AppendDerLength(signedDataBody, signerInfo.size());
-    signedDataBody.insert(signedDataBody.end(), signerInfo.begin(), signerInfo.end());
+    std::span<const std::uint8_t> signerInfoBody = value;
+    DerReader signerInfos(value);
+    std::span<const std::uint8_t> signerInfoValue;
+    if (signerInfos.ReadElement(tag, signerInfoValue) && tag == 0x30U) {
+        signerInfoBody = signerInfoValue;
+    }
 
-    // ContentInfo wrapping.
-    std::vector<std::uint8_t> content;
-    content.push_back(0x06); content.push_back(0x09);
-    content.insert(content.end(), dataOid.begin() + 2, dataOid.end());
-    // [0] EXPLICIT signedData
-    content.push_back(0xa0);
-    AppendDerLength(content, signedDataBody.size());
-    content.insert(content.end(), signedDataBody.begin(), signedDataBody.end());
+    DerReader signerInfo(signerInfoBody);
+    if (!signerInfo.ReadElement(tag, value) || tag != 0x02U) return false; // version
+    if (!signerInfo.ReadElement(tag, value)) return false; // sid
+    if (!signerInfo.ReadElement(tag, value) || tag != 0x30U) return false; // digestAlgorithm
+    if (!signerInfo.ReadElement(tag, value)) return false;
 
-    std::vector<std::uint8_t> result;
-    result.push_back(0x30);
-    AppendDerLength(result, content.size());
-    result.insert(result.end(), content.begin(), content.end());
-    return result;
+    if (tag == 0xA0U) {
+        outInfo.hasSignedAttributes = true;
+        outInfo.signedAttributesDer = DerSet(value);
+        DerReader attributes(value);
+        while (!attributes.AtEnd()) {
+            std::span<const std::uint8_t> attributeValue;
+            if (!attributes.ReadElement(tag, attributeValue) || tag != 0x30U) return false;
+            DerReader attribute(attributeValue);
+            std::span<const std::uint8_t> attributeOid;
+            std::span<const std::uint8_t> values;
+            if (!attribute.ReadElement(tag, attributeOid) || tag != 0x06U) return false;
+            if (!attribute.ReadElement(tag, values) || tag != 0x31U) return false;
+            DerReader attributeValues(values);
+            std::span<const std::uint8_t> firstValue;
+            if (!attributeValues.ReadElement(tag, firstValue)) return false;
+            if (OidEquals(attributeOid, kContentTypeAttributeOid)) {
+                outInfo.hasContentType = tag == 0x06U && OidEquals(firstValue, kCmsDataOid);
+            } else if (OidEquals(attributeOid, kMessageDigestAttributeOid)) {
+                if (tag == 0x04U && firstValue.size() == outInfo.messageDigest.size()) {
+                    std::copy(firstValue.begin(), firstValue.end(), outInfo.messageDigest.begin());
+                    outInfo.hasMessageDigest = true;
+                }
+            } else if (OidEquals(attributeOid, kSigningTimeAttributeOid)) {
+                if (tag == 0x17U || tag == 0x18U) {
+                    outInfo.signingTimeSeconds = ParseCmsTime(firstValue, tag == 0x18U);
+                }
+            }
+        }
+        if (!signerInfo.ReadElement(tag, value) || tag != 0x30U) return false; // signatureAlgorithm
+    } else if (tag != 0x30U) {
+        return false;
+    }
+
+    if (!signerInfo.ReadElement(tag, value) || tag != 0x04U) return false;
+    outInfo.signature.assign(value.begin(), value.end());
+    return !outInfo.signature.empty();
 }
 
 bool PdfCms::ParseSignedData(
     const std::span<const std::uint8_t> signedData,
     std::vector<std::uint8_t>& outCertificate,
     std::vector<std::uint8_t>& outSignature) {
-    outCertificate.clear();
-    outSignature.clear();
-    DerReader outer(signedData);
-    std::uint8_t tag = 0;
-    std::span<const std::uint8_t> contentInfo;
-    if (!outer.ReadElement(tag, contentInfo) || tag != 0x30U) return false;
-    // contentType OID, then [0] content.
-    std::uint8_t ignored = 0;
-    std::span<const std::uint8_t> oid;
-    if (!outer.ReadElement(ignored, oid)) return false;
-    std::span<const std::uint8_t> signedDataValue;
-    if (!outer.ReadElement(ignored, signedDataValue)) return false;
-
-    DerReader sd(signedDataValue);
-    std::uint8_t vTag = 0;
-    std::span<const std::uint8_t> vValue;
-    if (!sd.ReadElement(vTag, vValue)) return false; // version
-    // digestAlgorithms SET
-    std::span<const std::uint8_t> digestAlgorithms;
-    if (!sd.ReadElement(vTag, digestAlgorithms)) return false;
-    // encapContentInfo
-    std::span<const std::uint8_t> encap;
-    if (!sd.ReadElement(vTag, encap)) return false;
-    // certificates [0] (optional)
-    if (!sd.AtEnd()) {
-        const std::size_t beforeCerts = sd.Position();
-        std::span<const std::uint8_t> certificates;
-        if (sd.ReadElement(vTag, certificates) && vTag == 0xa0U) {
-            DerReader certs(certificates);
-            std::span<const std::uint8_t> firstCert;
-            if (certs.ReadElement(vTag, firstCert) && vTag == 0x30U) {
-                outCertificate.assign(firstCert.begin(), firstCert.end());
-            }
-        } else {
-            // The next element is the signerInfos SET (no certificates): rewind.
-            sd.Seek(beforeCerts);
-        }
+    SignedDataInfo info;
+    if (!ParseSignedData(signedData, info)) {
+        outCertificate.clear();
+        outSignature.clear();
+        return false;
     }
-    // signerInfos SET
-    std::span<const std::uint8_t> signerInfos;
-    if (!sd.ReadElement(vTag, signerInfos)) return false;
-    DerReader si(signerInfos);
-    std::span<const std::uint8_t> signerInfo;
-    if (!si.ReadElement(vTag, signerInfo)) return false;
-    DerReader inner(signerInfo);
-    // version
-    std::span<const std::uint8_t> version;
-    if (!inner.ReadElement(vTag, version)) return false;
-    // sid
-    std::span<const std::uint8_t> sid;
-    if (!inner.ReadElement(vTag, sid)) return false;
-    // digestAlgorithm
-    std::span<const std::uint8_t> digestAlg;
-    if (!inner.ReadElement(vTag, digestAlg)) return false;
-    // signatureAlgorithm
-    std::span<const std::uint8_t> sigAlg;
-    if (!inner.ReadElement(vTag, sigAlg)) return false;
-    // signature OCTET STRING
-    std::span<const std::uint8_t> signature;
-    if (!inner.ReadElement(vTag, signature)) return false;
-    outSignature.assign(signature.begin(), signature.end());
-    return !outSignature.empty();
+    outCertificate = info.certificates.empty() ? std::vector<std::uint8_t>{} : info.certificates.front();
+    outSignature = std::move(info.signature);
+    return true;
 }
 
 #if defined(_WIN32)
@@ -899,17 +1066,20 @@ std::vector<std::uint8_t> PdfCms::EcDsaSign(
     ULONG resultSize = 0;
     const NTSTATUS status = BCryptSignHash(keyHandle, nullptr, hash.data(),
                                            static_cast<ULONG>(hash.size()), nullptr, 0,
-                                           &resultSize, BCRYPT_PAD_PKCS1);
+                                           &resultSize, 0U);
     std::vector<std::uint8_t> result(resultSize);
     if (status == 0U) {
         BCryptSignHash(keyHandle, nullptr, hash.data(), static_cast<ULONG>(hash.size()),
-                       result.data(), static_cast<ULONG>(result.size()), &resultSize, BCRYPT_PAD_PKCS1);
+                       result.data(), static_cast<ULONG>(result.size()), &resultSize, 0U);
     }
     BCryptDestroyKey(keyHandle);
     BCryptCloseAlgorithmProvider(algorithm, 0U);
     if (status != 0U) return {};
-    return result; // DER ECDSA-Sig-Value
+    result.resize(resultSize);
+    return result; // Windows CNG returns the fixed-width raw r || s form.
 #else
+    (void)key;
+    (void)digest;
     return {}; // ECDSA requires CNG on this platform.
 #endif
 }
@@ -931,7 +1101,7 @@ bool PdfCms::EcDsaVerify(
     const NTSTATUS status = BCryptVerifySignature(keyHandle, nullptr, hash.data(),
                                                   static_cast<ULONG>(hash.size()),
                                                   sig.data(), static_cast<ULONG>(sig.size()),
-                                                  BCRYPT_PAD_PKCS1);
+                                                  0U);
     BCryptDestroyKey(keyHandle);
     BCryptCloseAlgorithmProvider(algorithm, 0U);
     return status == 0U;
