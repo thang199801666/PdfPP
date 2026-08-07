@@ -12,7 +12,7 @@ jobs:
     name: Default (GCC)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build zlib1g-dev poppler-utils
       - name: Validate project layout
@@ -37,7 +37,7 @@ jobs:
     name: Strict (Clang)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang ninja-build zlib1g-dev poppler-utils
       - name: Configure
@@ -54,7 +54,7 @@ jobs:
     name: ASan + UBSan (GCC)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build zlib1g-dev poppler-utils
       - name: Configure
@@ -71,7 +71,7 @@ jobs:
     name: MSVC
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install zlib
         shell: pwsh
         run: '& "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows'
